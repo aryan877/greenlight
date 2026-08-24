@@ -17,6 +17,36 @@ describe("Producer event projection", () => {
     );
   });
 
+  it("restores the latest response turn from the project's session chain", async () => {
+    const { latestProjectSessionTurn } = await import("./trueforge.js");
+    const root = {
+      createdAt: "2026-08-24T10:00:00.000Z",
+      input: [
+        {
+          type: "user.message",
+          content: "PROJECT_ID: project_greenlight\n\nTrim this scene.",
+        },
+      ],
+    };
+    const response = {
+      createdAt: "2026-08-24T10:01:00.000Z",
+      input: [
+        {
+          type: "user.tool_response",
+          tool_call_id: "question_001",
+          content: "Use 4 seconds",
+        },
+      ],
+    };
+
+    expect(
+      latestProjectSessionTurn([root, response], "project_greenlight"),
+    ).toBe(response);
+    expect(latestProjectSessionTurn([root, response], "project_other")).toBe(
+      null,
+    );
+  });
+
   it("keeps clarification text visible and exposes the exact paused question", async () => {
     const { describeEvent, pendingQuestionsFromEvent } =
       await import("./trueforge.js");
@@ -48,10 +78,15 @@ describe("Producer event projection", () => {
       "I found two different trim targets.",
     );
     expect(
-      pendingQuestionsFromEvent(required, new Map([[source.id, source]])),
+      pendingQuestionsFromEvent(
+        required,
+        new Map([[source.id, source]]),
+        "turn_question",
+      ),
     ).toEqual([
       {
         eventId: "question_required",
+        turnId: "turn_question",
         threadId: "main",
         toolCallId: "question_call",
         question: "Which duration should I use?",
@@ -106,6 +141,7 @@ describe("Producer event projection", () => {
           tool_calls: { id: "not-an-array" },
         },
         new Map(),
+        "turn_bad_question",
       ),
     ).toEqual([]);
   });

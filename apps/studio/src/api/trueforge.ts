@@ -37,6 +37,7 @@ export type StudioReviewDocument = {
 
 export type PendingToolApproval = {
   eventId: string;
+  turnId: string;
   threadId: string;
   toolCallId: string;
   toolName: string;
@@ -45,6 +46,7 @@ export type PendingToolApproval = {
 
 export type PendingQuestion = {
   eventId: string;
+  turnId: string;
   threadId: string;
   toolCallId: string;
   question: string;
@@ -63,6 +65,38 @@ type ProducerSendInput = {
 type WireEvent = Record<string, unknown> & {
   id?: string;
   type?: string;
+};
+
+type RestorableTurn = {
+  createdAt: string;
+  input?: unknown[] | null;
+};
+
+export const latestProjectSessionTurn = <Turn extends RestorableTurn>(
+  turns: Turn[],
+  projectId: string,
+): Turn | null => {
+  let latest: Turn | null = null;
+  let latestProjectMarker: { projectId: string; createdAt: string } | null =
+    null;
+  for (const turn of turns) {
+    if (!latest || turn.createdAt > latest.createdAt) latest = turn;
+    const marker = (turn.input ?? []).flatMap((item) => {
+      const value = item as Record<string, unknown>;
+      if (value.type !== "user.message" || typeof value.content !== "string") {
+        return [];
+      }
+      const match = /^PROJECT_ID:\s*([^\n]+)/.exec(value.content);
+      return match?.[1] ? [match[1].trim()] : [];
+    })[0];
+    if (
+      marker &&
+      (!latestProjectMarker || turn.createdAt > latestProjectMarker.createdAt)
+    ) {
+      latestProjectMarker = { projectId: marker, createdAt: turn.createdAt };
+    }
+  }
+  return latestProjectMarker?.projectId === projectId ? latest : null;
 };
 
 export type SandboxArtifactReference = {
@@ -181,6 +215,7 @@ const parseArguments = (toolCall: ToolCall): Record<string, unknown> => {
 export const pendingQuestionsFromEvent = (
   event: WireEvent,
   sources: Map<string, WireEvent>,
+  turnId: string,
 ): PendingQuestion[] => {
   if (event.type !== "tool.response_required") return [];
   return toolCallReferencesOf(event).flatMap((reference) => {
@@ -197,6 +232,7 @@ export const pendingQuestionsFromEvent = (
     return [
       {
         eventId: String(event.id ?? crypto.randomUUID()),
+        turnId,
         threadId: String(event.threadId ?? event.thread_id ?? "main"),
         toolCallId: call.id,
         question,
@@ -397,7 +433,7 @@ export const useProducerAgent = (
   }, []);
 
   const ingest = useCallback(
-    (incoming: WireEvent) => {
+    (incoming: WireEvent, sourceTurnId: string | null) => {
       let event = incoming;
       if (incoming.type === "model.message.delta") {
         const base = incoming.id
@@ -433,6 +469,7 @@ export const useProducerAgent = (
         event.type === "tool.approval_required" ||
         event.type === "tool.response_required"
       ) {
+        if (!sourceTurnId) return event;
         const resolved = toolCallReferencesOf(event).flatMap((reference) => {
           const sourceId = reference.sourceEventId ?? reference.source_event_id;
           const source = sourceId
@@ -449,6 +486,7 @@ export const useProducerAgent = (
         if (event.type === "tool.approval_required") {
           const approvals = resolved.map(({ call }) => ({
             eventId: String(event.id ?? crypto.randomUUID()),
+            turnId: sourceTurnId,
             threadId: String(event.threadId ?? event.thread_id ?? "main"),
             toolCallId: call.id,
             toolName: call.function.name,
@@ -467,6 +505,7 @@ export const useProducerAgent = (
           const questions = pendingQuestionsFromEvent(
             event,
             eventStore.current,
+            sourceTurnId,
           );
           setPendingQuestions((current) => [
             ...current.filter(
@@ -578,10 +617,14 @@ export const useProducerAgent = (
         const references: SandboxArtifactReference[] = [];
         for await (const envelope of stream.withMetadata()) {
           if (activeProjectId.current !== streamProjectId) return;
-          const event = ingest(envelope.data as unknown as WireEvent);
+          const incoming = envelope.data as unknown as WireEvent;
+          if (incoming.type === "turn.created") {
+            turnId = String(incoming.turnId ?? incoming.turn_id ?? "") || null;
+          }
+          const event = ingest(incoming, turnId);
           if (!event) continue;
           if (event.type === "turn.created") {
-            turnId = String(event.turnId ?? event.turn_id ?? "") || null;
+            turnId = String(event.turnId ?? event.turn_id ?? "") || turnId;
           }
           if (event.type === "model.message") {
             references.push(...parseSandboxArtifactReferences(event.content));
@@ -641,24 +684,11 @@ export const useProducerAgent = (
         const turns = await trueforge.sessions.listTurns(candidateSessionId, {
           limit: 25,
         });
-        let latest: TrueForgeApi.Turn | null = null;
+        const candidates: TrueForgeApi.Turn[] = [];
         for await (const turn of turns) {
-          const belongsToProject = (turn.input ?? []).some((item) => {
-            const value = item as unknown as Record<string, unknown>;
-            return (
-              value.type === "user.message" &&
-              typeof value.content === "string" &&
-              value.content.includes(`PROJECT_ID: ${projectId}`)
-            );
-          });
-          if (
-            belongsToProject &&
-            (!latest || turn.createdAt > latest.createdAt)
-          ) {
-            latest = turn;
-          }
+          candidates.push(turn);
         }
-        return latest;
+        return latestProjectSessionTurn(candidates, projectId);
       };
 
       let latestTurn = restoredSessionId
@@ -729,7 +759,7 @@ export const useProducerAgent = (
       const sandboxReferences: SandboxArtifactReference[] = [];
       for await (const stored of persisted) {
         if (cancelled || activeProjectId.current !== projectId) return;
-        const event = ingest(stored as unknown as WireEvent);
+        const event = ingest(stored as unknown as WireEvent, latestTurn.id);
         if (event?.type === "model.message") {
           sandboxReferences.push(
             ...parseSandboxArtifactReferences(event.content),
@@ -886,6 +916,7 @@ export const useProducerAgent = (
       const stream = await trueforge.sessions.createTurnStream(
         sessionId.current,
         {
+          previousTurnId: input.pending.turnId,
           input: [
             {
               type: "user.tool_approval",
@@ -911,6 +942,17 @@ export const useProducerAgent = (
         });
       }
     },
+    onError: (_error, input) => {
+      appendEvents([
+        {
+          id: `approval-delivery-${input.pending.toolCallId}-${crypto.randomUUID()}`,
+          kind: "message",
+          label: "Couldn’t send your decision.",
+          detail: "The preview is still waiting. Try again.",
+          sceneIds: selectionSceneIds(input.pending.arguments),
+        },
+      ]);
+    },
   });
 
   const question = useMutation({
@@ -920,6 +962,7 @@ export const useProducerAgent = (
       const stream = await trueforge.sessions.createTurnStream(
         sessionId.current,
         {
+          previousTurnId: input.pending.turnId,
           input: [
             {
               type: "user.tool_response",
@@ -941,6 +984,17 @@ export const useProducerAgent = (
           queryKey: greenlightKeys.project(projectId),
         });
       }
+    },
+    onError: (_error, input) => {
+      appendEvents([
+        {
+          id: `answer-delivery-${input.pending.toolCallId}-${crypto.randomUUID()}`,
+          kind: "message",
+          label: "Couldn’t send your answer.",
+          detail: "The question is still open. Try again.",
+          sceneIds: [],
+        },
+      ]);
     },
   });
 
