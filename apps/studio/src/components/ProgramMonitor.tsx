@@ -128,7 +128,7 @@ export const ProgramMonitor = ({
       </div>
 
       <div className="monitor-viewport grid min-h-0 flex-1 place-items-center overflow-hidden p-5 xl:p-7">
-        <div className="monitor-frame overflow-hidden rounded-md bg-white shadow-monitor ring-1 ring-line">
+        <div className="monitor-frame overflow-hidden rounded-md bg-white shadow-monitor">
           {video && !previewUsesCanvas ? (
             <video
               ref={media.mediaRef}
