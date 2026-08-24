@@ -13,6 +13,15 @@ export const sceneOffset = (scenes: Scene[], index: number) =>
 export const totalDuration = (content: ContentPackage) =>
   productionDurationSeconds(content.scenes);
 
+export const sceneTimelineDuration = (scenes: Scene[], index: number) => {
+  const start = sceneOffset(scenes, index);
+  const end =
+    index === scenes.length - 1
+      ? productionDurationSeconds(scenes)
+      : sceneOffset(scenes, index + 1);
+  return Math.max(0, end - start);
+};
+
 export const formatTime = (seconds: number) => {
   const safe = Math.max(0, seconds);
   const minutes = Math.floor(safe / 60);

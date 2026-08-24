@@ -1,7 +1,12 @@
 import type { Artifact, ContentPackage } from "@greenlight/contracts";
 import { describe, expect, it } from "vitest";
 
-import { createSelection } from "./model.js";
+import {
+  createSelection,
+  sceneOffset,
+  sceneTimelineDuration,
+  totalDuration,
+} from "./model.js";
 
 const content: ContentPackage = {
   version: 1,
@@ -50,6 +55,24 @@ const sourceLedger = {
 } satisfies Artifact;
 
 describe("editor selection", () => {
+  it("tiles transition scenes without overlapping timeline clips", () => {
+    const spans = content.scenes.map((_, index) => ({
+      start: sceneOffset(content.scenes, index),
+      duration: sceneTimelineDuration(content.scenes, index),
+    }));
+
+    for (let index = 1; index < spans.length; index += 1) {
+      expect(spans[index]!.start).toBeCloseTo(
+        spans[index - 1]!.start + spans[index - 1]!.duration,
+        8,
+      );
+    }
+    expect(spans.reduce((sum, span) => sum + span.duration, 0)).toBeCloseTo(
+      totalDuration(content),
+      8,
+    );
+  });
+
   it("keeps any-size ordered scene bundles and their typed artifacts", () => {
     const sceneIds = content.scenes.slice(3, 18).map((scene) => scene.id);
     const selection = createSelection({

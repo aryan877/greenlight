@@ -16,7 +16,12 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { formatTime, sceneOffset, totalDuration } from "../editor/model.js";
+import {
+  formatTime,
+  sceneOffset,
+  sceneTimelineDuration,
+  totalDuration,
+} from "../editor/model.js";
 import { cx, IconButton } from "./controls.js";
 
 type Marquee = {
@@ -244,7 +249,8 @@ export const Timeline = ({
                   bounds.width;
                 const sceneRight =
                   sceneLeft +
-                  (scene.duration_seconds / duration) * bounds.width;
+                  (sceneTimelineDuration(content.scenes, index) / duration) *
+                    bounds.width;
                 return sceneRight >= left && sceneLeft <= right
                   ? [scene.id]
                   : [];
@@ -266,7 +272,13 @@ export const Timeline = ({
                 trim?.sceneId === scene.id
                   ? trim.duration
                   : scene.duration_seconds;
-              const width = (displayedDuration / duration) * 100;
+              const displayedTimelineDuration = Math.max(
+                0,
+                sceneTimelineDuration(content.scenes, index) +
+                  displayedDuration -
+                  scene.duration_seconds,
+              );
+              const width = (displayedTimelineDuration / duration) * 100;
               const selected = selectedSceneIds.includes(scene.id);
               const proposed = previewSceneIds.includes(scene.id);
               return (
@@ -330,7 +342,7 @@ export const Timeline = ({
                     onSeek(sceneOffset(content.scenes, index));
                   }}
                   className={cx(
-                    "group absolute bottom-1 top-3 grid min-w-0 select-none grid-rows-3 gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action",
+                    "group absolute bottom-1 top-3 grid min-w-0 select-none grid-rows-3 gap-1 focus-visible:outline-none focus-visible:[&>span]:ring-1 focus-visible:[&>span]:ring-inset focus-visible:[&>span]:ring-action",
                     draggedSceneId === scene.id && "opacity-40",
                     dropSceneId === scene.id &&
                       "before:absolute before:inset-y-0 before:left-0 before:z-20 before:w-0.5 before:bg-action",
