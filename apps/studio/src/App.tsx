@@ -6,7 +6,6 @@ import {
 } from "@greenlight/contracts";
 import {
   Aperture,
-  ChevronDown,
   LockKeyhole,
   PanelLeftOpen,
   PanelRightClose,
@@ -17,6 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useProducerAgent } from "./api/trueforge.js";
 import {
   useContentPackage,
+  useCreateProject,
   useProject,
   useProjects,
   useUploadAsset,
@@ -31,6 +31,7 @@ import { IconButton, ResizeHandle, cx } from "./components/controls.js";
 import { InspectorPanel } from "./components/InspectorPanel.js";
 import { ProducerPanel } from "./components/ProducerPanel.js";
 import { ProgramMonitor } from "./components/ProgramMonitor.js";
+import { ProjectSwitcher } from "./components/ProjectSwitcher.js";
 import { MediaBrowser } from "./components/MediaBrowser.js";
 import { Timeline } from "./components/Timeline.js";
 import { createSelection, sceneOffset } from "./editor/model.js";
@@ -39,6 +40,7 @@ import { useWorkspaceLayout } from "./editor/use-workspace-layout.js";
 
 export const App = () => {
   const projects = useProjects();
+  const createProject = useCreateProject();
   const [projectId, setProjectId] = useState<string | null>(null);
   const [selectedSceneIds, setSelectedSceneIds] = useState<string[]>([]);
   const [rightTab, setRightTab] = useState<"producer" | "details">("producer");
@@ -334,24 +336,23 @@ export const App = () => {
           </strong>
         </button>
 
-        <label className="ml-4 flex min-w-0 max-w-[420px] items-center rounded-lg px-2 hover:bg-hover">
-          <select
-            aria-label="Active production"
-            value={projectId ?? ""}
-            onChange={(event) => setProjectId(event.target.value || null)}
-            className="h-8 min-w-0 flex-1 appearance-none truncate border-0 bg-transparent pr-6 text-[11px] text-ink outline-none"
-          >
-            {projects.data?.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.brief.topic}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            size={13}
-            className="-ml-5 pointer-events-none text-ink-caption"
-          />
-        </label>
+        <ProjectSwitcher
+          projects={projects.data ?? []}
+          activeId={projectId}
+          creating={createProject.isPending}
+          onSelect={setProjectId}
+          onCreate={async (topic) => {
+            const created = await createProject.mutateAsync({
+              topic,
+              audience: "YouTube viewers",
+              goal: "Develop a publish-ready YouTube video",
+              target_duration_seconds: 60,
+              tone: "clear, curious, cinematic",
+            });
+            setSelectedSceneIds([]);
+            setProjectId(created.id);
+          }}
+        />
 
         <div className="ml-auto flex items-center gap-1.5 rounded-full border border-line-subtle px-2 py-1 text-ink-tertiary">
           <TrueForgeIcon className="size-4" />
@@ -384,6 +385,7 @@ export const App = () => {
               attachedArtifactIds={attachedArtifactIds}
               importing={uploadAsset.isPending}
               importError={importError}
+              workspacePath={project.data?.project.workspace_path ?? null}
               onSelectArtifact={selectArtifact}
               onImport={(files) => void importMedia(files)}
               onCollapse={() => layout.setLeftOpen(false)}

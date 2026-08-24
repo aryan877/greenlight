@@ -10,14 +10,15 @@ The editor is the product surface. Selecting one or many scene bundles gives the
 - Immutable projects and artifacts in SQLite plus content-addressed local files
 - Scene-bundle selection with no arbitrary selection or scene-count cap
 - Click, Shift/Cmd, and marquee multi-select; whole-cut selection, drag reorder, end trim, timeline zoom, playback, mute, volume, and resizable/collapsible panes
-- A creator-media bin with real previews, signature-checked import, click/drag attachment, and direct file drop into Producer
+- Project history and new-project creation backed by the saved SQLite workspace, with managed paths and artifact counts
+- A creator-media bin with measured size, duration, dimensions and codecs; full image/audio/video viewers; signature-checked import; click/drag attachment; and direct file drop into Producer
 - Agent-driven Studio focus through `focus_editor_selection`
 - One shared Zod patch contract and reducer for Studio preview and MCP persistence
 - OpenMoji search and attachment with licensed SVG provenance
 - Optional bounded Codex-subscription image generation; GPT Image API routes stay disabled
 - Gemini voice through OpenRouter with provider/model provenance
 - Core timed transcription: OpenRouter `gpt-4o-mini-transcribe` reference text plus local `whisper.cpp` word boundaries, exact phrase lookup, corrections, and captions derived from measured timing
-- Deterministic Remotion render, thumbnail, FFprobe-backed quality checks, and playback-rate support
+- Deterministic Remotion render and thumbnail, best-effort cross-platform hardware encoding with safe software fallback, FFprobe-backed quality checks, and playback-rate support
 - Local YouTube OAuth wrapper, unlisted-first staging, immutable release snapshots, and approval-gated publish/schedule tools
 
 No paid transcription or image API call, YouTube upload, or public release is performed during setup or tests.

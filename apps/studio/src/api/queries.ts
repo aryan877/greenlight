@@ -26,6 +26,16 @@ export const useProject = (projectId: string | null) =>
     refetchInterval: 3_000,
   });
 
+export const useCreateProject = () => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: greenlightApi.createProject,
+    onSuccess: async () => {
+      await client.invalidateQueries({ queryKey: greenlightKeys.projects() });
+    },
+  });
+};
+
 export const useContentPackage = (artifactId: string | null) =>
   useQuery({
     queryKey: greenlightKeys.artifact(artifactId ?? "none"),

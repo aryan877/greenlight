@@ -77,6 +77,8 @@ try {
     serveUrl,
     codec: "h264",
     audioCodec: "aac",
+    hardwareAcceleration: "if-possible",
+    videoBitrate: "8M",
     outputLocation: outputPath,
     inputProps,
     onProgress: ({ progress }) => {

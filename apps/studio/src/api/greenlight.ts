@@ -3,12 +3,18 @@ import {
   type Artifact,
   type ContentPackage,
   type Project,
+  type ProjectBrief,
   type ReleaseSnapshot,
 } from "@greenlight/contracts";
 
+export type ProjectSummary = Project & {
+  artifact_count: number;
+  workspace_path: string;
+};
+
 export type ProjectDetail = {
   artifacts: Artifact[];
-  project: Project;
+  project: ProjectSummary;
   release: {
     privacy: string;
     snapshot: ReleaseSnapshot;
@@ -38,9 +44,15 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
 
 export const greenlightApi = {
   listProjects: () =>
-    request<{ projects: Project[] }>("/projects").then(
+    request<{ projects: ProjectSummary[] }>("/projects").then(
       (response) => response.projects,
     ),
+  createProject: (brief: ProjectBrief) =>
+    request<{ project: ProjectSummary }>("/projects", {
+      method: "POST",
+      body: JSON.stringify(brief),
+      headers: { "content-type": "application/json" },
+    }).then((response) => response.project),
   getProject: (projectId: string) =>
     request<ProjectDetail>(`/projects/${encodeURIComponent(projectId)}`),
   getContentPackage: (artifactId: string) =>

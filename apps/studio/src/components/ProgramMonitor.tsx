@@ -128,12 +128,12 @@ export const ProgramMonitor = ({
       </div>
 
       <div className="monitor-viewport grid min-h-0 flex-1 place-items-center overflow-hidden p-5 xl:p-7">
-        <div className="monitor-frame overflow-hidden rounded-md bg-white shadow-monitor">
+        <div className="monitor-frame bg-white">
           {video && !previewUsesCanvas ? (
             <video
               ref={media.mediaRef}
               src={greenlightApi.artifactUrl(video.id)}
-              className="size-full bg-black object-contain"
+              className="block size-full bg-white object-contain"
               playsInline
               {...media.mediaEvents}
             />

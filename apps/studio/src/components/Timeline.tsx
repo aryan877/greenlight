@@ -23,6 +23,8 @@ type Marquee = {
   pointerId: number;
   startX: number;
   currentX: number;
+  originSceneId: string | null;
+  additive: boolean;
 };
 
 export const Timeline = ({
@@ -177,9 +179,11 @@ export const Timeline = ({
             className="relative mx-3 h-[112px] cursor-crosshair border-b border-line-subtle bg-surface"
             style={{ width: "calc(100% - 24px)" }}
             onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              const target = event.target as HTMLElement;
               if (
-                event.button !== 0 ||
-                (event.target as HTMLElement).closest("[data-scene-clip]")
+                target.closest("[data-reorder-handle]") ||
+                target.closest("[data-trim-handle]")
               ) {
                 return;
               }
@@ -193,6 +197,10 @@ export const Timeline = ({
                 pointerId: event.pointerId,
                 startX,
                 currentX: startX,
+                originSceneId:
+                  target.closest<HTMLElement>("[data-scene-clip]")?.dataset
+                    .sceneId ?? null,
+                additive: event.shiftKey || event.metaKey || event.ctrlKey,
               });
             }}
             onPointerMove={(event) => {
@@ -219,7 +227,17 @@ export const Timeline = ({
               const right = Math.max(active.startX, endX);
               updateMarquee(null);
               event.currentTarget.releasePointerCapture(event.pointerId);
-              if (right - left < 4) return;
+              if (right - left < 4) {
+                if (!active.originSceneId) return;
+                const sceneIndex = content.scenes.findIndex(
+                  (scene) => scene.id === active.originSceneId,
+                );
+                const scene = content.scenes[sceneIndex];
+                if (!scene) return;
+                onSelect(scene, active.additive);
+                onSeek(sceneOffset(content.scenes, sceneIndex));
+                return;
+              }
               const selected = content.scenes.flatMap((scene, index) => {
                 const sceneLeft =
                   (sceneOffset(content.scenes, index) / duration) *
@@ -231,7 +249,13 @@ export const Timeline = ({
                   ? [scene.id]
                   : [];
               });
-              if (selected.length > 0) onSelectMany(selected);
+              if (selected.length > 0) {
+                onSelectMany(
+                  active.additive
+                    ? Array.from(new Set([...selectedSceneIds, ...selected]))
+                    : selected,
+                );
+              }
             }}
             onPointerCancel={() => updateMarquee(null)}
           >
@@ -249,8 +273,20 @@ export const Timeline = ({
                 <div
                   key={scene.id}
                   data-scene-clip
-                  draggable={!previewing && !marquee}
+                  data-scene-id={scene.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={selected}
+                  title={scene.title}
                   onDragStart={(event) => {
+                    if (
+                      !(event.target as HTMLElement).closest(
+                        "[data-reorder-handle]",
+                      )
+                    ) {
+                      event.preventDefault();
+                      return;
+                    }
                     setDraggedSceneId(scene.id);
                     event.dataTransfer.effectAllowed = "move";
                     event.dataTransfer.setData("text/plain", scene.id);
@@ -284,81 +320,94 @@ export const Timeline = ({
                       `Reorder the full cut to this exact scene order: ${order.join(", ")}. Change only scene order and show the preview before applying it.`,
                     );
                   }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    onSelect(
+                      scene,
+                      event.shiftKey || event.metaKey || event.ctrlKey,
+                    );
+                    onSeek(sceneOffset(content.scenes, index));
+                  }}
                   className={cx(
-                    "group absolute bottom-1 top-5 min-w-0 cursor-default overflow-hidden rounded-md border bg-surface-raised transition-[border-color,background-color,box-shadow] duration-100",
-                    selected
-                      ? "z-10 border-action bg-action-soft/45 ring-1 ring-action/20"
-                      : "border-line hover:border-line-strong hover:bg-hover",
-                    proposed && "preview-hatch border-warning/50",
+                    "group absolute bottom-1 top-3 grid min-w-0 select-none grid-rows-3 gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action",
                     draggedSceneId === scene.id && "opacity-40",
                     dropSceneId === scene.id &&
-                      "before:absolute before:-left-1 before:inset-y-0 before:w-0.5 before:bg-action",
+                      "before:absolute before:inset-y-0 before:left-0 before:z-20 before:w-0.5 before:bg-action",
                   )}
-                  style={{ left: `${left}%`, width: `calc(${width}% - 3px)` }}
+                  style={{
+                    left: `calc(${left}% + 3px)`,
+                    width: `calc(${width}% - 6px)`,
+                  }}
                 >
-                  <button
-                    type="button"
-                    title={scene.title}
-                    aria-pressed={selected}
-                    onClick={(event) => {
-                      onSelect(
-                        scene,
-                        event.shiftKey || event.metaKey || event.ctrlKey,
-                      );
-                      onSeek(sceneOffset(content.scenes, index));
-                    }}
-                    className="grid size-full grid-rows-3 overflow-hidden rounded-[inherit] text-left"
+                  <span
+                    className={cx(
+                      "flex min-w-0 items-center gap-1.5 overflow-hidden rounded-[4px] border bg-track-video px-2 text-[9px] text-ink transition-colors duration-100",
+                      selected
+                        ? "border-action"
+                        : "border-line group-hover:border-line-strong",
+                      proposed && "preview-hatch border-warning/50",
+                    )}
                   >
-                    <span className="flex min-w-0 items-center gap-1.5 bg-track-video px-2.5 text-[9px] text-ink">
-                      <Layers3
-                        size={10}
-                        className="shrink-0 text-track-video-strong"
-                      />
-                      <span className="truncate font-medium">
-                        {scene.title}
-                      </span>
-                      <span className="ml-auto shrink-0 font-mono text-[7px] text-ink-caption">
-                        {formatTime(displayedDuration)}
-                        {scene.playback_rate !== 1
-                          ? ` · ${scene.playback_rate.toFixed(2)}×`
-                          : ""}
-                      </span>
-                    </span>
                     <span
-                      className={cx(
-                        "flex min-w-0 items-center gap-1.5 border-t border-white/80 px-2.5 text-[8px] text-ink-secondary",
-                        scene.narration_artifact_id
-                          ? "bg-track-voice"
-                          : "bg-surface-sunken",
-                      )}
+                      data-reorder-handle
+                      draggable={!previewing && !marquee}
+                      title="Drag to reorder this scene"
+                      className="grid size-4 shrink-0 cursor-grab place-items-center rounded-sm text-track-video-strong hover:bg-white/70 active:cursor-grabbing"
                     >
-                      <Mic2
-                        size={9}
-                        className="shrink-0 text-track-voice-strong"
-                      />
-                      <span className="truncate">{scene.narration}</span>
+                      <Layers3 size={10} className="pointer-events-none" />
                     </span>
-                    <span
-                      className={cx(
-                        "flex min-w-0 items-center gap-1.5 border-t border-white/80 px-2.5 text-[8px] text-ink-secondary",
-                        scene.captions_artifact_id
-                          ? "bg-track-caption"
-                          : "bg-surface-sunken",
-                      )}
-                    >
-                      <Captions
-                        size={9}
-                        className="shrink-0 text-track-caption-strong"
-                      />
-                      <span className="truncate">{scene.narration}</span>
+                    <span className="truncate font-medium">{scene.title}</span>
+                    <span className="ml-auto shrink-0 font-mono text-[7px] text-ink-caption">
+                      {formatTime(displayedDuration)}
+                      {scene.playback_rate !== 1
+                        ? ` · ${scene.playback_rate.toFixed(2)}×`
+                        : ""}
                     </span>
-                  </button>
+                  </span>
+                  <span
+                    className={cx(
+                      "flex min-w-0 items-center gap-1.5 overflow-hidden rounded-[4px] border px-2 text-[8px] text-ink-secondary transition-colors duration-100",
+                      scene.narration_artifact_id
+                        ? "bg-track-voice"
+                        : "bg-surface-sunken",
+                      selected
+                        ? "border-action"
+                        : "border-line group-hover:border-line-strong",
+                      proposed && "preview-hatch border-warning/50",
+                    )}
+                  >
+                    <Mic2
+                      size={9}
+                      className="shrink-0 text-track-voice-strong"
+                    />
+                    <span className="truncate">{scene.narration}</span>
+                  </span>
+                  <span
+                    className={cx(
+                      "flex min-w-0 items-center gap-1.5 overflow-hidden rounded-[4px] border px-2 text-[8px] text-ink-secondary transition-colors duration-100",
+                      scene.captions_artifact_id
+                        ? "bg-track-caption"
+                        : "bg-surface-sunken",
+                      selected
+                        ? "border-action"
+                        : "border-line group-hover:border-line-strong",
+                      proposed && "preview-hatch border-warning/50",
+                    )}
+                  >
+                    <Captions
+                      size={9}
+                      className="shrink-0 text-track-caption-strong"
+                    />
+                    <span className="truncate">{scene.narration}</span>
+                  </span>
                   {selected && !previewing ? (
                     <button
                       type="button"
+                      data-trim-handle
                       aria-label={`Trim ${scene.title}`}
                       title="Drag to trim the end"
-                      className="absolute -right-0.5 inset-y-2 z-20 w-2 cursor-ew-resize rounded-full bg-action opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                      className="absolute inset-y-1 right-0 z-20 w-1.5 cursor-ew-resize rounded-full bg-action opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
                       onPointerDown={(event) => {
                         event.preventDefault();
                         event.stopPropagation();

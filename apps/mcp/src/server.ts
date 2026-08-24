@@ -5,6 +5,7 @@ import { basename, resolve } from "node:path";
 import cors from "cors";
 import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { projectBriefSchema, type Project } from "@greenlight/contracts";
 
 import { loadConfig } from "./config.js";
 import { inspectImportedMedia } from "./media-import.js";
@@ -12,6 +13,7 @@ import { buildMcpServer } from "./mcp/tools.js";
 import { CodexImageProvider } from "./providers/codex-image.js";
 import { QualityInspector } from "./providers/quality.js";
 import { OpenMojiToolkit } from "./providers/openmoji.js";
+import { probeImportedMedia } from "./providers/media-metadata.js";
 import { RemotionRenderer } from "./providers/render.js";
 import {
   DisabledTranscriptionProvider,
@@ -79,8 +81,28 @@ app.get("/health", (_request, response) => {
   response.json({ ok: true, service: "greenlight-mcp", version: "0.1.0" });
 });
 
+const studioProject = (project: Project) => ({
+  ...project,
+  artifact_count: store.listArtifacts(project.id).length,
+  workspace_path: resolve(config.artifactDir, project.id),
+});
+
 app.get("/api/projects", (_request, response) => {
-  response.json({ projects: store.listProjects() });
+  response.json({ projects: store.listProjects().map(studioProject) });
+});
+
+app.post("/api/projects", (request, response) => {
+  try {
+    const project = store.createProject(projectBriefSchema.parse(request.body));
+    mkdirSync(resolve(config.artifactDir, project.id), { recursive: true });
+    response.status(201).json({ project: studioProject(project) });
+  } catch (error) {
+    if (error && typeof error === "object" && "issues" in error) {
+      response.status(400).json({ error: "invalid_project_brief" });
+      return;
+    }
+    throw error;
+  }
 });
 
 app.get("/api/projects/:id", (request, response) => {
@@ -90,7 +112,7 @@ app.get("/api/projects/:id", (request, response) => {
     return;
   }
   response.json({
-    project,
+    project: studioProject(project),
     artifacts: store.listArtifacts(project.id),
     release: store.getLatestReleaseForProject(project.id),
   });
@@ -116,6 +138,7 @@ app.post(
         ? request.body
         : Buffer.from(request.body ?? []);
       const media = inspectImportedMedia(filename, bytes);
+      const metadata = await probeImportedMedia(media.extension, bytes);
       const artifact = await artifacts.importBuffer({
         projectId: project.id,
         kind: media.kind,
@@ -127,6 +150,8 @@ app.post(
           original_filename: filename,
           declared_mime_type: request.header("x-greenlight-mime") ?? null,
           inspected_mime_type: media.mimeType,
+          media_metadata: metadata,
+          media_probe_status: metadata ? "measured" : "unavailable",
         },
       });
       response.status(201).json({ artifact });
