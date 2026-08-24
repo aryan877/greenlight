@@ -1,0 +1,30 @@
+{
+  "folders": [
+    {
+      "name": "Greenlight",
+      "path": "."
+    },
+    {
+      "name": "TrueForge source (reference)",
+      "path": "/Users/aryankumar/trueforge-hackathon/trueforge-main"
+    },
+    {
+      "name": "TrueForge cookbook (reference)",
+      "path": "/Users/aryankumar/trueforge-hackathon/trueforge-examples"
+    },
+    {
+      "name": "YouTube uploader (reference)",
+      "path": "/Users/aryankumar/youtube-uploader"
+    }
+  ],
+  "settings": {
+    "files.exclude": {
+      "**/.DS_Store": true
+    },
+    "search.exclude": {
+      "**/node_modules/**": true,
+      "**/data/**": true
+    }
+  }
+}
+

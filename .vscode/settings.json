@@ -1,0 +1,12 @@
+{
+  "editor.formatOnSave": true,
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "markdown.preview.breaks": false,
+  "markdown.validate.enabled": true,
+  "search.exclude": {
+    "**/data/**": true,
+    "**/node_modules/**": true
+  }
+}
+
