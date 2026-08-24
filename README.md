@@ -14,11 +14,12 @@ The editor is the product surface. Selecting one or many scene bundles gives the
 - A creator-media bin with measured size, duration, dimensions and codecs; full image/audio/video viewers; signature-checked import; click/drag attachment; and direct file drop into Producer
 - Agent-driven Studio focus through `focus_editor_selection`
 - One shared Zod patch contract and reducer for Studio preview and MCP persistence
-- Frame-aligned, edge-to-edge visual/voice/caption lanes with explicit gaps, source handles, adaptive ruler ticks, and a continuous zoom range
+- Frame-aligned, edge-to-edge video, named audio, and caption lanes with explicit gaps, source handles, adaptive ruler ticks, and a continuous zoom range
+- Scene-sized primary narration, dub, music, and effects clips with track names, BCP-47 locales, gain, mute, solo, and export inclusion; Remotion mixes only the enabled tracks
 - One compact before/after media preview for trims, splits, speed changes, ranges, and other typed patches, with Apply, Refine, and Cancel
 - OpenMoji search and attachment with licensed SVG provenance
 - Optional bounded Codex-subscription image generation; GPT Image API routes stay disabled
-- Gemini voice through OpenRouter with provider/model provenance
+- Per-scene multilingual voice through OpenRouter with provider/model/voice/locale provenance; optional Sarvam and ElevenLabs batch routes stay behind the same immutable clip boundary
 - Core timed transcription: OpenRouter `gpt-4o-mini-transcribe` reference text plus local `whisper.cpp` word boundaries, exact phrase lookup, immutable corrections, and typed active-word captions derived from measured timing
 - Native TrueForge sandbox-output import: derived files are downloaded by exact session and turn, signature-checked, content-addressed, deduplicated, and handed back to the Producer only by artifact ID
 - Deterministic Remotion render and thumbnail, best-effort cross-platform hardware encoding with safe software fallback, FFprobe-backed quality checks, and playback-rate support

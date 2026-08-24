@@ -18,6 +18,9 @@ const affectedSceneIds = (patch: EditorPatchInput) => [
       if (operation.type === "upsert_localized_track") {
         return [operation.track.scene_id];
       }
+      if (operation.type === "upsert_audio_track") {
+        return operation.track.clips.map((clip) => clip.scene_id);
+      }
       return "scene_id" in operation ? [operation.scene_id] : [];
     }),
   ),

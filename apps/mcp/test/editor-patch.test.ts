@@ -247,4 +247,49 @@ describe("applyEditorPatch", () => {
       ),
     ).toThrow("scene_extension_has_no_source");
   });
+
+  it("materializes legacy narration before adding a scene-sized dub track", () => {
+    const revised = applyEditorPatch(
+      base,
+      patch([
+        {
+          type: "upsert_audio_track",
+          track: {
+            id: "track_hindi_dub",
+            name: "Hindi dub",
+            role: "dub",
+            locale: "hi-IN",
+            voice_label: "Kore",
+            muted: false,
+            solo: false,
+            export_enabled: true,
+            gain: 1,
+            clips: [
+              {
+                id: "clip_hindi_second",
+                scene_id: "scene_002",
+                label: "Second scene in Hindi",
+                artifact_id: null,
+                script: "यह दूसरा दृश्य है।",
+                transcript_artifact_id: null,
+                captions_artifact_id: null,
+                start_offset_seconds: 0,
+                source_in_seconds: 0,
+                source_out_seconds: null,
+                playback_rate: 1,
+                status: "draft",
+              },
+            ],
+          },
+        },
+      ]),
+    );
+
+    expect(revised.audio_tracks?.map((track) => track.id)).toEqual([
+      "track_primary_voice",
+      "track_hindi_dub",
+    ]);
+    expect(revised.audio_tracks?.[0]?.clips).toHaveLength(3);
+    expect(revised.audio_tracks?.[1]?.clips[0]?.scene_id).toBe("scene_002");
+  });
 });

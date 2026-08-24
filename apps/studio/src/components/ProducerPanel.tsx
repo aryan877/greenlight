@@ -145,6 +145,12 @@ const approvalCopy = (
       if ("playback_rate" in operation) fields.add("speed");
       if ("visual" in operation) fields.add("visual");
       if (operation.type === "split_scene") fields.add("structure");
+      if (
+        operation.type === "upsert_audio_track" ||
+        operation.type === "remove_audio_track"
+      ) {
+        fields.add("audio track");
+      }
     }
     const target =
       names.length > 0 ? `“${names.join("”, “")}”` : "the selected scene";

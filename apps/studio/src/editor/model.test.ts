@@ -94,6 +94,7 @@ describe("editor selection", () => {
       "voice",
       "caption",
       "transcript",
+      "track_primary_voice",
     ]);
     expect(selection.artifact_ids).toContain("transcript_004");
     expect(selection.artifact_ids).toContain(sourceLedger.id);

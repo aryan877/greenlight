@@ -200,6 +200,68 @@ export const localizedNarrationTrackSchema = z.object({
   status: z.enum(["draft", "generated", "reviewed"]).default("draft"),
 });
 
+export const audioTrackRoleSchema = z.enum([
+  "narration",
+  "dub",
+  "music",
+  "effects",
+]);
+
+const audioClipIdSchema = z
+  .string()
+  .min(8)
+  .max(100)
+  .regex(/^[a-z0-9][a-z0-9_-]+$/i);
+
+export const audioTrackClipSchema = z
+  .object({
+    id: audioClipIdSchema,
+    scene_id: idSchema,
+    label: z.string().trim().min(1).max(90),
+    artifact_id: idSchema.nullable().default(null),
+    script: z.string().trim().min(1).max(650).nullable().default(null),
+    transcript_artifact_id: idSchema.nullable().default(null),
+    captions_artifact_id: idSchema.nullable().default(null),
+    start_offset_seconds: frameAlignedSecondsSchema
+      .nonnegative()
+      .max(120)
+      .default(0),
+    source_in_seconds: z.number().nonnegative().default(0),
+    source_out_seconds: z.number().positive().nullable().default(null),
+    playback_rate: z.number().min(0.5).max(3).default(1),
+    status: z.enum(["draft", "generated", "reviewed"]).default("draft"),
+  })
+  .superRefine((clip, context) => {
+    if (
+      clip.source_out_seconds !== null &&
+      clip.source_out_seconds <= clip.source_in_seconds
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Audio source out must be after source in",
+        path: ["source_out_seconds"],
+      });
+    }
+  });
+
+export const audioTrackSchema = z.object({
+  id: idSchema,
+  name: z.string().trim().min(1).max(80),
+  role: audioTrackRoleSchema,
+  locale: z
+    .string()
+    .trim()
+    .regex(/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i, "Use a BCP-47 locale")
+    .nullable()
+    .default(null),
+  voice_label: z.string().trim().min(1).max(80).nullable().default(null),
+  muted: z.boolean().default(false),
+  solo: z.boolean().default(false),
+  export_enabled: z.boolean().default(true),
+  gain: z.number().min(0).max(2).default(1),
+  clips: z.array(audioTrackClipSchema).default([]),
+});
+
 export const youtubeMetadataSchema = z.object({
   title: z.string().trim().min(1).max(100),
   description: z.string().trim().min(1).max(5000),
@@ -219,9 +281,10 @@ export const contentPackageSchema = z
     localized_narration_tracks: z
       .array(localizedNarrationTrackSchema)
       .optional(),
+    audio_tracks: z.array(audioTrackSchema).optional(),
     metadata: youtubeMetadataSchema,
   })
-  .superRefine(({ scenes }, context) => {
+  .superRefine(({ scenes, audio_tracks: audioTracks }, context) => {
     const seconds = productionDurationSeconds(scenes);
     if (seconds < 30 || seconds > 120) {
       context.addIssue({
@@ -250,7 +313,129 @@ export const contentPackageSchema = z
         });
       }
     });
+    const sceneIds = new Set(scenes.map((scene) => scene.id));
+    const trackIds = new Set<string>();
+    const clipIds = new Set<string>();
+    for (const [trackIndex, track] of (audioTracks ?? []).entries()) {
+      if (trackIds.has(track.id)) {
+        context.addIssue({
+          code: "custom",
+          message: `Duplicate audio track ${track.id}`,
+          path: ["audio_tracks", trackIndex, "id"],
+        });
+      }
+      trackIds.add(track.id);
+      for (const [clipIndex, clip] of track.clips.entries()) {
+        if (!sceneIds.has(clip.scene_id)) {
+          context.addIssue({
+            code: "custom",
+            message: `Audio clip references missing scene ${clip.scene_id}`,
+            path: ["audio_tracks", trackIndex, "clips", clipIndex, "scene_id"],
+          });
+        }
+        if (clipIds.has(clip.id)) {
+          context.addIssue({
+            code: "custom",
+            message: `Duplicate audio clip ${clip.id}`,
+            path: ["audio_tracks", trackIndex, "clips", clipIndex, "id"],
+          });
+        }
+        clipIds.add(clip.id);
+        const scene = scenes.find(
+          (candidate) => candidate.id === clip.scene_id,
+        );
+        if (scene && clip.start_offset_seconds >= scene.duration_seconds) {
+          context.addIssue({
+            code: "custom",
+            message: "Audio clip offset must be inside its scene",
+            path: [
+              "audio_tracks",
+              trackIndex,
+              "clips",
+              clipIndex,
+              "start_offset_seconds",
+            ],
+          });
+        }
+      }
+    }
   });
+
+export type AudioTrack = z.infer<typeof audioTrackSchema>;
+
+const primaryAudioClip = (scene: Scene): AudioTrack["clips"][number] => ({
+  id: `voice_${scene.id}`,
+  scene_id: scene.id,
+  label: scene.title,
+  artifact_id: scene.narration_artifact_id,
+  script: scene.narration,
+  transcript_artifact_id: scene.transcript_artifact_id,
+  captions_artifact_id: scene.captions_artifact_id,
+  start_offset_seconds: 0,
+  source_in_seconds: 0,
+  source_out_seconds: null,
+  playback_rate: 1,
+  status: scene.narration_artifact_id ? "generated" : "draft",
+});
+
+const primaryAudioTrack = (content: { scenes: Scene[] }): AudioTrack => ({
+  id: "track_primary_voice",
+  name: "Primary voice",
+  role: "narration",
+  locale: null,
+  voice_label: null,
+  muted: false,
+  solo: false,
+  export_enabled: true,
+  gain: 1,
+  clips: content.scenes.map(primaryAudioClip),
+});
+
+export const effectiveAudioTracks = (content: ContentPackage): AudioTrack[] => {
+  if (content.audio_tracks) return content.audio_tracks;
+  const grouped = new Map<string, LocalizedNarrationTrack[]>();
+  for (const track of content.localized_narration_tracks ?? []) {
+    const existing = grouped.get(track.locale) ?? [];
+    existing.push(track);
+    grouped.set(track.locale, existing);
+  }
+  return [
+    primaryAudioTrack(content),
+    ...[...grouped.entries()].map(([locale, tracks]) => ({
+      id: `track_dub_${locale.replace(/[^a-z0-9]+/gi, "_")}`.slice(0, 80),
+      name: `${locale} dub`,
+      role: "dub" as const,
+      locale,
+      voice_label: null,
+      muted: false,
+      solo: false,
+      export_enabled: true,
+      gain: 1,
+      clips: tracks.map((track) => ({
+        id: track.id,
+        scene_id: track.scene_id,
+        label: track.script.slice(0, 90),
+        artifact_id: track.narration_artifact_id,
+        script: track.script,
+        transcript_artifact_id: track.transcript_artifact_id,
+        captions_artifact_id: track.captions_artifact_id,
+        start_offset_seconds: 0,
+        source_in_seconds: 0,
+        source_out_seconds: null,
+        playback_rate: 1,
+        status: track.status,
+      })),
+    })),
+  ];
+};
+
+export const audibleAudioTracks = (content: ContentPackage): AudioTrack[] => {
+  const exportable = effectiveAudioTracks(content).filter(
+    (track) => track.export_enabled,
+  );
+  const hasSolo = exportable.some((track) => track.solo);
+  return exportable.filter((track) => !track.muted && (!hasSolo || track.solo));
+};
 
 export const artifactKindSchema = z.enum([
   "evidence_ledger",
@@ -334,7 +519,14 @@ export const generateImageInputSchema = z.object({
 export const generateVoiceInputSchema = z.object({
   project_id: idSchema,
   scene_id: idSchema,
+  track_id: idSchema.optional(),
   script: z.string().trim().min(1).max(5000),
+  locale: z
+    .string()
+    .trim()
+    .regex(/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i, "Use a BCP-47 locale")
+    .optional(),
+  voice_id: z.string().trim().min(1).max(80).optional(),
 });
 
 export const transcriptWordSchema = z.object({
@@ -575,6 +767,14 @@ export const editorPatchOperationSchema = z.discriminatedUnion("type", [
     type: z.literal("remove_localized_track"),
     track_id: idSchema,
   }),
+  z.object({
+    type: z.literal("upsert_audio_track"),
+    track: audioTrackSchema,
+  }),
+  z.object({
+    type: z.literal("remove_audio_track"),
+    track_id: idSchema,
+  }),
 ]);
 
 export const editorPatchInputSchema = z.object({
@@ -594,6 +794,8 @@ export type ContentPackage = z.infer<typeof contentPackageSchema>;
 export type LocalizedNarrationTrack = z.infer<
   typeof localizedNarrationTrackSchema
 >;
+export type AudioTrackRole = z.infer<typeof audioTrackRoleSchema>;
+export type AudioTrackClip = z.infer<typeof audioTrackClipSchema>;
 export type YoutubeMetadata = z.infer<typeof youtubeMetadataSchema>;
 export type ArtifactKind = z.infer<typeof artifactKindSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
@@ -686,6 +888,12 @@ export const applyEditorPatch = (
   const requireTrack = (trackId: string): void => {
     if (!selectedTrackIds.has(trackId)) {
       throw new Error(`track_outside_selection:${trackId}`);
+    }
+  };
+
+  const requireOneTrack = (...trackIds: string[]): void => {
+    if (!trackIds.some((trackId) => selectedTrackIds.has(trackId))) {
+      throw new Error(`track_outside_selection:${trackIds.join("|")}`);
     }
   };
 
@@ -787,6 +995,37 @@ export const applyEditorPatch = (
             ? {}
             : { visual: { ...current.visual, ...operation.visual } }),
         };
+        const primaryTrack = next.audio_tracks?.find(
+          (track) => track.id === "track_primary_voice",
+        );
+        const primaryClipIndex = primaryTrack?.clips.findIndex(
+          (clip) => clip.scene_id === operation.scene_id,
+        );
+        if (
+          primaryTrack &&
+          primaryClipIndex !== undefined &&
+          primaryClipIndex >= 0
+        ) {
+          const currentClip = primaryTrack.clips[primaryClipIndex]!;
+          primaryTrack.clips[primaryClipIndex] = {
+            ...currentClip,
+            ...(operation.title === undefined
+              ? {}
+              : { label: operation.title }),
+            ...(operation.narration === undefined
+              ? {}
+              : { script: operation.narration }),
+            ...(operation.narration_artifact_id === undefined
+              ? {}
+              : { artifact_id: operation.narration_artifact_id }),
+            ...(operation.captions_artifact_id === undefined
+              ? {}
+              : { captions_artifact_id: operation.captions_artifact_id }),
+            ...(operation.transcript_artifact_id === undefined
+              ? {}
+              : { transcript_artifact_id: operation.transcript_artifact_id }),
+          };
+        }
         break;
       }
       case "split_scene": {
@@ -816,6 +1055,24 @@ export const applyEditorPatch = (
           throw new Error("split_scene_must_preserve_duration");
         }
         next.scenes.splice(index, 1, operation.first, operation.second);
+        const primaryTrack = next.audio_tracks?.find(
+          (track) => track.id === "track_primary_voice",
+        );
+        const primaryClipIndex = primaryTrack?.clips.findIndex(
+          (clip) => clip.scene_id === operation.scene_id,
+        );
+        if (
+          primaryTrack &&
+          primaryClipIndex !== undefined &&
+          primaryClipIndex >= 0
+        ) {
+          primaryTrack.clips.splice(
+            primaryClipIndex,
+            1,
+            primaryAudioClip(operation.first),
+            primaryAudioClip(operation.second),
+          );
+        }
         break;
       }
       case "remove_scene": {
@@ -827,6 +1084,14 @@ export const applyEditorPatch = (
           next.localized_narration_tracks.filter(
             (track) => track.scene_id !== operation.scene_id,
           );
+        if (next.audio_tracks) {
+          next.audio_tracks = next.audio_tracks.map((track) => ({
+            ...track,
+            clips: track.clips.filter(
+              (clip) => clip.scene_id !== operation.scene_id,
+            ),
+          }));
+        }
         break;
       }
       case "reorder_scenes": {
@@ -874,6 +1139,33 @@ export const applyEditorPatch = (
           next.localized_narration_tracks[index]!.scene_id,
         );
         next.localized_narration_tracks.splice(index, 1);
+        break;
+      }
+      case "upsert_audio_track": {
+        requireOneTrack("voice", operation.track.id);
+        for (const clip of operation.track.clips) {
+          requireSelectedScene(selectedSceneIds, clip.scene_id);
+          requireScene(next.scenes, clip.scene_id);
+        }
+        next.audio_tracks ??= effectiveAudioTracks(next);
+        const index = next.audio_tracks.findIndex(
+          (track) => track.id === operation.track.id,
+        );
+        if (index === -1) next.audio_tracks.push(operation.track);
+        else next.audio_tracks[index] = operation.track;
+        break;
+      }
+      case "remove_audio_track": {
+        requireOneTrack("voice", operation.track_id);
+        next.audio_tracks ??= effectiveAudioTracks(next);
+        const index = next.audio_tracks.findIndex(
+          (track) => track.id === operation.track_id,
+        );
+        if (index === -1) throw new Error("audio_track_not_found");
+        for (const clip of next.audio_tracks[index]!.clips) {
+          requireSelectedScene(selectedSceneIds, clip.scene_id);
+        }
+        next.audio_tracks.splice(index, 1);
         break;
       }
     }

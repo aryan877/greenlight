@@ -2,6 +2,8 @@ import { sha256 } from "../lib/canonical.js";
 
 export type VoiceRequest = {
   script: string;
+  locale?: string;
+  voiceId?: string;
 };
 
 export type VoiceResult = {
@@ -16,6 +18,8 @@ export interface VoiceProvider {
     available: boolean;
     model: string | null;
     provider: string;
+    supports_locale_auto_detection: boolean;
+    supports_voice_override: boolean;
     voice_id: string | null;
   };
   generate(input: VoiceRequest): Promise<VoiceResult>;
@@ -60,11 +64,17 @@ export class OpenRouterVoiceProvider implements VoiceProvider {
       available: Boolean(this.config.apiKey),
       model: this.config.model,
       provider: "openrouter",
+      supports_locale_auto_detection: true,
+      supports_voice_override: true,
       voice_id: this.config.voiceId,
     };
   }
 
-  async generate({ script }: VoiceRequest): Promise<VoiceResult> {
+  async generate({
+    locale,
+    script,
+    voiceId,
+  }: VoiceRequest): Promise<VoiceResult> {
     if (!this.config.apiKey) throw new Error("voice_provider_not_configured");
     const response = await this.request(
       "https://openrouter.ai/api/v1/audio/speech",
@@ -78,7 +88,7 @@ export class OpenRouterVoiceProvider implements VoiceProvider {
         body: JSON.stringify({
           model: this.config.model,
           input: script,
-          voice: this.config.voiceId,
+          voice: voiceId ?? this.config.voiceId,
           response_format: "pcm",
         }),
       },
@@ -102,7 +112,8 @@ export class OpenRouterVoiceProvider implements VoiceProvider {
       provenance: {
         provider: "openrouter",
         model: this.config.model,
-        voice_id: this.config.voiceId,
+        locale: locale ?? null,
+        voice_id: voiceId ?? this.config.voiceId,
         script_sha256: sha256(script),
         source_format: "pcm_s16le_24000_mono",
         output_format: "wav_pcm_s16le_24000_mono",
@@ -117,6 +128,8 @@ export class DisabledVoiceProvider implements VoiceProvider {
       available: false,
       model: null,
       provider: "disabled",
+      supports_locale_auto_detection: false,
+      supports_voice_override: false,
       voice_id: null,
     };
   }
@@ -132,11 +145,17 @@ export class TestVoiceProvider implements VoiceProvider {
       available: true,
       model: "deterministic-pcm",
       provider: "test",
+      supports_locale_auto_detection: false,
+      supports_voice_override: true,
       voice_id: "fixture",
     };
   }
 
-  async generate({ script }: VoiceRequest): Promise<VoiceResult> {
+  async generate({
+    locale,
+    script,
+    voiceId,
+  }: VoiceRequest): Promise<VoiceResult> {
     const durationSeconds = 0.1;
     const pcm = new Uint8Array(24_000 * 2 * durationSeconds);
     return {
@@ -146,7 +165,9 @@ export class TestVoiceProvider implements VoiceProvider {
       provenance: {
         provider: "test",
         model: "deterministic-pcm",
+        locale: locale ?? null,
         script_sha256: sha256(script),
+        voice_id: voiceId ?? "fixture",
       },
     };
   }

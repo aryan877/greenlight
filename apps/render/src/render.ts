@@ -7,6 +7,7 @@ import {
   captionCueSchema,
   captionTrackSchema,
   contentPackageSchema,
+  effectiveAudioTracks,
 } from "@greenlight/contracts";
 import { bundle } from "@remotion/bundler";
 import {
@@ -37,11 +38,16 @@ const sourceAssets = argument("--assets")
       string
     >)
   : {};
-const captionArtifactIds = new Set(
-  content.scenes.flatMap((scene) =>
+const captionArtifactIds = new Set([
+  ...content.scenes.flatMap((scene) =>
     scene.captions_artifact_id ? [scene.captions_artifact_id] : [],
   ),
-);
+  ...effectiveAudioTracks(content).flatMap((track) =>
+    track.clips.flatMap((clip) =>
+      clip.captions_artifact_id ? [clip.captions_artifact_id] : [],
+    ),
+  ),
+]);
 const captionTracks = Object.fromEntries(
   await Promise.all(
     [...captionArtifactIds].map(async (id) => {

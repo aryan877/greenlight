@@ -197,6 +197,9 @@ export const App = () => {
                 if (operation.type === "upsert_localized_track") {
                   return [operation.track.scene_id];
                 }
+                if (operation.type === "upsert_audio_track") {
+                  return operation.track.clips.map((clip) => clip.scene_id);
+                }
                 return [];
               }),
             ),

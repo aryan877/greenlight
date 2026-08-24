@@ -28,15 +28,21 @@ describe("voice provider", () => {
         });
       },
     );
-    const result = await provider.generate({ script: "A short line." });
+    const result = await provider.generate({
+      locale: "hi-IN",
+      script: "A short line.",
+      voiceId: "Puck",
+    });
     expect(body).toMatchObject({
       model: "provider/model",
-      voice: "Kore",
+      voice: "Puck",
       response_format: "pcm",
     });
     expect(result.provenance).toMatchObject({
       provider: "openrouter",
       model: "provider/model",
+      locale: "hi-IN",
+      voice_id: "Puck",
     });
   });
 

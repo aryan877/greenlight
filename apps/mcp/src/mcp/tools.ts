@@ -394,6 +394,13 @@ export const buildMcpServer = ({
         requireArtifactKind(track.captions_artifact_id, ["caption"]);
         requireArtifactKind(track.transcript_artifact_id, ["transcript"]);
       }
+      for (const track of revised.audio_tracks ?? []) {
+        for (const clip of track.clips) {
+          requireArtifactKind(clip.artifact_id, ["narration"]);
+          requireArtifactKind(clip.captions_artifact_id, ["caption"]);
+          requireArtifactKind(clip.transcript_artifact_id, ["transcript"]);
+        }
+      }
       const permittedSceneIds = new Set(selection.scene_ids);
       for (const operation of request.operations) {
         if (operation.type === "split_scene") {
@@ -426,6 +433,13 @@ export const buildMcpServer = ({
             requireArtifactScope(scene.narration_artifact_id);
             requireArtifactScope(scene.captions_artifact_id);
             requireArtifactScope(scene.transcript_artifact_id);
+          }
+        }
+        if (operation.type === "upsert_audio_track") {
+          for (const clip of operation.track.clips) {
+            requireArtifactScope(clip.artifact_id);
+            requireArtifactScope(clip.captions_artifact_id);
+            requireArtifactScope(clip.transcript_artifact_id);
           }
         }
       }
@@ -517,7 +531,7 @@ export const buildMcpServer = ({
     {
       title: "Generate one narration artifact",
       description:
-        "Generate a narration WAV for one agent-authored scene using the configured voice provider. Word timing and captions are created separately by transcribe_audio, never estimated.",
+        "Generate one immutable scene-sized narration or dub WAV using the configured voice provider, optional BCP-47 locale, and optional provider voice ID. Word timing and captions are created separately by transcribe_audio, never estimated.",
       inputSchema: generateVoiceInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -530,7 +544,11 @@ export const buildMcpServer = ({
       const request = generateVoiceInputSchema.parse(input);
       if (!store.getProject(request.project_id))
         throw new Error("project_not_found");
-      const generated = await voice.generate({ script: request.script });
+      const generated = await voice.generate({
+        locale: request.locale,
+        script: request.script,
+        voiceId: request.voice_id,
+      });
       const artifact = await artifacts.importBuffer({
         projectId: request.project_id,
         kind: "narration",
@@ -539,6 +557,7 @@ export const buildMcpServer = ({
         provenance: {
           ...generated.provenance,
           scene_id: request.scene_id,
+          track_id: request.track_id ?? null,
         },
       });
       return result({

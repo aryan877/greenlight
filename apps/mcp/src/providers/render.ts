@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import {
+  contentPackageSchema,
+  effectiveAudioTracks,
+} from "@greenlight/contracts";
+
 import type { ArtifactStore } from "../storage/artifacts.js";
 
 const runFile = promisify(execFile);
@@ -30,21 +35,23 @@ export class RemotionRenderer {
     const thumbnailPath = join(workDir, "thumbnail.png");
     const assetManifestPath = join(workDir, "assets.json");
     try {
-      const packageValue = await this.artifacts.readJson<{
-        scenes: Array<{
-          captions_artifact_id: string | null;
-          narration_artifact_id: string | null;
-          visual: { artifact_ids: string[] };
-        }>;
-      }>(input.contentPackageArtifactId);
+      const packageValue = contentPackageSchema.parse(
+        await this.artifacts.readJson(input.contentPackageArtifactId),
+      );
       const assetIds = new Set<string>(
-        packageValue.scenes
-          .flatMap((scene) => [
+        [
+          ...packageValue.scenes.flatMap((scene) => [
             ...scene.visual.artifact_ids,
             scene.narration_artifact_id,
             scene.captions_artifact_id,
-          ])
-          .filter((id): id is string => Boolean(id)),
+          ]),
+          ...effectiveAudioTracks(packageValue).flatMap((track) =>
+            track.clips.flatMap((clip) => [
+              clip.artifact_id,
+              clip.captions_artifact_id,
+            ]),
+          ),
+        ].filter((id): id is string => Boolean(id)),
       );
       const assetFiles = Object.fromEntries(
         [...assetIds].map((id) => {

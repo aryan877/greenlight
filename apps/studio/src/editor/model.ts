@@ -1,4 +1,5 @@
 import {
+  effectiveAudioTracks,
   productionDurationSeconds,
   scenePresentationDurationSeconds,
   sceneStartSeconds,
@@ -98,6 +99,17 @@ export const createSelection = (input: {
   const artifactIds = [
     ...new Set([
       ...selected.flatMap(({ scene }) => sceneArtifacts(scene)),
+      ...effectiveAudioTracks(input.content).flatMap((track) =>
+        track.clips.flatMap((clip) =>
+          input.sceneIds.includes(clip.scene_id)
+            ? [
+                clip.artifact_id,
+                clip.transcript_artifact_id,
+                clip.captions_artifact_id,
+              ].filter((id): id is string => Boolean(id))
+            : [],
+        ),
+      ),
       ...(input.extraArtifactIds ?? []),
     ]),
   ];
@@ -112,7 +124,13 @@ export const createSelection = (input: {
     project_id: input.projectId,
     base_content_package_artifact_id: input.contentArtifactId,
     scene_ids: selected.map(({ scene }) => scene.id),
-    track_ids: ["visual", "voice", "caption", "transcript"],
+    track_ids: [
+      "visual",
+      "voice",
+      "caption",
+      "transcript",
+      ...effectiveAudioTracks(input.content).map((track) => track.id),
+    ],
     artifact_ids: artifactIds,
     time_range_seconds: {
       start: sceneOffset(input.content.scenes, first.index),

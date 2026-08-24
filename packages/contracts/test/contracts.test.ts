@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  audibleAudioTracks,
   captionTrackSchema,
   contentPackageSchema,
   editorPatchInputSchema,
+  effectiveAudioTracks,
   evidenceLedgerSchema,
   productionDurationSeconds,
   projectBriefSchema,
@@ -169,5 +171,65 @@ describe("Greenlight contracts", () => {
     });
 
     expect(parsed.cues.map((cue) => cue.text).join("")).toBe("Hello world");
+  });
+
+  it("normalizes legacy narration and obeys track mute, solo, and export state", () => {
+    const content = contentPackageSchema.parse({
+      version: 1,
+      project_id: "project_audio",
+      headline: "A production with named audio",
+      dek: "Every language remains editable one scene at a time.",
+      scenes: Array.from({ length: 3 }, (_, index) => ({
+        id: `scene_audio_${index}`,
+        kind: index === 0 ? "hook" : "explanation",
+        title: `Audio scene ${index + 1}`,
+        narration: "One independently editable narration clip.",
+        narration_artifact_id: `artifact_voice_${index}`,
+        claim_ids: [],
+        duration_seconds: 10,
+        visual: { treatment: "type", accent: "signal" },
+      })),
+      metadata: {
+        title: "A production with named audio",
+        description: "A concise production.",
+        tags: ["audio"],
+      },
+    });
+    const [primary] = effectiveAudioTracks(content);
+    expect(primary?.name).toBe("Primary voice");
+    expect(primary?.clips).toHaveLength(3);
+
+    const explicit = contentPackageSchema.parse({
+      ...content,
+      audio_tracks: [
+        { ...primary!, muted: false, solo: false, export_enabled: true },
+        {
+          ...primary!,
+          id: "track_hindi_dub",
+          name: "Hindi dub",
+          role: "dub",
+          locale: "hi-IN",
+          solo: true,
+          clips: primary!.clips.map((clip) => ({
+            ...clip,
+            id: `hindi_${clip.id}`,
+          })),
+        },
+        {
+          ...primary!,
+          id: "track_music_bed",
+          name: "Music",
+          role: "music",
+          muted: true,
+          clips: primary!.clips.map((clip) => ({
+            ...clip,
+            id: `music_${clip.id}`,
+          })),
+        },
+      ],
+    });
+    expect(audibleAudioTracks(explicit).map((track) => track.id)).toEqual([
+      "track_hindi_dub",
+    ]);
   });
 });

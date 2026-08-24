@@ -1,6 +1,14 @@
 import type { CSSProperties, ReactNode } from "react";
 
-import type { CaptionCue, ContentPackage, Scene } from "@greenlight/contracts";
+import {
+  audibleAudioTracks,
+  sceneStartSeconds,
+  type AudioTrack,
+  type AudioTrackClip,
+  type CaptionCue,
+  type ContentPackage,
+  type Scene,
+} from "@greenlight/contracts";
 import { fitText } from "@remotion/layout-utils";
 import { Audio, Video } from "@remotion/media";
 import {
@@ -8,6 +16,7 @@ import {
   Easing,
   Img,
   interpolate,
+  Sequence,
   Series,
   staticFile,
   useCurrentFrame,
@@ -261,20 +270,13 @@ const treatments = {
 const EditorialScene = ({
   assetFiles,
   captionTrack,
-  isFirst,
-  isLast,
   scene,
 }: {
   assetFiles: Record<string, string>;
   captionTrack: CaptionCue[] | null;
-  isFirst: boolean;
-  isLast: boolean;
   scene: Scene;
 }) => {
   const Treatment = treatments[scene.visual.treatment];
-  const narrationFile = scene.narration_artifact_id
-    ? assetFiles[scene.narration_artifact_id]
-    : null;
   return (
     <AbsoluteFill style={{ background: color.paper, color: color.ink }}>
       <div
@@ -296,36 +298,100 @@ const EditorialScene = ({
       {captionTrack ? (
         <TimedCaptions cues={captionTrack} playbackRate={scene.playback_rate} />
       ) : null}
-      {narrationFile ? (
-        <Audio
-          playbackRate={scene.playback_rate}
-          src={staticFile(narrationFile)}
-          volume={(frame) => {
-            const duration = Math.round(scene.duration_seconds * FPS);
-            const fadeIn = isFirst
-              ? 1
-              : interpolate(frame, [0, AUDIO_EDGE_FADE_FRAMES], [0, 1], {
-                  extrapolateLeft: "clamp",
-                  extrapolateRight: "clamp",
-                });
-            const fadeOut = isLast
-              ? 1
-              : interpolate(
-                  frame,
-                  [duration - AUDIO_EDGE_FADE_FRAMES, duration],
-                  [1, 0],
-                  {
-                    extrapolateLeft: "clamp",
-                    extrapolateRight: "clamp",
-                  },
-                );
-            return Math.min(fadeIn, fadeOut);
-          }}
-        />
-      ) : null}
     </AbsoluteFill>
   );
 };
+
+const TrackAudioClip = ({
+  clip,
+  durationInFrames,
+  file,
+  scenePlaybackRate,
+  track,
+}: {
+  clip: AudioTrackClip;
+  durationInFrames: number;
+  file: string;
+  scenePlaybackRate: number;
+  track: AudioTrack;
+}) => {
+  const frame = useCurrentFrame();
+  const fadeIn = interpolate(
+    frame,
+    [0, AUDIO_EDGE_FADE_FRAMES],
+    [0, track.gain],
+    {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    },
+  );
+  const fadeOut = interpolate(
+    frame,
+    [durationInFrames - AUDIO_EDGE_FADE_FRAMES, durationInFrames],
+    [track.gain, 0],
+    {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    },
+  );
+  return (
+    <Audio
+      playbackRate={clip.playback_rate * scenePlaybackRate}
+      src={staticFile(file)}
+      trimBefore={Math.round(clip.source_in_seconds * FPS)}
+      trimAfter={
+        clip.source_out_seconds === null
+          ? undefined
+          : Math.round(clip.source_out_seconds * FPS)
+      }
+      volume={Math.min(fadeIn, fadeOut)}
+    />
+  );
+};
+
+const ProductionAudio = ({
+  assetFiles,
+  content,
+}: Pick<RenderProject, "assetFiles" | "content">) => (
+  <>
+    {audibleAudioTracks(content).flatMap((track) =>
+      track.clips.flatMap((clip) => {
+        const sceneIndex = content.scenes.findIndex(
+          (scene) => scene.id === clip.scene_id,
+        );
+        const file = clip.artifact_id ? assetFiles[clip.artifact_id] : null;
+        const scene = content.scenes[sceneIndex];
+        if (!file || !scene || sceneIndex < 0) return [];
+        const from = Math.round(
+          (sceneStartSeconds(content.scenes, sceneIndex) +
+            clip.start_offset_seconds) *
+            FPS,
+        );
+        const durationInFrames = Math.max(
+          1,
+          Math.round(
+            (scene.duration_seconds - clip.start_offset_seconds) * FPS,
+          ),
+        );
+        return [
+          <Sequence
+            key={`${track.id}:${clip.id}`}
+            from={from}
+            durationInFrames={durationInFrames}
+          >
+            <TrackAudioClip
+              clip={clip}
+              durationInFrames={durationInFrames}
+              file={file}
+              scenePlaybackRate={scene.playback_rate}
+              track={track}
+            />
+          </Sequence>,
+        ];
+      }),
+    )}
+  </>
+);
 
 export const getDurationInFrames = (content: ContentPackage): number =>
   content.scenes.reduce(
@@ -341,8 +407,14 @@ export const GreenlightFilm = ({
   captionTracks,
   content,
 }: RenderProject) => {
+  const audioTracks = audibleAudioTracks(content);
   const timeline: ReactNode[] = [];
   content.scenes.forEach((scene, index) => {
+    const captionArtifactId =
+      audioTracks
+        .flatMap((track) => track.clips)
+        .find((clip) => clip.scene_id === scene.id && clip.captions_artifact_id)
+        ?.captions_artifact_id ?? scene.captions_artifact_id;
     timeline.push(
       <Series.Sequence
         key={scene.id}
@@ -352,12 +424,10 @@ export const GreenlightFilm = ({
         <EditorialScene
           assetFiles={assetFiles}
           captionTrack={
-            scene.captions_artifact_id
-              ? (captionTracks[scene.captions_artifact_id] ?? null)
+            captionArtifactId
+              ? (captionTracks[captionArtifactId] ?? null)
               : null
           }
-          isFirst={index === 0}
-          isLast={index === content.scenes.length - 1}
           scene={scene}
         />
       </Series.Sequence>,
@@ -376,6 +446,7 @@ export const GreenlightFilm = ({
   return (
     <AbsoluteFill style={{ background: color.paper }}>
       <Series>{timeline}</Series>
+      <ProductionAudio assetFiles={assetFiles} content={content} />
     </AbsoluteFill>
   );
 };
