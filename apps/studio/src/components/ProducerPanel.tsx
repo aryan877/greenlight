@@ -4,6 +4,7 @@ import type {
   EditorSelection,
 } from "@greenlight/contracts";
 import {
+  ArrowUp,
   Bot,
   Captions,
   Check,
@@ -14,7 +15,6 @@ import {
   MousePointer2,
   Paperclip,
   RotateCcw,
-  Send,
   SlidersHorizontal,
   Sparkles,
   FileText,
@@ -91,7 +91,7 @@ const QuestionCard = ({
           aria-label="Answer Producer"
           className="grid size-7 place-items-center rounded-md bg-ink text-white disabled:opacity-30"
         >
-          <Send size={12} />
+          <ArrowUp size={13} strokeWidth={2.2} />
         </button>
       </form>
     </div>
@@ -643,7 +643,7 @@ export const ProducerPanel = ({
             disabled={!instruction.trim() || isSending}
             className="ml-auto grid size-8 place-items-center rounded-full bg-ink text-white transition-colors hover:bg-ink-secondary disabled:cursor-not-allowed disabled:opacity-30"
           >
-            <Send size={14} />
+            <ArrowUp size={15} strokeWidth={2.2} />
           </button>
         </div>
       </form>
