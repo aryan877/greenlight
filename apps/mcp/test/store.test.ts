@@ -148,4 +148,43 @@ describe("GreenlightStore", () => {
     expect(store.listArtifacts(project.id)).toHaveLength(1);
     store.close();
   });
+
+  it("lists projects with artifact counts in one store query", () => {
+    const store = new GreenlightStore(":memory:");
+    const first = store.createProject({
+      topic: "A multilingual production",
+      audience: "creators",
+      goal: "Edit every language from one timeline",
+      target_duration_seconds: 60,
+      tone: "direct",
+    });
+    const second = store.createProject({
+      topic: "A clean production history",
+      audience: "editors",
+      goal: "Open prior work without scanning every artifact",
+      target_duration_seconds: 60,
+      tone: "precise",
+    });
+    store.saveArtifact({
+      id: "artifact_counted",
+      project_id: first.id,
+      kind: "image",
+      sha256: "b".repeat(64),
+      relative_path: `${first.id}/image/${"b".repeat(64)}.png`,
+      mime_type: "image/png",
+      byte_size: 8,
+      provenance: { source: "test" },
+      created_at: now(),
+    });
+
+    const counts = new Map(
+      store
+        .listProjectsWithArtifactCounts()
+        .map(({ project, artifactCount }) => [project.id, artifactCount]),
+    );
+    expect(counts.get(first.id)).toBe(1);
+    expect(counts.get(second.id)).toBe(0);
+    expect(store.countArtifacts(first.id)).toBe(1);
+    store.close();
+  });
 });

@@ -183,6 +183,32 @@ export class GreenlightStore {
     return rows.map(toProject);
   }
 
+  listProjectsWithArtifactCounts(): Array<{
+    project: Project;
+    artifactCount: number;
+  }> {
+    const rows = this.db
+      .prepare(
+        `SELECT projects.*, COUNT(artifacts.id) AS artifact_count
+         FROM projects
+         LEFT JOIN artifacts ON artifacts.project_id = projects.id
+         GROUP BY projects.id
+         ORDER BY projects.updated_at DESC`,
+      )
+      .all() as Array<ProjectRow & { artifact_count: number }>;
+    return rows.map((row) => ({
+      project: toProject(row),
+      artifactCount: row.artifact_count,
+    }));
+  }
+
+  countArtifacts(projectId: string): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS count FROM artifacts WHERE project_id = ?")
+      .get(projectId) as { count: number };
+    return row.count;
+  }
+
   setProjectStage(
     id: string,
     stageInput: ProjectStage,

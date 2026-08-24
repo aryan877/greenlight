@@ -5,6 +5,16 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
+export const MEDIA_PROBE_TIMEOUT_MS = 30_000;
+
+type ProbeRunner = (
+  executable: string,
+  arguments_: string[],
+  options: { maxBuffer: number; timeout: number },
+) => Promise<{ stdout: string | Buffer }>;
+
+const runProbe: ProbeRunner = (executable, arguments_, options) =>
+  execFile(executable, arguments_, options);
 
 type ProbeDocument = {
   format?: { duration?: string };
@@ -46,12 +56,13 @@ export const parseMediaMetadata = (document: ProbeDocument): MediaMetadata => {
 export const probeImportedMedia = async (
   extension: string,
   bytes: Uint8Array,
+  probe: ProbeRunner = runProbe,
 ): Promise<MediaMetadata | null> => {
   const directory = await mkdtemp(join(tmpdir(), "greenlight-media-"));
   const path = join(directory, `asset${extension}`);
   try {
     await writeFile(path, bytes);
-    const { stdout } = await execFile(
+    const { stdout } = await probe(
       "ffprobe",
       [
         "-v",
@@ -62,9 +73,9 @@ export const probeImportedMedia = async (
         "json",
         path,
       ],
-      { maxBuffer: 2 * 1024 * 1024 },
+      { maxBuffer: 2 * 1024 * 1024, timeout: MEDIA_PROBE_TIMEOUT_MS },
     );
-    return parseMediaMetadata(JSON.parse(stdout) as ProbeDocument);
+    return parseMediaMetadata(JSON.parse(String(stdout)) as ProbeDocument);
   } catch {
     return null;
   } finally {

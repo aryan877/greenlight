@@ -9,6 +9,7 @@ import {
   OpenRouterTranscriptionProvider,
   parseWhisperWords,
 } from "../src/providers/transcription.js";
+import { captionsFromTimedWords } from "../src/mcp/tools.js";
 
 describe("transcription", () => {
   it("uses OpenRouter text with independently measured local word timing", async () => {
@@ -113,5 +114,29 @@ describe("transcription", () => {
       start_word_index: 1,
       end_word_index: 2,
     });
+  });
+
+  it("keeps sub-millisecond measured words valid as caption cues", () => {
+    expect(
+      captionsFromTimedWords([
+        { text: "A", start_seconds: 1.0001, end_seconds: 1.0002 },
+        { text: "cut", start_seconds: 1.1, end_seconds: 1.1 },
+      ]),
+    ).toEqual([
+      {
+        text: "A",
+        startMs: 1_000,
+        endMs: 1_001,
+        timestampMs: null,
+        confidence: null,
+      },
+      {
+        text: " cut",
+        startMs: 1_100,
+        endMs: 1_101,
+        timestampMs: null,
+        confidence: null,
+      },
+    ]);
   });
 });

@@ -81,21 +81,27 @@ app.get("/health", (_request, response) => {
   response.json({ ok: true, service: "greenlight-mcp", version: "0.1.0" });
 });
 
-const studioProject = (project: Project) => ({
+const studioProject = (project: Project, artifactCount: number) => ({
   ...project,
-  artifact_count: store.listArtifacts(project.id).length,
+  artifact_count: artifactCount,
   workspace_path: resolve(config.artifactDir, project.id),
 });
 
 app.get("/api/projects", (_request, response) => {
-  response.json({ projects: store.listProjects().map(studioProject) });
+  response.json({
+    projects: store
+      .listProjectsWithArtifactCounts()
+      .map(({ project, artifactCount }) =>
+        studioProject(project, artifactCount),
+      ),
+  });
 });
 
 app.post("/api/projects", (request, response) => {
   try {
     const project = store.createProject(projectBriefSchema.parse(request.body));
     mkdirSync(resolve(config.artifactDir, project.id), { recursive: true });
-    response.status(201).json({ project: studioProject(project) });
+    response.status(201).json({ project: studioProject(project, 0) });
   } catch (error) {
     if (error && typeof error === "object" && "issues" in error) {
       response.status(400).json({ error: "invalid_project_brief" });
@@ -112,7 +118,7 @@ app.get("/api/projects/:id", (request, response) => {
     return;
   }
   response.json({
-    project: studioProject(project),
+    project: studioProject(project, store.countArtifacts(project.id)),
     artifacts: store.listArtifacts(project.id),
     release: store.getLatestReleaseForProject(project.id),
   });

@@ -57,20 +57,24 @@ const result = (value: unknown) => ({
   structuredContent: value as Record<string, unknown>,
 });
 
-const captionsFromTimedWords = (
+export const captionsFromTimedWords = (
   words: Array<{
     text: string;
     start_seconds: number;
     end_seconds: number;
   }>,
 ) =>
-  words.map((word, index) => ({
-    text: `${index === 0 ? "" : " "}${word.text}`,
-    startMs: Math.round(word.start_seconds * 1_000),
-    endMs: Math.round(word.end_seconds * 1_000),
-    timestampMs: null,
-    confidence: null,
-  }));
+  words.map((word, index) => {
+    const startMs = Math.floor(word.start_seconds * 1_000);
+    const measuredEndMs = Math.ceil(word.end_seconds * 1_000);
+    return {
+      text: `${index === 0 ? "" : " "}${word.text}`,
+      startMs,
+      endMs: Math.max(measuredEndMs, startMs + 1),
+      timestampMs: null,
+      confidence: null,
+    };
+  });
 
 export const buildMcpServer = ({
   artifacts,
