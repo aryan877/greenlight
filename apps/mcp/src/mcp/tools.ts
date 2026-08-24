@@ -1,4 +1,5 @@
 import {
+  captionTrackSchema,
   attachOpenMojiInputSchema,
   applyEditorPatch,
   contentPackageSchema,
@@ -62,23 +63,14 @@ const captionsFromTimedWords = (
     start_seconds: number;
     end_seconds: number;
   }>,
-) => {
-  const captions = [];
-  for (let index = 0; index < words.length; index += 8) {
-    const group = words.slice(index, index + 8);
-    const first = group[0];
-    const last = group.at(-1);
-    if (!first || !last) continue;
-    captions.push({
-      text: group.map((word) => word.text).join(" "),
-      startMs: Math.round(first.start_seconds * 1_000),
-      endMs: Math.round(last.end_seconds * 1_000),
-      timestampMs: Math.round(first.start_seconds * 1_000),
-      confidence: null,
-    });
-  }
-  return captions;
-};
+) =>
+  words.map((word, index) => ({
+    text: `${index === 0 ? "" : " "}${word.text}`,
+    startMs: Math.round(word.start_seconds * 1_000),
+    endMs: Math.round(word.end_seconds * 1_000),
+    timestampMs: null,
+    confidence: null,
+  }));
 
 export const buildMcpServer = ({
   artifacts,
@@ -340,7 +332,7 @@ export const buildMcpServer = ({
     {
       title: "Apply a scoped editor revision",
       description:
-        "Apply validated scene, media, split, ordering, or localized-track operations to the exact selected content package. Creator-imported images and videos are placed by artifact ID in scene.visual.artifact_ids. Saves an immutable edit and content-package revision; never overwrites the base cut.",
+        "Apply one validated non-destructive edit patch to the exact selected content package. Selection is context: operations may target only the scenes the edit actually changes. Cuts are frame-aligned; shortening records gap_after_seconds; source-backed extension is limited by the recorded source range and existing gap. Creator media is referenced only by artifact ID. Saves immutable patch and content-package revisions; never overwrites the base cut.",
       inputSchema: editorPatchInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -392,6 +384,7 @@ export const buildMcpServer = ({
         for (const artifactId of scene.visual.artifact_ids) {
           requireArtifactKind(artifactId, ["image", "video", "thumbnail"]);
         }
+        requireArtifactKind(scene.source_clip?.artifact_id ?? null, ["video"]);
         requireArtifactKind(scene.narration_artifact_id, ["narration"]);
         requireArtifactKind(scene.captions_artifact_id, ["caption"]);
         requireArtifactKind(scene.transcript_artifact_id, ["transcript"]);
@@ -423,6 +416,7 @@ export const buildMcpServer = ({
           requireArtifactScope(operation.narration_artifact_id ?? null);
           requireArtifactScope(operation.captions_artifact_id ?? null);
           requireArtifactScope(operation.transcript_artifact_id ?? null);
+          requireArtifactScope(operation.source_clip?.artifact_id ?? null);
         }
         if (operation.type === "split_scene") {
           for (const scene of [operation.first, operation.second]) {
@@ -609,13 +603,18 @@ export const buildMcpServer = ({
           audio_artifact_id: request.audio_artifact_id,
         },
       });
-      const captions = await artifacts.importBuffer({
+      const captionTrack = captionTrackSchema.parse({
+        version: 1,
+        project_id: request.project_id,
+        scene_id: request.scene_id,
+        locale: request.locale,
+        transcript_artifact_id: artifact.id,
+        cues: captionsFromTimedWords(transcript.words),
+      });
+      const captions = await artifacts.importJson({
         projectId: request.project_id,
         kind: "caption",
-        filename: `${request.scene_id}.captions.json`,
-        bytes: Buffer.from(
-          `${JSON.stringify(captionsFromTimedWords(transcript.words), null, 2)}\n`,
-        ),
+        value: captionTrack,
         provenance: {
           producer: "greenlight_timed_transcript",
           scene_id: request.scene_id,
@@ -717,7 +716,31 @@ export const buildMcpServer = ({
           correction_note: request.note,
         },
       });
-      return result({ artifact, transcript });
+      const captionTrack = captionTrackSchema.parse({
+        version: 1,
+        project_id: current.project_id,
+        scene_id: current.scene_id,
+        locale: current.locale,
+        transcript_artifact_id: artifact.id,
+        cues: captionsFromTimedWords(words),
+      });
+      const captions = await artifacts.importJson({
+        projectId: request.project_id,
+        kind: "caption",
+        value: captionTrack,
+        provenance: {
+          producer: "greenlight_timed_transcript",
+          scene_id: current.scene_id,
+          narration_artifact_id: current.audio_artifact_id,
+          transcript_artifact_id: artifact.id,
+          parent_transcript_artifact_id: request.transcript_artifact_id,
+        },
+      });
+      return result({
+        transcript_artifact: artifact,
+        captions_artifact: captions,
+        transcript,
+      });
     },
   );
 

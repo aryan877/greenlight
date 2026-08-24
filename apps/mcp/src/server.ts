@@ -134,6 +134,21 @@ app.post(
         return;
       }
       const filename = basename(decodeURIComponent(encodedFilename));
+      const source = request.header("x-greenlight-source");
+      const sandboxSessionId = request.header("x-greenlight-session-id");
+      const sandboxTurnId = request.header("x-greenlight-turn-id");
+      const encodedSandboxPath = request.header("x-greenlight-sandbox-path");
+      const sandboxPath = encodedSandboxPath
+        ? decodeURIComponent(encodedSandboxPath)
+        : null;
+      const fromSandbox = source === "trueforge_sandbox";
+      if (
+        fromSandbox &&
+        (!sandboxSessionId || !sandboxTurnId || !sandboxPath?.startsWith("/"))
+      ) {
+        response.status(400).json({ error: "sandbox_origin_required" });
+        return;
+      }
       const bytes = Buffer.isBuffer(request.body)
         ? request.body
         : Buffer.from(request.body ?? []);
@@ -145,9 +160,16 @@ app.post(
         filename: `creator-media${media.extension}`,
         bytes,
         provenance: {
-          producer: "creator",
-          source: "local_import",
+          producer: fromSandbox ? "trueforge" : "creator",
+          source: fromSandbox ? "sandbox_output" : "local_import",
           original_filename: filename,
+          ...(fromSandbox
+            ? {
+                trueforge_session_id: sandboxSessionId,
+                trueforge_turn_id: sandboxTurnId,
+                sandbox_path: sandboxPath,
+              }
+            : {}),
           declared_mime_type: request.header("x-greenlight-mime") ?? null,
           inspected_mime_type: media.mimeType,
           media_metadata: metadata,

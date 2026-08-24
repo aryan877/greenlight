@@ -26,7 +26,8 @@ const SceneCanvas = ({
   const visuals = scene.visual.artifact_ids.slice(0, 4);
   const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
   return (
-    <div className="relative size-full overflow-hidden bg-white">
+    <div className="relative size-full overflow-hidden bg-[#f8faf9]">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_18%,rgba(255,208,103,.34),transparent_32%),radial-gradient(circle_at_8%_84%,rgba(77,196,156,.19),transparent_34%)]" />
       {visuals.length > 0 ? (
         <div
           className={cx(
@@ -34,29 +35,41 @@ const SceneCanvas = ({
             visuals.length === 1 ? "grid-cols-1" : "grid-cols-2",
           )}
         >
-          {visuals.map((visual) => (
-            <div
-              key={visual}
-              className="grid min-h-0 place-items-center rounded-[7%] bg-[#ecf2ef] p-[9%]"
-            >
-              {byId.get(visual)?.mime_type.startsWith("video/") ? (
-                <video
-                  src={greenlightApi.artifactUrl(visual)}
-                  muted
-                  loop
-                  autoPlay
-                  playsInline
-                  className="size-full object-cover"
-                />
-              ) : (
-                <img
-                  src={greenlightApi.artifactUrl(visual)}
-                  alt=""
-                  className="size-full object-contain"
-                />
-              )}
-            </div>
-          ))}
+          {visuals.map((visual) => {
+            const artifact = byId.get(visual);
+            const source =
+              visual === scene.source_clip?.artifact_id
+                ? scene.source_clip
+                : null;
+            return (
+              <div
+                key={visual}
+                className="grid min-h-0 place-items-center rounded-[7%] bg-[#ecf2ef] p-[9%]"
+              >
+                {artifact?.mime_type.startsWith("video/") ? (
+                  <video
+                    src={`${greenlightApi.artifactUrl(visual)}${source ? `#t=${source.in_seconds.toFixed(3)},${source.out_seconds.toFixed(3)}` : ""}`}
+                    muted
+                    loop={!source}
+                    autoPlay
+                    playsInline
+                    onLoadedMetadata={(event) => {
+                      event.currentTarget.playbackRate = source
+                        ? scene.playback_rate
+                        : 1;
+                    }}
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  <img
+                    src={greenlightApi.artifactUrl(visual)}
+                    alt=""
+                    className="size-full object-contain"
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       ) : null}
       <div
@@ -69,11 +82,13 @@ const SceneCanvas = ({
           {scene.title}
         </h1>
       </div>
-      <div className="absolute inset-x-[8%] bottom-[5%] flex justify-center">
-        <span className="max-w-[88%] rounded-lg bg-black/88 px-3 py-2 text-center text-[clamp(9px,1vw,14px)] font-medium leading-snug text-white">
-          {scene.narration}
-        </span>
-      </div>
+      {scene.captions_artifact_id ? (
+        <div className="absolute inset-x-[8%] bottom-[5%] flex justify-center">
+          <span className="max-w-[88%] rounded-lg bg-black/88 px-3 py-2 text-center text-[clamp(9px,1vw,14px)] font-medium leading-snug text-white">
+            {scene.narration}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 };
@@ -82,6 +97,7 @@ export const ProgramMonitor = ({
   scene,
   artifacts,
   video,
+  poster,
   media,
   timelineOpen,
   previewing,
@@ -91,6 +107,7 @@ export const ProgramMonitor = ({
   scene: Scene | null;
   artifacts: Artifact[];
   video: Artifact | null;
+  poster: Artifact | null;
   media: MediaController;
   timelineOpen: boolean;
   previewing: boolean;
@@ -128,12 +145,13 @@ export const ProgramMonitor = ({
       </div>
 
       <div className="monitor-viewport grid min-h-0 flex-1 place-items-center overflow-hidden p-5 xl:p-7">
-        <div className="monitor-frame bg-white">
+        <div className="monitor-frame">
           {video && !previewUsesCanvas ? (
             <video
               ref={media.mediaRef}
               src={greenlightApi.artifactUrl(video.id)}
-              className="block size-full bg-white object-contain"
+              poster={poster ? greenlightApi.artifactUrl(poster.id) : undefined}
+              className="block size-full object-contain"
               playsInline
               {...media.mediaEvents}
             />

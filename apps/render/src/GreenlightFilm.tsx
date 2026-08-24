@@ -1,30 +1,30 @@
 import type { CSSProperties, ReactNode } from "react";
 
-import type { ContentPackage, Scene } from "@greenlight/contracts";
+import type { CaptionCue, ContentPackage, Scene } from "@greenlight/contracts";
 import { fitText } from "@remotion/layout-utils";
 import { Audio, Video } from "@remotion/media";
-import { TransitionSeries, linearTiming } from "@remotion/transitions";
-import { fade } from "@remotion/transitions/fade";
 import {
   AbsoluteFill,
   Easing,
   Img,
   interpolate,
+  Series,
   staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
 
 import { accentColor, renderSpec } from "./design";
+import { TimedCaptions } from "./Captions";
 import type { RenderProject } from "./Root";
 
 export const FPS = renderSpec.format.fps;
-export const TRANSITION_FRAMES = renderSpec.timing.transitionFrames;
+const AUDIO_EDGE_FADE_FRAMES = 2;
 
 const { color, layout, timing, type } = renderSpec;
 
 const enterProgress = (frame: number, fps: number): number =>
-  interpolate(frame, [0, timing.enterSeconds * fps], [0, 1], {
+  interpolate(frame, [0, timing.enterSeconds * fps], [0.35, 1], {
     easing: Easing.bezier(0.16, 1, 0.3, 1),
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
@@ -61,36 +61,6 @@ const Title = ({
   };
   return <h2 style={style}>{scene.title}</h2>;
 };
-
-const Caption = ({ text }: { text: string }) => (
-  <div
-    style={{
-      position: "absolute",
-      left: layout.edge,
-      right: layout.edge,
-      bottom: layout.captionBottom,
-      display: "flex",
-      justifyContent: "center",
-    }}
-  >
-    <div
-      style={{
-        maxWidth: 1340,
-        padding: "12px 20px 14px",
-        borderRadius: 12,
-        color: "white",
-        background: "rgba(18, 22, 21, 0.9)",
-        fontFamily: type.editorial,
-        fontSize: type.caption,
-        fontWeight: 600,
-        letterSpacing: "-0.015em",
-        textAlign: "center",
-      }}
-    >
-      {text}
-    </div>
-  </div>
-);
 
 type TreatmentProps = {
   assetFiles: Record<string, string>;
@@ -190,34 +160,39 @@ const TimelineTreatment = ({ scene }: TreatmentProps) => {
 const OpenMojiTreatment = ({ assetFiles, scene }: TreatmentProps) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const files = scene.visual.artifact_ids
-    .map((id) => assetFiles[id])
-    .filter((file): file is string => Boolean(file));
+  const assets = scene.visual.artifact_ids.flatMap((artifactId) => {
+    const file = assetFiles[artifactId];
+    return file ? [{ artifactId, file }] : [];
+  });
   return (
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: files.length > 0 ? "1fr 610px" : "1fr",
+        gridTemplateColumns: assets.length > 0 ? "1fr 610px" : "1fr",
         alignItems: "center",
         gap: 80,
         width: "100%",
       }}
     >
-      <Title scene={scene} compact={files.length > 0} />
-      {files.length > 0 ? (
+      <Title scene={scene} compact={assets.length > 0} />
+      {assets.length > 0 ? (
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: files.length === 1 ? "1fr" : "1fr 1fr",
+            gridTemplateColumns: assets.length === 1 ? "1fr" : "1fr 1fr",
             gap: 24,
             alignItems: "center",
           }}
         >
-          {files.map((file, index) => {
+          {assets.map(({ artifactId, file }, index) => {
+            const source =
+              artifactId === scene.source_clip?.artifact_id
+                ? scene.source_clip
+                : null;
             const enter = interpolate(
               frame,
               [index * 0.12 * fps, (index * 0.12 + 0.55) * fps],
-              [0, 1],
+              [index === 0 ? 0.3 : 0, 1],
               {
                 easing: Easing.bezier(0.34, 1.3, 0.64, 1),
                 extrapolateLeft: "clamp",
@@ -226,7 +201,7 @@ const OpenMojiTreatment = ({ assetFiles, scene }: TreatmentProps) => {
             );
             return (
               <div
-                key={file}
+                key={artifactId}
                 style={{
                   display: "grid",
                   aspectRatio: "1",
@@ -241,7 +216,14 @@ const OpenMojiTreatment = ({ assetFiles, scene }: TreatmentProps) => {
                   <Video
                     src={staticFile(file)}
                     muted
-                    loop
+                    loop={!source}
+                    playbackRate={source ? scene.playback_rate : 1}
+                    trimBefore={
+                      source ? Math.round(source.in_seconds * fps) : undefined
+                    }
+                    trimAfter={
+                      source ? Math.round(source.out_seconds * fps) : undefined
+                    }
                     objectFit="cover"
                     style={{ width: "100%", height: "100%", borderRadius: 54 }}
                   />
@@ -278,11 +260,13 @@ const treatments = {
 
 const EditorialScene = ({
   assetFiles,
+  captionTrack,
   isFirst,
   isLast,
   scene,
 }: {
   assetFiles: Record<string, string>;
+  captionTrack: CaptionCue[] | null;
   isFirst: boolean;
   isLast: boolean;
   scene: Scene;
@@ -309,7 +293,9 @@ const EditorialScene = ({
       >
         <Treatment assetFiles={assetFiles} scene={scene} />
       </AbsoluteFill>
-      <Caption text={scene.narration} />
+      {captionTrack ? (
+        <TimedCaptions cues={captionTrack} playbackRate={scene.playback_rate} />
+      ) : null}
       {narrationFile ? (
         <Audio
           playbackRate={scene.playback_rate}
@@ -318,7 +304,7 @@ const EditorialScene = ({
             const duration = Math.round(scene.duration_seconds * FPS);
             const fadeIn = isFirst
               ? 1
-              : interpolate(frame, [0, TRANSITION_FRAMES], [0, 1], {
+              : interpolate(frame, [0, AUDIO_EDGE_FADE_FRAMES], [0, 1], {
                   extrapolateLeft: "clamp",
                   extrapolateRight: "clamp",
                 });
@@ -326,7 +312,7 @@ const EditorialScene = ({
               ? 1
               : interpolate(
                   frame,
-                  [duration - TRANSITION_FRAMES, duration],
+                  [duration - AUDIO_EDGE_FADE_FRAMES, duration],
                   [1, 0],
                   {
                     extrapolateLeft: "clamp",
@@ -343,41 +329,53 @@ const EditorialScene = ({
 
 export const getDurationInFrames = (content: ContentPackage): number =>
   content.scenes.reduce(
-    (total, scene) => total + Math.round(scene.duration_seconds * FPS),
+    (total, scene) =>
+      total +
+      Math.round(scene.duration_seconds * FPS) +
+      Math.round((scene.gap_after_seconds ?? 0) * FPS),
     0,
-  ) -
-  Math.max(0, content.scenes.length - 1) * TRANSITION_FRAMES;
+  );
 
-export const GreenlightFilm = ({ assetFiles, content }: RenderProject) => {
+export const GreenlightFilm = ({
+  assetFiles,
+  captionTracks,
+  content,
+}: RenderProject) => {
   const timeline: ReactNode[] = [];
   content.scenes.forEach((scene, index) => {
     timeline.push(
-      <TransitionSeries.Sequence
+      <Series.Sequence
         key={scene.id}
         durationInFrames={Math.round(scene.duration_seconds * FPS)}
         premountFor={FPS}
       >
         <EditorialScene
           assetFiles={assetFiles}
+          captionTrack={
+            scene.captions_artifact_id
+              ? (captionTracks[scene.captions_artifact_id] ?? null)
+              : null
+          }
           isFirst={index === 0}
           isLast={index === content.scenes.length - 1}
           scene={scene}
         />
-      </TransitionSeries.Sequence>,
+      </Series.Sequence>,
     );
-    if (index < content.scenes.length - 1) {
+    if ((scene.gap_after_seconds ?? 0) > 0) {
       timeline.push(
-        <TransitionSeries.Transition
-          key={`${scene.id}-transition`}
-          presentation={fade()}
-          timing={linearTiming({ durationInFrames: TRANSITION_FRAMES })}
-        />,
+        <Series.Sequence
+          key={`${scene.id}-gap`}
+          durationInFrames={Math.round((scene.gap_after_seconds ?? 0) * FPS)}
+        >
+          <AbsoluteFill style={{ background: color.paper }} />
+        </Series.Sequence>,
       );
     }
   });
   return (
     <AbsoluteFill style={{ background: color.paper }}>
-      <TransitionSeries>{timeline}</TransitionSeries>
+      <Series>{timeline}</Series>
     </AbsoluteFill>
   );
 };

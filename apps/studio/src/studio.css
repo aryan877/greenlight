@@ -102,7 +102,11 @@
 
 .monitor-frame {
   width: min(1080px, 100cqw, calc(100cqh * 16 / 9));
-  height: min(607.5px, 100cqh, calc(100cqw * 9 / 16));
+  aspect-ratio: 16 / 9;
+  max-height: 100cqh;
+  overflow: hidden;
+  line-height: 0;
+  background: #f8faf9;
 }
 
 .preview-hatch {
@@ -168,13 +172,4 @@
 
 .precision-range:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-action) 20%, transparent);
-}
-
-@keyframes agent-sweep {
-  from {
-    transform: translateX(-120%);
-  }
-  to {
-    transform: translateX(420%);
-  }
 }

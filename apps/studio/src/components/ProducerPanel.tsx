@@ -3,6 +3,7 @@ import type {
   ContentPackage,
   EditorSelection,
 } from "@greenlight/contracts";
+import { editorPatchInputSchema } from "@greenlight/contracts";
 import {
   ArrowUp,
   Bot,
@@ -31,6 +32,7 @@ import type {
 } from "../api/trueforge.js";
 import { MEDIA_ACCEPT, MEDIA_ARTIFACT_MIME } from "../editor/media-transfer.js";
 import { cx } from "./controls.js";
+import { EditPatchPreview } from "./EditPatchPreview.js";
 
 const eventIcon: Record<StudioAgentEvent["kind"], typeof Bot> = {
   reasoning: Sparkles,
@@ -138,6 +140,8 @@ const approvalCopy = (
       if ("captions_artifact_id" in operation) fields.add("captions");
       if ("transcript_artifact_id" in operation) fields.add("transcript");
       if ("duration_seconds" in operation) fields.add("timing");
+      if ("gap_after_seconds" in operation) fields.add("gap");
+      if ("source_clip" in operation) fields.add("source range");
       if ("playback_rate" in operation) fields.add("speed");
       if ("visual" in operation) fields.add("visual");
       if (operation.type === "split_scene") fields.add("structure");
@@ -189,15 +193,21 @@ const approvalCopy = (
 const ApprovalCard = ({
   pending,
   content,
+  artifacts,
   busy,
   onDecision,
 }: {
   pending: PendingToolApproval;
   content: ContentPackage | null;
+  artifacts: Artifact[];
   busy: boolean;
   onDecision: (status: "allow" | "deny", reason?: string) => void;
 }) => {
   const copy = approvalCopy(pending, content);
+  const editPatch =
+    pending.toolName === "apply_editor_patch"
+      ? editorPatchInputSchema.safeParse(pending.arguments)
+      : null;
   const [refining, setRefining] = useState(false);
   const [reason, setReason] = useState("");
   return (
@@ -213,6 +223,13 @@ const ApprovalCard = ({
         <p className="mt-1 text-[12px] leading-5 text-ink-tertiary">
           {copy.detail}
         </p>
+        {content && editPatch?.success ? (
+          <EditPatchPreview
+            artifacts={artifacts}
+            content={content}
+            patch={editPatch.data}
+          />
+        ) : null}
         {refining ? (
           <div className="mt-3">
             <textarea
@@ -335,8 +352,70 @@ const ReviewDocument = ({
   </div>
 );
 
+const ComposerExamples = ({
+  sceneCount,
+  onChoose,
+}: {
+  sceneCount: number;
+  onChoose: (instruction: string) => void;
+}) => {
+  const examples: Array<readonly [string, string]> =
+    sceneCount > 1
+      ? [
+          [
+            "Tighten",
+            "Tighten the pacing across these scenes without changing their meaning. Show the exact timing patch first.",
+          ],
+          [
+            "Merge",
+            "Merge the contiguous scenes that belong together into one editable scene bundle. Preview the combined cut first.",
+          ],
+          [
+            "Re-caption",
+            "Regenerate and correct captions for these scenes from their measured transcripts. Preview every changed cue.",
+          ],
+          [
+            "Dub",
+            "Create a localized voice and caption track for these scenes. Ask me for the language only if it is missing.",
+          ],
+        ]
+      : [
+          [
+            "Trim",
+            "Trim this scene to its strongest ending. Preserve unused source handles, show the resulting gap, and preview the exact new end first.",
+          ],
+          [
+            "Split at word",
+            "Split this scene at the spoken word I specify. Resolve its measured timestamp and show the cut in the video preview first.",
+          ],
+          [
+            "Speed",
+            "Speed up this scene without clipping speech or captions. Preview the new duration and playback rate first.",
+          ],
+          [
+            "Re-caption",
+            "Correct this scene's captions from its measured transcript and preview the changed cues first.",
+          ],
+        ];
+  return (
+    <div className="flex gap-1 overflow-x-auto border-b border-line-subtle px-3 py-2">
+      {examples.map(([label, instruction]) => (
+        <button
+          key={label}
+          type="button"
+          onClick={() => onChoose(instruction)}
+          className="h-6 shrink-0 border border-line px-2 text-[9px] font-medium text-ink-tertiary hover:border-line-strong hover:bg-hover hover:text-ink"
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+};
+
 export const ProducerPanel = ({
   content,
+  artifacts,
   selection,
   contextArtifacts,
   draftIntent,
@@ -358,6 +437,7 @@ export const ProducerPanel = ({
   importing,
 }: {
   content: ContentPackage | null;
+  artifacts: Artifact[];
   selection: EditorSelection | null;
   contextArtifacts: Artifact[];
   draftIntent: { id: string; text: string } | null;
@@ -499,6 +579,7 @@ export const ProducerPanel = ({
           key={pending.toolCallId}
           pending={pending}
           content={content}
+          artifacts={artifacts}
           busy={isApproving}
           onDecision={(status, reason) => onApproval(pending, status, reason)}
         />
@@ -622,6 +703,12 @@ export const ProducerPanel = ({
               </span>
             ) : null}
           </div>
+        ) : null}
+        {selection && !conversationPaused ? (
+          <ComposerExamples
+            sceneCount={selection.scene_ids.length}
+            onChoose={setInstruction}
+          />
         ) : null}
         <textarea
           value={instruction}

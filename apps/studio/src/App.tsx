@@ -76,6 +76,15 @@ export const App = () => {
             contentArtifact?.id,
       )
       .at(-1) ?? null;
+  const thumbnailArtifact =
+    project.data?.artifacts
+      .filter(
+        (artifact) =>
+          artifact.kind === "thumbnail" &&
+          artifact.provenance.content_package_artifact_id ===
+            videoArtifact?.provenance.content_package_artifact_id,
+      )
+      .at(-1) ?? null;
   const content = useContentPackage(contentArtifact?.id ?? null);
 
   useEffect(() => {
@@ -412,6 +421,7 @@ export const App = () => {
             scene={visibleScene}
             artifacts={project.data?.artifacts ?? []}
             video={videoArtifact}
+            poster={thumbnailArtifact}
             media={media}
             previewing={Boolean(previewContent)}
             previewUsesCanvas={Boolean(
@@ -509,6 +519,7 @@ export const App = () => {
                 >
                   <ProducerPanel
                     content={content.data ?? null}
+                    artifacts={project.data?.artifacts ?? []}
                     selection={selection}
                     contextArtifacts={(project.data?.artifacts ?? []).filter(
                       (artifact) => attachedArtifactIds.includes(artifact.id),

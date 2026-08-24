@@ -92,6 +92,11 @@ export class QualityInspector {
       (stream) => stream.codec_type === "audio",
     );
     const plannedDuration = productionDurationSeconds(content.scenes);
+    const scenesMissingTimedCaptions = content.scenes.filter(
+      (scene) =>
+        scene.narration_artifact_id &&
+        (!scene.captions_artifact_id || !scene.transcript_artifact_id),
+    );
     const checks: QualityCheck[] = [
       {
         name: "evidence_coverage",
@@ -121,6 +126,17 @@ export class QualityInspector {
           ? "Narration audio stream is present."
           : "No audio stream found.",
         measured: Boolean(hasAudio),
+      },
+      {
+        name: "timed_captions",
+        passed: scenesMissingTimedCaptions.length === 0,
+        detail:
+          scenesMissingTimedCaptions.length === 0
+            ? "Every generated narration has measured words and captions."
+            : `Missing timed captions: ${scenesMissingTimedCaptions
+                .map((scene) => scene.title)
+                .join(", ")}`,
+        measured: scenesMissingTimedCaptions.length,
       },
       {
         name: "youtube_metadata",

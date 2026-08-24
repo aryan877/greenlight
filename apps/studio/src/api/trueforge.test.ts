@@ -1,7 +1,11 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 beforeAll(() => {
   vi.stubGlobal("window", { location: { origin: "http://127.0.0.1:4173" } });
+});
+
+afterAll(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("Producer event projection", () => {
@@ -54,5 +58,55 @@ describe("Producer event projection", () => {
         options: ["2.2 seconds", "3.4 seconds"],
       },
     ]);
+  });
+
+  it("extracts only absolute, deduplicated TrueForge sandbox outputs", async () => {
+    const { parseSandboxArtifactReferences } = await import("./trueforge.js");
+
+    expect(
+      parseSandboxArtifactReferences(
+        [
+          "The cut is ready.",
+          "```sandbox_artifacts",
+          "[Tight cut](/workspace/tight-cut.mp4)",
+          "[duplicate](/workspace/tight-cut.mp4)",
+          "[unsafe](relative.mp4)",
+          "```",
+        ].join("\n"),
+      ),
+    ).toEqual([{ name: "tight-cut.mp4", path: "/workspace/tight-cut.mp4" }]);
+  });
+
+  it("hides routine context reads from the creator feed", async () => {
+    const { describeEvent } = await import("./trueforge.js");
+    const read = (name: string) => ({
+      id: `event_${name}`,
+      type: "model.message",
+      content: "",
+      tool_calls: [
+        {
+          id: `call_${name}`,
+          function: { name, arguments: "{}" },
+        },
+      ],
+    });
+
+    expect(describeEvent(read("get_project"))).toEqual([]);
+    expect(describeEvent(read("get_artifact"))).toEqual([]);
+  });
+
+  it("ignores malformed tool references instead of breaking the feed", async () => {
+    const { pendingQuestionsFromEvent } = await import("./trueforge.js");
+
+    expect(
+      pendingQuestionsFromEvent(
+        {
+          id: "bad_question_event",
+          type: "tool.response_required",
+          tool_calls: { id: "not-an-array" },
+        },
+        new Map(),
+      ),
+    ).toEqual([]);
   });
 });

@@ -1,6 +1,8 @@
 import {
   productionDurationSeconds,
+  scenePresentationDurationSeconds,
   sceneStartSeconds,
+  VIDEO_FPS,
   type Artifact,
   type ContentPackage,
   type EditorSelection,
@@ -14,12 +16,54 @@ export const totalDuration = (content: ContentPackage) =>
   productionDurationSeconds(content.scenes);
 
 export const sceneTimelineDuration = (scenes: Scene[], index: number) => {
-  const start = sceneOffset(scenes, index);
-  const end =
-    index === scenes.length - 1
-      ? productionDurationSeconds(scenes)
-      : sceneOffset(scenes, index + 1);
-  return Math.max(0, end - start);
+  return scenePresentationDurationSeconds(scenes, index);
+};
+
+export const snapToFrame = (seconds: number) =>
+  Math.round(seconds * VIDEO_FPS) / VIDEO_FPS;
+
+export const snapTimelineSeconds = (
+  seconds: number,
+  pixelsPerSecond: number,
+  candidates: number[] = [],
+) => {
+  const frameTime = snapToFrame(seconds);
+  const thresholdSeconds = 7 / Math.max(pixelsPerSecond, 1);
+  const meaningful = [Math.round(frameTime), ...candidates]
+    .map(snapToFrame)
+    .filter((candidate) => Math.abs(candidate - frameTime) <= thresholdSeconds)
+    .sort(
+      (left, right) => Math.abs(left - frameTime) - Math.abs(right - frameTime),
+    );
+  return meaningful[0] ?? frameTime;
+};
+
+const TIMELINE_TICK_FRAMES = [
+  1, 2, 5, 10, 15, 30, 60, 90, 150, 300, 450, 900, 1800,
+] as const;
+
+export const timelineTicks = (duration: number, width: number) => {
+  const safeDuration = Math.max(duration, 1 / VIDEO_FPS);
+  const pixelsPerSecond = Math.max(width, 1) / safeDuration;
+  const targetFrames = (72 / pixelsPerSecond) * VIDEO_FPS;
+  const stepFrames =
+    TIMELINE_TICK_FRAMES.find((frames) => frames >= targetFrames) ??
+    TIMELINE_TICK_FRAMES.at(-1)!;
+  const stepSeconds = stepFrames / VIDEO_FPS;
+  const ticks = Array.from(
+    { length: Math.floor(safeDuration / stepSeconds) + 1 },
+    (_, index) => Math.min(safeDuration, index * stepSeconds),
+  );
+  if (ticks.at(-1)! < safeDuration - 1 / VIDEO_FPS) ticks.push(safeDuration);
+  return { stepSeconds, ticks };
+};
+
+export const formatRulerTime = (seconds: number, stepSeconds: number) => {
+  const safe = Math.max(0, seconds);
+  const minutes = Math.floor(safe / 60);
+  const rest = safe - minutes * 60;
+  const decimals = stepSeconds < 0.1 ? 3 : stepSeconds < 1 ? 2 : 1;
+  return `${minutes}:${rest.toFixed(decimals).padStart(3 + decimals, "0")}`;
 };
 
 export const formatTime = (seconds: number) => {

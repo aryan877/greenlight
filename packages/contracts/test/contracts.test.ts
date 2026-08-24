@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  captionTrackSchema,
   contentPackageSchema,
   editorPatchInputSchema,
   evidenceLedgerSchema,
@@ -10,14 +11,15 @@ import {
 } from "../src/index.js";
 
 describe("Greenlight contracts", () => {
-  it("uses one transition-aware clock for scene starts and final duration", () => {
+  it("uses one edge-to-edge clock and records only explicit gaps", () => {
     const scenes = [
       { duration_seconds: 8 },
-      { duration_seconds: 7 },
+      { duration_seconds: 7, gap_after_seconds: 2 },
       { duration_seconds: 6 },
     ];
-    expect(sceneStartSeconds(scenes, 1)).toBeCloseTo(7.6667, 3);
-    expect(productionDurationSeconds(scenes)).toBeCloseTo(20.3333, 3);
+    expect(sceneStartSeconds(scenes, 1)).toBe(8);
+    expect(sceneStartSeconds(scenes, 2)).toBe(17);
+    expect(productionDurationSeconds(scenes)).toBe(23);
   });
 
   it("applies safe brief defaults", () => {
@@ -96,6 +98,26 @@ describe("Greenlight contracts", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("rejects edit timing between production frames", () => {
+    const parsed = editorPatchInputSchema.safeParse({
+      selection: {
+        project_id: "project_001",
+        base_content_package_artifact_id: "artifact_001",
+        scene_ids: ["scene_001"],
+      },
+      instruction_summary: "Trim on the exact frame grid",
+      operations: [
+        {
+          type: "update_scene",
+          scene_id: "scene_001",
+          duration_seconds: 1.01,
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it("does not impose an arbitrary scene-count cap", () => {
     const parsed = contentPackageSchema.safeParse({
       version: 1,
@@ -119,5 +141,33 @@ describe("Greenlight contracts", () => {
     });
 
     expect(parsed.success).toBe(true);
+  });
+
+  it("keeps captions word-timed and ordered", () => {
+    const parsed = captionTrackSchema.parse({
+      version: 1,
+      project_id: "project_001",
+      scene_id: "scene_001",
+      locale: "en",
+      transcript_artifact_id: "artifact_transcript_001",
+      cues: [
+        {
+          text: "Hello",
+          startMs: 0,
+          endMs: 320,
+          timestampMs: null,
+          confidence: null,
+        },
+        {
+          text: " world",
+          startMs: 340,
+          endMs: 720,
+          timestampMs: null,
+          confidence: null,
+        },
+      ],
+    });
+
+    expect(parsed.cues.map((cue) => cue.text).join("")).toBe("Hello world");
   });
 });

@@ -74,6 +74,29 @@ export const greenlightApi = {
     );
     return response.artifact;
   },
+  uploadSandboxAsset: async (
+    projectId: string,
+    file: File,
+    origin: { path: string; sessionId: string; turnId: string },
+  ) => {
+    const response = await request<{ artifact: Artifact }>(
+      `/projects/${encodeURIComponent(projectId)}/assets`,
+      {
+        method: "POST",
+        body: file,
+        headers: {
+          "content-type": "application/octet-stream",
+          "x-greenlight-filename": encodeURIComponent(file.name),
+          "x-greenlight-mime": file.type || "application/octet-stream",
+          "x-greenlight-source": "trueforge_sandbox",
+          "x-greenlight-session-id": origin.sessionId,
+          "x-greenlight-turn-id": origin.turnId,
+          "x-greenlight-sandbox-path": encodeURIComponent(origin.path),
+        },
+      },
+    );
+    return response.artifact;
+  },
   artifactUrl: (artifactId: string) =>
     `/greenlight-api/artifacts/${encodeURIComponent(artifactId)}`,
 };

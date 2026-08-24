@@ -1,4 +1,4 @@
-import { contentPackageSchema } from "@greenlight/contracts";
+import { captionCueSchema, contentPackageSchema } from "@greenlight/contracts";
 import { Composition, Still } from "remotion";
 import { z } from "zod";
 
@@ -14,6 +14,7 @@ import { fixturePackage } from "./fixture";
 export const renderProjectSchema = z.object({
   content: contentPackageSchema,
   assetFiles: z.record(z.string(), z.string()),
+  captionTracks: z.record(z.string(), z.array(captionCueSchema)),
 });
 
 export type RenderProject = z.infer<typeof renderProjectSchema>;
@@ -21,6 +22,7 @@ export type RenderProject = z.infer<typeof renderProjectSchema>;
 const defaultProps: RenderProject = {
   content: fixturePackage,
   assetFiles: {},
+  captionTracks: {},
 };
 
 export const RemotionRoot = () => (

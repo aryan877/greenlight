@@ -1,6 +1,6 @@
 # Greenlight product requirements
 
-Status: implementation · 24 August 2026
+Status: implementation · 25 August 2026
 
 ## Product
 
@@ -54,7 +54,9 @@ The visual language is a distinct light editorial system: Archivo plus IBM Plex 
 - Natural language may change one field, multiple fields, several scenes, or the full cut.
 - Drag reorder and end trim send exact instructions with typed selection to TrueForge.
 - Split, remove, speed, localized track, visual, voice, caption, transcript, timing, and order changes are typed patch operations.
-- A scene cannot be extended silently; additive work requires an explicit structural edit.
+- Scene and gap timing is validated against the 30-fps production grid.
+- Shortening preserves the removed frames as an explicit gap unless a separate structural edit resolves them.
+- A scene cannot be extended beyond recorded unused source frames or beyond its existing gap.
 - Local transient drag state is not production state.
 
 ### Preview and approval
@@ -63,11 +65,11 @@ When the Producer calls `apply_editor_patch`, TrueForge pauses the tool. Studio 
 
 - changed scenes are hatched;
 - changed visuals/text render on the canvas;
-- timing preview constrains playback;
-- speed preview changes playback rate;
+- the compact approval card embeds the affected real video range, exact cut/trim marker, before/after structure, caption, and timing delta;
+- timing preview constrains playback and speed preview changes the actual preview rate;
 - approval copy names the scenes and human fields, not protocol/tool jargon;
 - Apply resumes the exact TrueForge tool call;
-- Deny removes Preview and leaves the immutable base revision untouched.
+- Cancel removes Preview and leaves the immutable base revision untouched; Refine returns a concise reason to the Producer.
 
 Render, unlisted upload, public publish, and schedule use the same native approval mechanism with action-specific human copy.
 
@@ -111,6 +113,7 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 - The root Producer is the only agent that asks the user questions.
 - Subagents are bounded, cannot spawn nested agents, and return work to the root.
 - Greenlight exposes small typed domain tools, never a one-shot `make_video` function.
+- Flexible edit math and FFmpeg work happens in the TrueForge sandbox. Emitted files return through the SDK download boundary, Greenlight's media validator, and immutable artifact IDs; the model never receives a host path.
 - Studio uses the official TrueForge TypeScript SDK and `user.tool_approval` turns.
 - Tool activity is translated into short human progress; raw event names, IDs, arguments, and chain-of-thought are not dumped into the product UI.
 
@@ -132,6 +135,8 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 - Timeline marquee selection preserves complete scene bundles and a real canvas gutter.
 - An imported media file appears with its real thumbnail/type, becomes removable Producer context, previews on the selected scene, and resolves to the same immutable file during Remotion export.
 - A scoped title/visual/timing/speed patch visibly previews before execution.
+- A trim preserves removed frames as a visible gap, a split preserves duration, and source-backed extension cannot exceed recorded handles.
+- A sandbox-derived media output is imported once with session/turn provenance and the Producer receives only its immutable artifact ID.
 - Deny leaves the base revision byte-for-byte unchanged; Apply writes a patch artifact and one new content package.
 - Drag reorder and manual end trim travel through TrueForge, not a parallel local mutation path.
 - A phrase can be resolved to real timed words; a missing phrase fails instead of guessing.

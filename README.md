@@ -14,10 +14,13 @@ The editor is the product surface. Selecting one or many scene bundles gives the
 - A creator-media bin with measured size, duration, dimensions and codecs; full image/audio/video viewers; signature-checked import; click/drag attachment; and direct file drop into Producer
 - Agent-driven Studio focus through `focus_editor_selection`
 - One shared Zod patch contract and reducer for Studio preview and MCP persistence
+- Frame-aligned, edge-to-edge visual/voice/caption lanes with explicit gaps, source handles, adaptive ruler ticks, and a continuous zoom range
+- One compact before/after media preview for trims, splits, speed changes, ranges, and other typed patches, with Apply, Refine, and Cancel
 - OpenMoji search and attachment with licensed SVG provenance
 - Optional bounded Codex-subscription image generation; GPT Image API routes stay disabled
 - Gemini voice through OpenRouter with provider/model provenance
-- Core timed transcription: OpenRouter `gpt-4o-mini-transcribe` reference text plus local `whisper.cpp` word boundaries, exact phrase lookup, corrections, and captions derived from measured timing
+- Core timed transcription: OpenRouter `gpt-4o-mini-transcribe` reference text plus local `whisper.cpp` word boundaries, exact phrase lookup, immutable corrections, and typed active-word captions derived from measured timing
+- Native TrueForge sandbox-output import: derived files are downloaded by exact session and turn, signature-checked, content-addressed, deduplicated, and handed back to the Producer only by artifact ID
 - Deterministic Remotion render and thumbnail, best-effort cross-platform hardware encoding with safe software fallback, FFprobe-backed quality checks, and playback-rate support
 - Local YouTube OAuth wrapper, unlisted-first staging, immutable release snapshots, and approval-gated publish/schedule tools
 
@@ -88,6 +91,8 @@ The suite covers contracts, scoped patch safety, storage, voice conversion, tran
 - Creator media is copied into content-addressed project storage; the original stays untouched and no external symlink enters the workspace.
 - Visual, narration, caption, transcript, timing, and source context move as one scene bundle.
 - Local edits create immutable revisions; the base cut is never overwritten.
+- Shortening keeps removed time as an explicit gap unless a separate structural edit intentionally resolves it; extension requires recorded unused source frames.
+- Sandbox-derived files cross the TrueForge download boundary and Greenlight media validator; no host path enters model context.
 - Generated narration is never given estimated word timing.
 - YouTube uploads are unlisted first.
 - TrueForge authenticates to the MCP service with a private header; the Studio never receives that credential.

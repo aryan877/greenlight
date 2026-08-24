@@ -143,4 +143,108 @@ describe("applyEditorPatch", () => {
       revised.scenes.reduce((sum, item) => sum + item.duration_seconds, 0),
     ).toBe(30);
   });
+
+  it("records a real gap when a scene is shortened", () => {
+    const revised = applyEditorPatch(
+      base,
+      patch([
+        {
+          type: "update_scene",
+          scene_id: "scene_002",
+          duration_seconds: 8,
+          gap_after_seconds: 2,
+        },
+      ]),
+    );
+
+    expect(revised.scenes[1]!.duration_seconds).toBe(8);
+    expect(revised.scenes[1]!.gap_after_seconds).toBe(2);
+    expect(sceneStartSeconds(revised.scenes, 2)).toBe(20);
+  });
+
+  it("preserves removed time as a gap when a trim does not request a ripple", () => {
+    const revised = applyEditorPatch(
+      base,
+      patch([
+        {
+          type: "update_scene",
+          scene_id: "scene_002",
+          duration_seconds: 8,
+        },
+      ]),
+    );
+
+    expect(revised.scenes[1]!.gap_after_seconds).toBe(2);
+    expect(sceneStartSeconds(revised.scenes, 2)).toBe(20);
+  });
+
+  it("rejects a split that silently removes source time", () => {
+    expect(() =>
+      applyEditorPatch(
+        base,
+        patch([
+          {
+            type: "split_scene",
+            scene_id: "scene_002",
+            first: {
+              ...scene("scene_002", "Second / setup"),
+              duration_seconds: 4,
+            },
+            second: {
+              ...scene("scene_004", "Second / reveal"),
+              duration_seconds: 5,
+            },
+          },
+        ]),
+      ),
+    ).toThrow("split_scene_must_preserve_duration");
+  });
+
+  it("extends only into a gap when measured source frames exist", () => {
+    const sourced = structuredClone(base);
+    sourced.scenes[1] = {
+      ...sourced.scenes[1]!,
+      gap_after_seconds: 2,
+      visual: {
+        ...sourced.scenes[1]!.visual,
+        artifact_ids: ["artifact_source_video"],
+      },
+      source_clip: {
+        artifact_id: "artifact_source_video",
+        in_seconds: 0,
+        out_seconds: 10,
+        source_duration_seconds: 20,
+      },
+    };
+    const request = patch([
+      {
+        type: "update_scene",
+        scene_id: "scene_002",
+        duration_seconds: 12,
+        gap_after_seconds: 0,
+        source_clip: {
+          artifact_id: "artifact_source_video",
+          in_seconds: 0,
+          out_seconds: 12,
+          source_duration_seconds: 20,
+        },
+      },
+    ]);
+    const revised = applyEditorPatch(sourced, request);
+
+    expect(revised.scenes[1]!.duration_seconds).toBe(12);
+    expect(revised.scenes[1]!.gap_after_seconds).toBe(0);
+    expect(() =>
+      applyEditorPatch(
+        base,
+        patch([
+          {
+            type: "update_scene",
+            scene_id: "scene_002",
+            duration_seconds: 12,
+          },
+        ]),
+      ),
+    ).toThrow("scene_extension_has_no_source");
+  });
 });

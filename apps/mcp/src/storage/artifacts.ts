@@ -74,6 +74,7 @@ export class ArtifactStore {
     kind:
       | "evidence_ledger"
       | "content_package"
+      | "caption"
       | "edit_patch"
       | "quality_report"
       | "transcript";

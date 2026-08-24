@@ -3,7 +3,11 @@ import { dirname, extname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { contentPackageSchema } from "@greenlight/contracts";
+import {
+  captionCueSchema,
+  captionTrackSchema,
+  contentPackageSchema,
+} from "@greenlight/contracts";
 import { bundle } from "@remotion/bundler";
 import {
   renderMedia,
@@ -33,6 +37,25 @@ const sourceAssets = argument("--assets")
       string
     >)
   : {};
+const captionArtifactIds = new Set(
+  content.scenes.flatMap((scene) =>
+    scene.captions_artifact_id ? [scene.captions_artifact_id] : [],
+  ),
+);
+const captionTracks = Object.fromEntries(
+  await Promise.all(
+    [...captionArtifactIds].map(async (id) => {
+      const source = sourceAssets[id];
+      if (!source) throw new Error(`caption_artifact_missing:${id}`);
+      const value = JSON.parse(await readFile(source, "utf8"));
+      const track = captionTrackSchema.safeParse(value);
+      return [
+        id,
+        track.success ? track.data.cues : captionCueSchema.array().parse(value),
+      ] as const;
+    }),
+  ),
+);
 const outputPath = resolve(argument("--output") ?? "out/greenlight.mp4");
 const thumbnailPath = resolve(argument("--thumbnail") ?? "out/thumbnail.png");
 const publicDir = await mkdtemp(join(tmpdir(), "greenlight-public-"));
@@ -44,6 +67,7 @@ try {
   const assetFiles: Record<string, string> = {};
   await Promise.all(
     Object.entries(sourceAssets).map(async ([id, source]) => {
+      if (captionArtifactIds.has(id)) return;
       const relativePath = `assets/${id}${extname(source)}`;
       const target = join(publicDir, relativePath);
       await mkdir(dirname(target), { recursive: true });
@@ -51,7 +75,7 @@ try {
       assetFiles[id] = relativePath;
     }),
   );
-  const inputProps: RenderProject = { content, assetFiles };
+  const inputProps: RenderProject = { content, assetFiles, captionTracks };
   const serveUrl = await bundle({
     entryPoint: resolve(here, "index.ts"),
     publicDir,

@@ -423,22 +423,19 @@ export const MediaBrowser = ({
                       </span>
                     </span>
                   </button>
-                  <div className="flex items-center border-t border-line-subtle px-2.5 py-1.5">
-                    <span className="min-w-0 flex-1 truncate font-mono text-[8px] text-ink-caption">
-                      {artifact.relative_path}
-                    </span>
+                  <div className="flex justify-end border-t border-line-subtle px-2.5 py-1.5">
                     <button
                       type="button"
                       onClick={() => onSelectArtifact(artifact.id)}
                       className={cx(
-                        "ml-2 flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10px] font-medium",
+                        "flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10px] font-medium",
                         attached
                           ? "bg-action-soft text-action"
                           : "text-ink-tertiary hover:bg-hover hover:text-ink",
                       )}
                     >
                       {attached ? <Check size={11} /> : <Plus size={11} />}
-                      {attached ? "Added" : "Producer"}
+                      {attached ? "Added to Producer" : "Add to Producer"}
                     </button>
                   </div>
                 </article>

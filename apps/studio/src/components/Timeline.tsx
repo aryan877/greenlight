@@ -14,13 +14,22 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import {
+  type CSSProperties,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
+  formatRulerTime,
   formatTime,
   sceneOffset,
   sceneTimelineDuration,
+  snapTimelineSeconds,
   totalDuration,
+  timelineTicks,
 } from "../editor/model.js";
 import { cx, IconButton } from "./controls.js";
 
@@ -31,6 +40,10 @@ type Marquee = {
   originSceneId: string | null;
   additive: boolean;
 };
+
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 8;
+const ZOOM_STEP = 0.1;
 
 export const Timeline = ({
   content,
@@ -62,6 +75,7 @@ export const Timeline = ({
   const duration = totalDuration(content);
   const playhead = (Math.min(currentTime, duration) / duration) * 100;
   const [zoom, setZoom] = useState(1);
+  const [trackWidth, setTrackWidth] = useState(1000);
   const [draggedSceneId, setDraggedSceneId] = useState<string | null>(null);
   const [dropSceneId, setDropSceneId] = useState<string | null>(null);
   const [trim, setTrim] = useState<{
@@ -75,8 +89,19 @@ export const Timeline = ({
     marqueeRef.current = next;
     setMarquee(next);
   };
-  const updateZoom = (delta: number) =>
-    setZoom((current) => Math.min(4, Math.max(1, current + delta)));
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setTrackWidth(entry.contentRect.width);
+    });
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, []);
+  const ruler = useMemo(
+    () => timelineTicks(duration, trackWidth),
+    [duration, trackWidth],
+  );
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-surface">
@@ -103,24 +128,27 @@ export const Timeline = ({
             ? "Full cut"
             : `${selectedSceneIds.length} selected`}
         </span>
-        <div className="ml-auto flex items-center gap-0.5">
-          <IconButton
-            Icon={ZoomOut}
-            label="Zoom timeline out"
-            size="sm"
-            disabled={zoom === 1}
-            onClick={() => updateZoom(-0.5)}
+        <div className="ml-auto flex items-center gap-1.5">
+          <ZoomOut size={12} className="shrink-0 text-ink-caption" />
+          <input
+            aria-label="Timeline zoom"
+            type="range"
+            min={MIN_ZOOM}
+            max={MAX_ZOOM}
+            step={ZOOM_STEP}
+            value={zoom}
+            onChange={(event) => setZoom(Number(event.currentTarget.value))}
+            style={
+              {
+                "--range-progress": `${((zoom - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)) * 100}%`,
+              } as CSSProperties
+            }
+            className="precision-range w-24"
           />
-          <span className="w-9 text-center font-mono text-[8px] text-ink-caption">
+          <ZoomIn size={12} className="shrink-0 text-ink-caption" />
+          <span className="w-10 text-right font-mono text-[8px] text-ink-caption">
             {Math.round(zoom * 100)}%
           </span>
-          <IconButton
-            Icon={ZoomIn}
-            label="Zoom timeline in"
-            size="sm"
-            disabled={zoom === 4}
-            onClick={() => updateZoom(0.5)}
-          />
           <span className="mx-1 h-4 w-px bg-line-subtle" />
           <IconButton
             Icon={Split}
@@ -147,7 +175,7 @@ export const Timeline = ({
 
       <div className="scroll-stable min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-surface-sunken">
         <div
-          className="relative h-full min-w-full"
+          className="relative h-full"
           style={{ width: `calc(${zoom * 100}% + 24px)` }}
         >
           <button
@@ -160,20 +188,22 @@ export const Timeline = ({
               onSeek(((event.clientX - bounds.left) / bounds.width) * duration);
             }}
           >
-            {Array.from({ length: 7 }, (_, index) => (
+            {ruler.ticks.map((seconds, index) => (
               <span
-                key={index}
+                key={`${seconds}-${index}`}
                 className={cx(
-                  "pointer-events-none absolute top-2 font-mono text-[8px] text-ink-caption",
+                  "pointer-events-none absolute inset-y-0 border-l border-line-subtle pt-2 font-mono text-[8px] text-ink-caption",
                   index === 0
                     ? "translate-x-0"
-                    : index === 6
+                    : index === ruler.ticks.length - 1
                       ? "-translate-x-full"
-                      : "-translate-x-1/2",
+                      : "translate-x-0",
                 )}
-                style={{ left: `${(index / 6) * 100}%` }}
+                style={{ left: `${(seconds / duration) * 100}%` }}
               >
-                {formatTime((index / 6) * duration)}
+                <span className="ml-1 whitespace-nowrap">
+                  {formatRulerTime(seconds, ruler.stepSeconds)}
+                </span>
               </span>
             ))}
           </button>
@@ -272,15 +302,19 @@ export const Timeline = ({
                 trim?.sceneId === scene.id
                   ? trim.duration
                   : scene.duration_seconds;
-              const displayedTimelineDuration = Math.max(
-                0,
-                sceneTimelineDuration(content.scenes, index) +
-                  displayedDuration -
-                  scene.duration_seconds,
-              );
-              const width = (displayedTimelineDuration / duration) * 100;
+              const width = (displayedDuration / duration) * 100;
               const selected = selectedSceneIds.includes(scene.id);
               const proposed = previewSceneIds.includes(scene.id);
+              const currentGap = scene.gap_after_seconds ?? 0;
+              const sourceMaximum = scene.source_clip
+                ? (scene.source_clip.source_duration_seconds -
+                    scene.source_clip.in_seconds) /
+                  scene.playback_rate
+                : scene.duration_seconds;
+              const maximumDuration = Math.max(
+                scene.duration_seconds,
+                Math.min(sourceMaximum, scene.duration_seconds + currentGap),
+              );
               return (
                 <div
                   key={scene.id}
@@ -348,15 +382,16 @@ export const Timeline = ({
                       "before:absolute before:inset-y-0 before:left-0 before:z-20 before:w-0.5 before:bg-action",
                   )}
                   style={{
-                    left: `calc(${left}% + 3px)`,
-                    width: `calc(${width}% - 6px)`,
+                    left: `${left}%`,
+                    width: `${width}%`,
                   }}
                 >
                   <span
                     className={cx(
-                      "flex min-w-0 items-center gap-1.5 overflow-hidden rounded-[4px] border bg-track-video px-2 text-[9px] text-ink transition-colors duration-100",
+                      "flex min-w-0 items-center gap-1.5 overflow-hidden border-y border-r bg-track-video px-2 text-[9px] text-ink transition-colors duration-100",
+                      index === 0 && "border-l",
                       selected
-                        ? "border-action"
+                        ? "border-line ring-1 ring-inset ring-action"
                         : "border-line group-hover:border-line-strong",
                       proposed && "preview-hatch border-warning/50",
                     )}
@@ -379,12 +414,13 @@ export const Timeline = ({
                   </span>
                   <span
                     className={cx(
-                      "flex min-w-0 items-center gap-1.5 overflow-hidden rounded-[4px] border px-2 text-[8px] text-ink-secondary transition-colors duration-100",
+                      "flex min-w-0 items-center gap-1.5 overflow-hidden border-y border-r px-2 text-[8px] text-ink-secondary transition-colors duration-100",
+                      index === 0 && "border-l",
                       scene.narration_artifact_id
                         ? "bg-track-voice"
                         : "bg-surface-sunken",
                       selected
-                        ? "border-action"
+                        ? "border-line ring-1 ring-inset ring-action"
                         : "border-line group-hover:border-line-strong",
                       proposed && "preview-hatch border-warning/50",
                     )}
@@ -397,12 +433,13 @@ export const Timeline = ({
                   </span>
                   <span
                     className={cx(
-                      "flex min-w-0 items-center gap-1.5 overflow-hidden rounded-[4px] border px-2 text-[8px] text-ink-secondary transition-colors duration-100",
+                      "flex min-w-0 items-center gap-1.5 overflow-hidden border-y border-r px-2 text-[8px] text-ink-secondary transition-colors duration-100",
+                      index === 0 && "border-l",
                       scene.captions_artifact_id
                         ? "bg-track-caption"
                         : "bg-surface-sunken",
                       selected
-                        ? "border-action"
+                        ? "border-line ring-1 ring-inset ring-action"
                         : "border-line group-hover:border-line-strong",
                       proposed && "preview-hatch border-warning/50",
                     )}
@@ -429,34 +466,59 @@ export const Timeline = ({
                           trackRef.current?.getBoundingClientRect().width;
                         if (!trackWidth) return;
                         const move = (pointer: PointerEvent) => {
-                          const seconds =
+                          const rawSeconds =
                             initial +
                             ((pointer.clientX - startX) / trackWidth) *
                               duration;
+                          const seconds = snapTimelineSeconds(
+                            rawSeconds,
+                            trackWidth / duration,
+                            [
+                              MIN_SCENE_DURATION_SECONDS,
+                              initial,
+                              maximumDuration,
+                            ],
+                          );
                           setTrim({
                             sceneId: scene.id,
                             duration: Math.max(
                               MIN_SCENE_DURATION_SECONDS,
-                              Math.min(initial, Math.round(seconds * 10) / 10),
+                              Math.min(maximumDuration, seconds),
                             ),
                           });
                         };
                         const up = (pointer: PointerEvent) => {
-                          const seconds =
+                          const rawSeconds =
                             initial +
                             ((pointer.clientX - startX) / trackWidth) *
                               duration;
+                          const seconds = snapTimelineSeconds(
+                            rawSeconds,
+                            trackWidth / duration,
+                            [
+                              MIN_SCENE_DURATION_SECONDS,
+                              initial,
+                              maximumDuration,
+                            ],
+                          );
                           const next = Math.max(
                             MIN_SCENE_DURATION_SECONDS,
-                            Math.min(initial, Math.round(seconds * 10) / 10),
+                            Math.min(maximumDuration, seconds),
                           );
                           setTrim(null);
                           window.removeEventListener("pointermove", move);
                           window.removeEventListener("pointerup", up);
                           if (next === initial) return;
+                          const nextGap = Math.max(
+                            0,
+                            currentGap + initial - next,
+                          );
+                          const sourceInstruction = scene.source_clip
+                            ? ` Move the source out point to ${(scene.source_clip.in_seconds + next * scene.playback_rate).toFixed(3)} seconds; its measured source ends at ${scene.source_clip.source_duration_seconds.toFixed(3)} seconds.`
+                            : " This scene has no recorded unused source handles, so do not extend it beyond its current duration.";
                           onEditorCommand(
                             [scene.id],
-                            `Trim the end of scene ${scene.id} from ${initial.toFixed(1)} seconds to exactly ${next.toFixed(1)} seconds. Keep its start, media, sources, and wording unchanged. Show the preview before applying it.`,
+                            `Set scene ${scene.id} to exactly ${next.toFixed(3)} seconds and set its gap after to exactly ${nextGap.toFixed(3)} seconds. Keep its start, media, captions, sources, and wording unchanged.${sourceInstruction} Show the frame-accurate preview before applying it.`,
                           );
                         };
                         window.addEventListener("pointermove", move);
@@ -466,6 +528,34 @@ export const Timeline = ({
                       }}
                     />
                   ) : null}
+                </div>
+              );
+            })}
+            {content.scenes.map((scene, index) => {
+              const displayedDuration =
+                trim?.sceneId === scene.id
+                  ? trim.duration
+                  : scene.duration_seconds;
+              const gap =
+                (scene.gap_after_seconds ?? 0) +
+                (trim?.sceneId === scene.id
+                  ? scene.duration_seconds - trim.duration
+                  : 0);
+              if (gap <= 0) return null;
+              const left =
+                ((sceneOffset(content.scenes, index) + displayedDuration) /
+                  duration) *
+                100;
+              return (
+                <div
+                  key={`${scene.id}-gap`}
+                  className="preview-hatch pointer-events-none absolute bottom-1 top-3 z-10 grid place-items-center border-x border-warning/40 text-[8px] font-medium text-warning"
+                  style={{
+                    left: `${left}%`,
+                    width: `${(gap / duration) * 100}%`,
+                  }}
+                >
+                  <span className="truncate px-1">{formatTime(gap)} gap</span>
                 </div>
               );
             })}

@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   editorFocusInputSchema,
+  type Artifact,
   type EditorFocusInput,
   type EditorSelection,
 } from "@greenlight/contracts";
@@ -11,6 +12,7 @@ import {
 } from "@truefoundry/trueforge-sdk";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { greenlightApi } from "./greenlight.js";
 import { greenlightKeys } from "./queries.js";
 
 export type StudioAgentEvent = {
@@ -63,9 +65,25 @@ type WireEvent = Record<string, unknown> & {
   type?: string;
 };
 
+export type SandboxArtifactReference = {
+  name: string;
+  path: string;
+};
+
+type ImportedSandboxOutput = {
+  artifact: Artifact;
+  reference: SandboxArtifactReference;
+};
+
 type ToolCall = {
   id: string;
   function: { arguments: string; name: string };
+};
+
+type ToolCallReference = {
+  id: string;
+  sourceEventId?: string;
+  source_event_id?: string;
 };
 
 const trueforge = new TrueForge({
@@ -85,9 +103,71 @@ const textContent = (content: unknown): string => {
     .join("\n");
 };
 
+export const parseSandboxArtifactReferences = (
+  content: unknown,
+): SandboxArtifactReference[] => {
+  const text = textContent(content);
+  const references: SandboxArtifactReference[] = [];
+  const seen = new Set<string>();
+  for (const block of text.matchAll(
+    /```sandbox_artifacts\s*\n([\s\S]*?)```/g,
+  )) {
+    const body = block[1] ?? "";
+    for (const link of body.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)) {
+      const label = link[1]?.trim() ?? "";
+      const path = link[2]?.trim() ?? "";
+      if (!label || !path.startsWith("/") || seen.has(path)) continue;
+      const pathName = path.split("/").at(-1) ?? "";
+      const name = /\.[a-z0-9]{2,8}$/i.test(label) ? label : pathName || label;
+      seen.add(path);
+      references.push({ name, path });
+    }
+  }
+  return references;
+};
+
+const artifactHandoffMessage = (
+  projectId: string,
+  outputs: ImportedSandboxOutput[],
+) =>
+  `PROJECT_ID: ${projectId}\n\nGREENLIGHT_ARTIFACT_HANDOFF (internal):\n${JSON.stringify(
+    outputs.map(({ artifact, reference }) => ({
+      artifact_id: artifact.id,
+      kind: artifact.kind,
+      label: reference.name,
+    })),
+  )}\n\nUse these immutable artifact IDs to finish the pending edit. Do not emit the same sandbox files again.`;
+
 const toolCallsOf = (event: WireEvent): ToolCall[] => {
   const value = event.toolCalls ?? event.tool_calls;
   return Array.isArray(value) ? (value as ToolCall[]) : [];
+};
+
+const toolCallReferencesOf = (event: WireEvent): ToolCallReference[] => {
+  const value = event.toolCalls ?? event.tool_calls;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      !("id" in candidate) ||
+      typeof candidate.id !== "string"
+    ) {
+      return [];
+    }
+    const reference = candidate as Record<string, unknown>;
+    return [
+      {
+        id: candidate.id,
+        ...(typeof reference.sourceEventId === "string"
+          ? { sourceEventId: reference.sourceEventId }
+          : {}),
+        ...(typeof reference.source_event_id === "string"
+          ? { source_event_id: reference.source_event_id }
+          : {}),
+      },
+    ];
+  });
 };
 
 const parseArguments = (toolCall: ToolCall): Record<string, unknown> => {
@@ -103,14 +183,7 @@ export const pendingQuestionsFromEvent = (
   sources: Map<string, WireEvent>,
 ): PendingQuestion[] => {
   if (event.type !== "tool.response_required") return [];
-  const refs = (event.toolCalls ?? event.tool_calls) as
-    | Array<{
-        id: string;
-        sourceEventId?: string;
-        source_event_id?: string;
-      }>
-    | undefined;
-  return (refs ?? []).flatMap((reference) => {
+  return toolCallReferencesOf(event).flatMap((reference) => {
     const sourceId = reference.sourceEventId ?? reference.source_event_id;
     const source = sourceId ? sources.get(sourceId) : undefined;
     const call = source
@@ -151,8 +224,6 @@ const toolPresentation = (
     string,
     { kind: StudioAgentEvent["kind"]; label: string; detail?: string }
   > = {
-    get_project: { kind: "tool", label: "Opened the production" },
-    get_artifact: { kind: "tool", label: "Checked the scene context" },
     save_evidence_ledger: {
       kind: "artifact",
       label: "Updated the source record",
@@ -333,7 +404,9 @@ export const useProducerAgent = (
           ? eventStore.current.get(incoming.id)
           : undefined;
         if (base) mergeEventDelta(base as never, incoming as never);
-        if (!(incoming.finishReason ?? incoming.finish_reason) || !base) return;
+        if (!(incoming.finishReason ?? incoming.finish_reason) || !base) {
+          return null;
+        }
         event = base;
       }
       if (event.id) eventStore.current.set(event.id, event);
@@ -345,7 +418,7 @@ export const useProducerAgent = (
         !event.reasoning_content &&
         toolCallsOf(event).length === 0
       ) {
-        return;
+        return null;
       }
 
       if (event.type === "model.message") {
@@ -360,14 +433,7 @@ export const useProducerAgent = (
         event.type === "tool.approval_required" ||
         event.type === "tool.response_required"
       ) {
-        const refs = (event.toolCalls ?? event.tool_calls) as
-          | Array<{
-              id: string;
-              sourceEventId?: string;
-              source_event_id?: string;
-            }>
-          | undefined;
-        const resolved = (refs ?? []).flatMap((reference) => {
+        const resolved = toolCallReferencesOf(event).flatMap((reference) => {
           const sourceId = reference.sourceEventId ?? reference.source_event_id;
           const source = sourceId
             ? eventStore.current.get(sourceId)
@@ -415,8 +481,140 @@ export const useProducerAgent = (
       }
 
       appendEvents(describeEvent(event));
+      return event;
     },
     [appendEvents],
+  );
+
+  const importSandboxOutputs = useCallback(
+    async (
+      outputSessionId: string,
+      turnId: string,
+      references: SandboxArtifactReference[],
+      outputProjectId: string,
+    ) => {
+      if (references.length === 0) return [];
+      const detail = await greenlightApi.getProject(outputProjectId);
+      const uniqueReferences = Array.from(
+        new Map(
+          references.map((reference) => [reference.path, reference]),
+        ).values(),
+      );
+      const pending = uniqueReferences.filter(
+        (reference) =>
+          !detail.artifacts.some(
+            (artifact) =>
+              artifact.provenance.trueforge_session_id === outputSessionId &&
+              artifact.provenance.trueforge_turn_id === turnId &&
+              artifact.provenance.sandbox_path === reference.path,
+          ),
+      );
+      const imported: ImportedSandboxOutput[] = [];
+      for (const reference of pending) {
+        try {
+          const binary = await trueforge.sessions.downloadSandboxFile(
+            outputSessionId,
+            turnId,
+            { path: reference.path },
+          );
+          const blob = await binary.blob();
+          const file = new File([blob], reference.name, {
+            type: blob.type || "application/octet-stream",
+          });
+          const artifact = await greenlightApi.uploadSandboxAsset(
+            outputProjectId,
+            file,
+            {
+              path: reference.path,
+              sessionId: outputSessionId,
+              turnId,
+            },
+          );
+          imported.push({ artifact, reference });
+          appendEvents([
+            {
+              id: `sandbox-import-${artifact.id}`,
+              kind: "artifact",
+              label: `Created ${reference.name}`,
+              detail: "Ready for this edit",
+              sceneIds: [],
+            },
+          ]);
+        } catch (error) {
+          appendEvents([
+            {
+              id: `sandbox-import-error-${turnId}-${reference.path}`,
+              kind: "message",
+              label: `Couldn’t add ${reference.name}`,
+              detail:
+                error instanceof Error
+                  ? error.message.replaceAll("_", " ")
+                  : "Sandbox output import failed",
+              sceneIds: [],
+            },
+          ]);
+        }
+      }
+      if (imported.length > 0) {
+        await queryClient.invalidateQueries({
+          queryKey: greenlightKeys.project(outputProjectId),
+        });
+      }
+      return imported;
+    },
+    [appendEvents, queryClient],
+  );
+
+  const consume = useCallback(
+    async (
+      initialStream: Awaited<
+        ReturnType<typeof trueforge.sessions.createTurnStream>
+      >,
+      streamProjectId: string,
+    ) => {
+      let stream = initialStream;
+      for (let handoff = 0; handoff < 4; handoff += 1) {
+        let turnId: string | null = null;
+        const references: SandboxArtifactReference[] = [];
+        for await (const envelope of stream.withMetadata()) {
+          if (activeProjectId.current !== streamProjectId) return;
+          const event = ingest(envelope.data as unknown as WireEvent);
+          if (!event) continue;
+          if (event.type === "turn.created") {
+            turnId = String(event.turnId ?? event.turn_id ?? "") || null;
+          }
+          if (event.type === "model.message") {
+            references.push(...parseSandboxArtifactReferences(event.content));
+          }
+        }
+        if (!turnId || references.length === 0 || !sessionId.current) return;
+        const imported = await importSandboxOutputs(
+          sessionId.current,
+          turnId,
+          references,
+          streamProjectId,
+        );
+        if (imported.length === 0) return;
+        stream = await trueforge.sessions.createTurnStream(sessionId.current, {
+          input: [
+            {
+              type: "user.message",
+              content: artifactHandoffMessage(streamProjectId, imported),
+            },
+          ],
+        });
+      }
+      appendEvents([
+        {
+          id: `sandbox-handoff-limit-${streamProjectId}`,
+          kind: "message",
+          label: "The edit produced too many chained files.",
+          detail: "Ask Producer to continue from the latest imported media.",
+          sceneIds: [],
+        },
+      ]);
+    },
+    [appendEvents, importSandboxOutputs, ingest],
   );
 
   useEffect(() => {
@@ -508,7 +706,10 @@ export const useProducerAgent = (
         ?.replace(/^PROJECT_ID:[^\n]+\n\n/, "")
         .split("\n\nEDITOR_SELECTION")[0]
         ?.trim();
-      if (instruction) {
+      if (
+        instruction &&
+        !instruction.startsWith("GREENLIGHT_ARTIFACT_HANDOFF")
+      ) {
         appendEvents([
           {
             id: `instruction-${latestTurn.id}`,
@@ -525,9 +726,35 @@ export const useProducerAgent = (
         latestTurn.id,
         { limit: 100, order: "asc" },
       );
+      const sandboxReferences: SandboxArtifactReference[] = [];
       for await (const stored of persisted) {
         if (cancelled || activeProjectId.current !== projectId) return;
-        ingest(stored as unknown as WireEvent);
+        const event = ingest(stored as unknown as WireEvent);
+        if (event?.type === "model.message") {
+          sandboxReferences.push(
+            ...parseSandboxArtifactReferences(event.content),
+          );
+        }
+      }
+      const imported = await importSandboxOutputs(
+        restoredSessionId,
+        latestTurn.id,
+        sandboxReferences,
+        projectId,
+      );
+      if (imported.length > 0 && !cancelled) {
+        const handoff = await trueforge.sessions.createTurnStream(
+          restoredSessionId,
+          {
+            input: [
+              {
+                type: "user.message",
+                content: artifactHandoffMessage(projectId, imported),
+              },
+            ],
+          },
+        );
+        await consume(handoff, projectId);
       }
     };
     void restore().catch(() => {
@@ -544,20 +771,7 @@ export const useProducerAgent = (
     return () => {
       cancelled = true;
     };
-  }, [ingest, projectId]);
-
-  const consume = useCallback(
-    async (
-      stream: Awaited<ReturnType<typeof trueforge.sessions.createTurnStream>>,
-      streamProjectId: string,
-    ) => {
-      for await (const envelope of stream.withMetadata()) {
-        if (activeProjectId.current !== streamProjectId) return;
-        ingest(envelope.data as unknown as WireEvent);
-      }
-    },
-    [ingest],
-  );
+  }, [appendEvents, consume, importSandboxOutputs, ingest, projectId]);
 
   const send = useMutation<void, Error, ProducerSendInput, { eventId: string }>(
     {
@@ -685,10 +899,10 @@ export const useProducerAgent = (
           ],
         },
       );
+      await consume(stream, projectId);
       setPendingApprovals((current) =>
         current.filter((item) => item.toolCallId !== input.pending.toolCallId),
       );
-      await consume(stream, projectId);
     },
     onSuccess: async () => {
       if (projectId) {

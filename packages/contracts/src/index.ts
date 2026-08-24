@@ -1,24 +1,46 @@
 import { z } from "zod";
 
 export const VIDEO_FPS = 30;
-export const VIDEO_TRANSITION_FRAMES = 10;
-export const VIDEO_TRANSITION_SECONDS = VIDEO_TRANSITION_FRAMES / VIDEO_FPS;
-export const MIN_SCENE_DURATION_SECONDS = VIDEO_TRANSITION_SECONDS * 2;
+export const MIN_SCENE_DURATION_SECONDS = 0.5;
+const FRAME_EPSILON_SECONDS = 1e-6;
+
+const frameAlignedSecondsSchema = z
+  .number()
+  .refine(
+    (seconds) =>
+      Math.abs(seconds * VIDEO_FPS - Math.round(seconds * VIDEO_FPS)) <=
+      FRAME_EPSILON_SECONDS,
+    "Time must align to the production frame rate",
+  );
+
+type TimedScene = {
+  duration_seconds: number;
+  gap_after_seconds?: number;
+};
 
 export const sceneStartSeconds = (
-  scenes: ReadonlyArray<{ duration_seconds: number }>,
+  scenes: ReadonlyArray<TimedScene>,
   index: number,
 ) =>
   scenes
     .slice(0, index)
-    .reduce((sum, scene) => sum + scene.duration_seconds, 0) -
-  Math.max(0, index) * VIDEO_TRANSITION_SECONDS;
+    .reduce(
+      (sum, scene) =>
+        sum + scene.duration_seconds + (scene.gap_after_seconds ?? 0),
+      0,
+    );
 
-export const productionDurationSeconds = (
-  scenes: ReadonlyArray<{ duration_seconds: number }>,
-) =>
-  scenes.reduce((sum, scene) => sum + scene.duration_seconds, 0) -
-  Math.max(0, scenes.length - 1) * VIDEO_TRANSITION_SECONDS;
+export const scenePresentationDurationSeconds = (
+  scenes: ReadonlyArray<TimedScene>,
+  index: number,
+) => Math.max(0, scenes[index]?.duration_seconds ?? 0);
+
+export const productionDurationSeconds = (scenes: ReadonlyArray<TimedScene>) =>
+  scenes.reduce(
+    (sum, scene) =>
+      sum + scene.duration_seconds + (scene.gap_after_seconds ?? 0),
+    0,
+  );
 
 export const idSchema = z
   .string()
@@ -110,6 +132,30 @@ export const sceneKindSchema = z.enum([
   "cta",
 ]);
 
+export const sourceClipSchema = z
+  .object({
+    artifact_id: idSchema,
+    in_seconds: z.number().nonnegative(),
+    out_seconds: z.number().positive(),
+    source_duration_seconds: z.number().positive(),
+  })
+  .superRefine((source, context) => {
+    if (source.out_seconds <= source.in_seconds) {
+      context.addIssue({
+        code: "custom",
+        message: "Source out must be after source in",
+        path: ["out_seconds"],
+      });
+    }
+    if (source.out_seconds > source.source_duration_seconds) {
+      context.addIssue({
+        code: "custom",
+        message: "Source out exceeds available media",
+        path: ["out_seconds"],
+      });
+    }
+  });
+
 export const sceneSchema = z.object({
   id: idSchema,
   kind: sceneKindSchema,
@@ -119,7 +165,14 @@ export const sceneSchema = z.object({
   captions_artifact_id: idSchema.nullable().default(null),
   transcript_artifact_id: idSchema.nullable().default(null),
   claim_ids: z.array(idSchema),
-  duration_seconds: z.number().min(MIN_SCENE_DURATION_SECONDS).max(120),
+  duration_seconds: frameAlignedSecondsSchema
+    .min(MIN_SCENE_DURATION_SECONDS)
+    .max(120),
+  gap_after_seconds: frameAlignedSecondsSchema
+    .nonnegative()
+    .max(120)
+    .optional(),
+  source_clip: sourceClipSchema.nullable().optional(),
   playback_rate: z.number().min(0.5).max(3).default(1),
   visual: z.object({
     treatment: z.enum([
@@ -169,10 +222,7 @@ export const contentPackageSchema = z
     metadata: youtubeMetadataSchema,
   })
   .superRefine(({ scenes }, context) => {
-    const seconds = scenes.reduce(
-      (total, scene) => total + scene.duration_seconds,
-      0,
-    );
+    const seconds = productionDurationSeconds(scenes);
     if (seconds < 30 || seconds > 120) {
       context.addIssue({
         code: "custom",
@@ -180,6 +230,26 @@ export const contentPackageSchema = z
         path: ["scenes"],
       });
     }
+    scenes.forEach((scene, index) => {
+      const source = scene.source_clip;
+      if (!source) return;
+      if (!scene.visual.artifact_ids.includes(source.artifact_id)) {
+        context.addIssue({
+          code: "custom",
+          message: "Source clip must be one of the scene's visual artifacts",
+          path: ["scenes", index, "source_clip", "artifact_id"],
+        });
+      }
+      const sourceSpan =
+        (source.out_seconds - source.in_seconds) / scene.playback_rate;
+      if (Math.abs(sourceSpan - scene.duration_seconds) > 1 / VIDEO_FPS) {
+        context.addIssue({
+          code: "custom",
+          message: "Scene duration must match its source in/out range",
+          path: ["scenes", index, "duration_seconds"],
+        });
+      }
+    });
   });
 
 export const artifactKindSchema = z.enum([
@@ -284,11 +354,46 @@ export const transcriptSchema = z.object({
   reference_text: z.string().trim().min(1),
   words: z.array(transcriptWordSchema).min(1),
   provider: z.object({
-    name: z.literal("openai"),
+    name: z.literal("openrouter+whisper.cpp"),
     transcription_model: z.string().min(1),
     timing_model: z.string().min(1),
+    usage_cost_usd: z.number().nonnegative().nullable(),
   }),
 });
+
+export const captionCueSchema = z
+  .object({
+    text: z.string().min(1).max(240),
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().positive(),
+    timestampMs: z.number().int().nonnegative().nullable(),
+    confidence: z.number().min(0).max(1).nullable(),
+  })
+  .refine((cue) => cue.endMs > cue.startMs, {
+    message: "Caption end must be after its start",
+    path: ["endMs"],
+  });
+
+export const captionTrackSchema = z
+  .object({
+    version: z.literal(1),
+    project_id: idSchema,
+    scene_id: idSchema,
+    locale: z.string().trim().min(2).max(35),
+    transcript_artifact_id: idSchema,
+    cues: z.array(captionCueSchema).min(1),
+  })
+  .superRefine(({ cues }, context) => {
+    for (let index = 1; index < cues.length; index += 1) {
+      if (cues[index]!.startMs < cues[index - 1]!.startMs) {
+        context.addIssue({
+          code: "custom",
+          message: "Caption cues must be ordered by start time",
+          path: ["cues", index, "startMs"],
+        });
+      }
+    }
+  });
 
 export const transcribeAudioInputSchema = z.object({
   project_id: idSchema,
@@ -431,11 +536,15 @@ export const editorPatchOperationSchema = z.discriminatedUnion("type", [
       captions_artifact_id: idSchema.nullable().optional(),
       transcript_artifact_id: idSchema.nullable().optional(),
       claim_ids: z.array(idSchema).optional(),
-      duration_seconds: z
-        .number()
+      duration_seconds: frameAlignedSecondsSchema
         .min(MIN_SCENE_DURATION_SECONDS)
         .max(120)
         .optional(),
+      gap_after_seconds: frameAlignedSecondsSchema
+        .nonnegative()
+        .max(120)
+        .optional(),
+      source_clip: sourceClipSchema.nullable().optional(),
       playback_rate: z.number().min(0.5).max(3).optional(),
       visual: sceneVisualPatchSchema.optional(),
     })
@@ -497,6 +606,8 @@ export type GenerateImageInput = z.infer<typeof generateImageInputSchema>;
 export type GenerateVoiceInput = z.infer<typeof generateVoiceInputSchema>;
 export type TranscriptWord = z.infer<typeof transcriptWordSchema>;
 export type Transcript = z.infer<typeof transcriptSchema>;
+export type CaptionCue = z.infer<typeof captionCueSchema>;
+export type CaptionTrack = z.infer<typeof captionTrackSchema>;
 export type TranscribeAudioInput = z.infer<typeof transcribeAudioInputSchema>;
 export type FindSpokenPhraseInput = z.infer<typeof findSpokenPhraseInputSchema>;
 export type CorrectTranscriptInput = z.infer<
@@ -590,7 +701,9 @@ export const applyEditorPatch = (
           operation.title !== undefined ||
           operation.claim_ids !== undefined ||
           operation.visual !== undefined ||
-          operation.duration_seconds !== undefined
+          operation.duration_seconds !== undefined ||
+          operation.gap_after_seconds !== undefined ||
+          operation.source_clip !== undefined
         ) {
           requireTrack("visual");
         }
@@ -609,11 +722,34 @@ export const applyEditorPatch = (
         }
         const index = requireScene(next.scenes, operation.scene_id);
         const current = next.scenes[index]!;
-        if (
-          operation.duration_seconds !== undefined &&
-          operation.duration_seconds > current.duration_seconds
-        ) {
-          throw new Error("scene_extension_not_allowed");
+        const requestedDuration =
+          operation.duration_seconds ?? current.duration_seconds;
+        const durationRemoved = Math.max(
+          0,
+          current.duration_seconds - requestedDuration,
+        );
+        const requestedGap =
+          operation.gap_after_seconds ??
+          (current.gap_after_seconds ?? 0) + durationRemoved;
+        if (requestedDuration > current.duration_seconds) {
+          const source = operation.source_clip ?? current.source_clip;
+          if (!source) throw new Error("scene_extension_has_no_source");
+          const availableDuration =
+            (source.source_duration_seconds - source.in_seconds) /
+            (operation.playback_rate ?? current.playback_rate);
+          if (requestedDuration > availableDuration + 1 / VIDEO_FPS) {
+            throw new Error("scene_extension_exceeds_source");
+          }
+          const extension = requestedDuration - current.duration_seconds;
+          if (extension > (current.gap_after_seconds ?? 0) + 1 / VIDEO_FPS) {
+            throw new Error("scene_extension_exceeds_gap");
+          }
+          if (
+            requestedGap >
+            (current.gap_after_seconds ?? 0) - extension + 1 / VIDEO_FPS
+          ) {
+            throw new Error("scene_extension_must_consume_gap");
+          }
         }
         next.scenes[index] = {
           ...current,
@@ -637,6 +773,13 @@ export const applyEditorPatch = (
           ...(operation.duration_seconds === undefined
             ? {}
             : { duration_seconds: operation.duration_seconds }),
+          ...(operation.gap_after_seconds === undefined &&
+          operation.duration_seconds === undefined
+            ? {}
+            : { gap_after_seconds: requestedGap }),
+          ...(operation.source_clip === undefined
+            ? {}
+            : { source_clip: operation.source_clip }),
           ...(operation.playback_rate === undefined
             ? {}
             : { playback_rate: operation.playback_rate }),
@@ -663,10 +806,14 @@ export const applyEditorPatch = (
           throw new Error("split_second_scene_id_conflict");
         }
         if (
-          operation.first.duration_seconds + operation.second.duration_seconds >
-          current.duration_seconds
+          Math.abs(
+            operation.first.duration_seconds +
+              operation.second.duration_seconds -
+              current.duration_seconds,
+          ) >
+          1 / VIDEO_FPS
         ) {
-          throw new Error("split_scene_extension_not_allowed");
+          throw new Error("split_scene_must_preserve_duration");
         }
         next.scenes.splice(index, 1, operation.first, operation.second);
         break;
