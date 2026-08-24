@@ -1,0 +1,53 @@
+{
+  "name": "greenlight-producer",
+  "manifest": {
+    "model": {
+      "name": "greenlight/root-model",
+      "params": {
+        "max_tokens": 16384,
+        "temperature": 0.35,
+        "parallel_tool_calls": true
+      }
+    },
+    "mcp_servers": [
+      {
+        "name": "greenlight",
+        "enable_tools": ["@all"],
+        "disable_tools": [],
+        "preload": true,
+        "preload_tools": [],
+        "require_approval_for_tools": [
+          "apply_editor_patch",
+          "render_video",
+          "stage_video_unlisted",
+          "publish_video",
+          "schedule_video"
+        ]
+      }
+    ],
+    "config": {
+      "iteration_limit": 80,
+      "sandbox": {
+        "enabled": true,
+        "file_downloads": true
+      },
+      "dynamic_sub_agents": {
+        "enabled": true
+      },
+      "context_management": {
+        "compaction": {
+          "enabled": true
+        },
+        "large_tool_response": {
+          "enabled": true
+        }
+      },
+      "generative_ui": {
+        "enabled": true
+      },
+      "ask_user_questions": {
+        "enabled": true
+      }
+    }
+  }
+}

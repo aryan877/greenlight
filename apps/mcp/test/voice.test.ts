@@ -1,0 +1,41 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  OpenRouterVoiceProvider,
+  pcm16MonoToWav,
+} from "../src/providers/voice.js";
+
+describe("voice provider", () => {
+  it("wraps 24 kHz mono PCM in a valid WAV header", () => {
+    const wav = pcm16MonoToWav(Uint8Array.from([0, 0, 1, 0]));
+    const view = Buffer.from(wav);
+    expect(view.subarray(0, 4).toString()).toBe("RIFF");
+    expect(view.subarray(8, 12).toString()).toBe("WAVE");
+    expect(view.readUInt32LE(24)).toBe(24_000);
+    expect(view.readUInt32LE(40)).toBe(4);
+  });
+
+  it("uses the configured OpenRouter model without pricing logic", async () => {
+    let body: Record<string, unknown> | null = null;
+    const provider = new OpenRouterVoiceProvider(
+      { apiKey: "test", model: "provider/model", voiceId: "Kore" },
+      async (_url, init) => {
+        body = JSON.parse(String(init?.body));
+        return new Response(Uint8Array.from([0, 0]), {
+          status: 200,
+          headers: { "content-type": "audio/pcm" },
+        });
+      },
+    );
+    const result = await provider.generate({ script: "A short line." });
+    expect(body).toMatchObject({
+      model: "provider/model",
+      voice: "Kore",
+      response_format: "pcm",
+    });
+    expect(result.provenance).toMatchObject({
+      provider: "openrouter",
+      model: "provider/model",
+    });
+  });
+});

@@ -1,0 +1,133 @@
+import type { ContentPackage } from "@greenlight/contracts";
+
+export const fixturePackage: ContentPackage = {
+  version: 1,
+  project_id: "project_greenlight_demo",
+  headline: "The last responsible moment",
+  dek: "The best agents know exactly when to hand control back to you.",
+  scenes: [
+    {
+      id: "scene_hook",
+      kind: "hook",
+      title: "Your agent finished the video.",
+      narration:
+        "Your agent researched it, wrote it, checked every claim, and finished the edit.",
+      narration_artifact_id: null,
+      captions_artifact_id: null,
+      transcript_artifact_id: null,
+      claim_ids: ["claim_pipeline"],
+      duration_seconds: 8,
+      playback_rate: 1,
+      visual: {
+        treatment: "type",
+        prompt: null,
+        artifact_ids: [],
+        accent: "signal",
+      },
+    },
+    {
+      id: "scene_stakes",
+      kind: "contrast",
+      title: "But should it publish?",
+      narration:
+        "One action is different. Publishing reaches real people under your real name.",
+      narration_artifact_id: null,
+      captions_artifact_id: null,
+      transcript_artifact_id: null,
+      claim_ids: ["claim_publication"],
+      duration_seconds: 9,
+      playback_rate: 1,
+      visual: {
+        treatment: "number",
+        prompt: null,
+        artifact_ids: [],
+        accent: "ember",
+      },
+    },
+    {
+      id: "scene_evidence",
+      kind: "evidence",
+      title: "Research · verify · render",
+      narration:
+        "Greenlight keeps the research, evidence, render, and release state visible as separate work.",
+      narration_artifact_id: null,
+      captions_artifact_id: null,
+      transcript_artifact_id: null,
+      claim_ids: ["claim_pipeline"],
+      duration_seconds: 10,
+      playback_rate: 1,
+      visual: {
+        treatment: "timeline",
+        prompt: null,
+        artifact_ids: [],
+        accent: "ink",
+      },
+    },
+    {
+      id: "scene_gate",
+      kind: "resolution",
+      title: "Unlisted first.",
+      narration:
+        "The finished film is staged unlisted. The exact video, title, channel, and evidence snapshot are locked.",
+      narration_artifact_id: null,
+      captions_artifact_id: null,
+      transcript_artifact_id: null,
+      claim_ids: ["claim_unlisted"],
+      duration_seconds: 10,
+      playback_rate: 1,
+      visual: {
+        treatment: "quote",
+        prompt: null,
+        artifact_ids: [],
+        accent: "signal",
+      },
+    },
+    {
+      id: "scene_approval",
+      kind: "resolution",
+      title: "Your thumb is the greenlight.",
+      narration:
+        "TrueForge pauses at the last responsible moment. Nothing goes public until you approve the current release.",
+      narration_artifact_id: null,
+      captions_artifact_id: null,
+      transcript_artifact_id: null,
+      claim_ids: ["claim_approval"],
+      duration_seconds: 11,
+      playback_rate: 1,
+      visual: {
+        treatment: "type",
+        prompt: null,
+        artifact_ids: [],
+        accent: "signal",
+      },
+    },
+    {
+      id: "scene_cta",
+      kind: "cta",
+      title: "Make boldly. Release deliberately.",
+      narration:
+        "Greenlight is an autonomous studio with a license to create—and a human license to broadcast.",
+      narration_artifact_id: null,
+      captions_artifact_id: null,
+      transcript_artifact_id: null,
+      claim_ids: [],
+      duration_seconds: 8,
+      playback_rate: 1,
+      visual: {
+        treatment: "type",
+        prompt: null,
+        artifact_ids: [],
+        accent: "ink",
+      },
+    },
+  ],
+  metadata: {
+    title: "The last responsible moment for an AI agent",
+    description:
+      "Greenlight is a TrueForge-native production studio that researches, verifies, renders, stages, and asks before a video goes public.",
+    tags: ["ai agents", "trueforge", "human approval", "youtube automation"],
+    category_id: "28",
+    made_for_kids: false,
+    contains_synthetic_media: true,
+  },
+};

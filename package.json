@@ -1,0 +1,33 @@
+{
+  "name": "greenlight",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.5",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "dev:mcp": "pnpm --filter @greenlight/mcp dev",
+    "dev:render": "pnpm --filter @greenlight/render studio",
+    "dev:studio": "pnpm --filter @greenlight/studio dev",
+    "studio:seed": "tsx scripts/seed-studio.ts",
+    "trueforge:configure": "node --env-file=.env scripts/configure-trueforge.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.5",
+    "turbo": "^2.10.11",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
