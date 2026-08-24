@@ -1,4 +1,5 @@
 import { dirname, isAbsolute, resolve } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const workspaceRoot = resolve(
@@ -12,7 +13,9 @@ const workspacePath = (value: string): string =>
 export type GreenlightConfig = {
   artifactDir: string;
   dataDir: string;
+  mcpAuthToken: string;
   port: number;
+  studioOrigin: string;
   workspaceRoot: string;
   openMojiRoot: string;
   codex: {
@@ -27,9 +30,10 @@ export type GreenlightConfig = {
   };
   transcription: {
     apiKey: string | null;
-    provider: "openai" | "disabled";
+    provider: "openrouter" | "disabled";
     transcriptionModel: string;
-    timingModel: string;
+    timingBinaryPath: string;
+    timingModelPath: string;
   };
   youtube: {
     allowedChannelId: string | null;
@@ -39,6 +43,12 @@ export type GreenlightConfig = {
 };
 
 export const loadConfig = (): GreenlightConfig => {
+  const mcpAuthToken = process.env.GREENLIGHT_MCP_AUTH_TOKEN?.trim();
+  if (!mcpAuthToken || mcpAuthToken.length < 32) {
+    throw new Error(
+      "GREENLIGHT_MCP_AUTH_TOKEN must contain at least 32 characters",
+    );
+  }
   const dataDir = workspacePath(process.env.GREENLIGHT_DATA_DIR ?? "data");
   const artifactDir = workspacePath(
     process.env.GREENLIGHT_ARTIFACT_DIR ?? "artifacts",
@@ -49,19 +59,23 @@ export const loadConfig = (): GreenlightConfig => {
     throw new Error("unsupported_voice_provider");
   }
   const configuredTranscriptionProvider =
-    process.env.GREENLIGHT_TRANSCRIPTION_PROVIDER ?? "openai";
-  if (!["openai", "disabled"].includes(configuredTranscriptionProvider)) {
+    process.env.GREENLIGHT_TRANSCRIPTION_PROVIDER ?? "openrouter";
+  if (!["openrouter", "disabled"].includes(configuredTranscriptionProvider)) {
     throw new Error("unsupported_transcription_provider");
   }
 
   return {
     artifactDir,
     dataDir,
+    mcpAuthToken,
     port: Number(process.env.GREENLIGHT_MCP_PORT ?? 8941),
+    studioOrigin: new URL(
+      process.env.GREENLIGHT_STUDIO_ORIGIN ?? "http://127.0.0.1:4173",
+    ).origin,
     workspaceRoot,
     openMojiRoot: workspacePath(
       process.env.GREENLIGHT_OPENMOJI_ROOT ??
-        "/Users/aryankumar/trueforge-hackathon/openmoji",
+        resolve(homedir(), "trueforge-hackathon/openmoji"),
     ),
     codex: {
       binaryPath: process.env.GREENLIGHT_CODEX_BINARY ?? "codex",
@@ -76,19 +90,21 @@ export const loadConfig = (): GreenlightConfig => {
       voiceId: process.env.GREENLIGHT_VOICE_ID ?? "Kore",
     },
     transcription: {
-      apiKey: process.env.OPENAI_API_KEY || null,
-      provider: configuredTranscriptionProvider as "openai" | "disabled",
+      apiKey: process.env.OPENROUTER_API_KEY || null,
+      provider: configuredTranscriptionProvider as "openrouter" | "disabled",
       transcriptionModel:
-        process.env.GREENLIGHT_TRANSCRIPTION_MODEL ?? "gpt-4o-mini-transcribe",
-      timingModel:
-        process.env.GREENLIGHT_TRANSCRIPTION_TIMING_MODEL ?? "whisper-1",
+        process.env.GREENLIGHT_TRANSCRIPTION_MODEL ??
+        "openai/gpt-4o-mini-transcribe",
+      timingBinaryPath: process.env.GREENLIGHT_WHISPER_BINARY ?? "whisper-cli",
+      timingModelPath:
+        process.env.GREENLIGHT_WHISPER_MODEL ||
+        resolve(homedir(), ".cache/greenlight/models/ggml-base.bin"),
     },
     youtube: {
       allowedChannelId: process.env.GREENLIGHT_YOUTUBE_CHANNEL_ID || null,
       profile: process.env.GREENLIGHT_YOUTUBE_PROFILE ?? "main",
       uploaderPath:
-        process.env.GREENLIGHT_YOUTUBE_UPLOADER ??
-        "/Users/aryankumar/youtube-uploader/.venv/bin/youtube-uploader",
+        process.env.GREENLIGHT_YOUTUBE_UPLOADER || "youtube-uploader",
     },
   };
 };

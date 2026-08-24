@@ -1,9 +1,7 @@
 import {
   contentPackageSchema,
-  evidenceLedgerSchema,
   type Artifact,
   type ContentPackage,
-  type EvidenceLedger,
   type Project,
   type ReleaseSnapshot,
 } from "@greenlight/contracts";
@@ -26,8 +24,16 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
       ...init?.headers,
     },
   });
-  if (!response.ok) throw new Error(`Greenlight API ${response.status}`);
-  return response.json() as Promise<T>;
+  const value = (await response.json().catch(() => null)) as
+    T | { error?: string } | null;
+  if (!response.ok) {
+    const code =
+      value && typeof value === "object" && "error" in value
+        ? value.error
+        : null;
+    throw new Error(code || `Greenlight API ${response.status}`);
+  }
+  return value as T;
 };
 
 export const greenlightApi = {
@@ -41,10 +47,21 @@ export const greenlightApi = {
     request<ContentPackage>(
       `/artifacts/${encodeURIComponent(artifactId)}`,
     ).then((value) => contentPackageSchema.parse(value)),
-  getEvidenceLedger: (artifactId: string) =>
-    request<EvidenceLedger>(
-      `/artifacts/${encodeURIComponent(artifactId)}`,
-    ).then((value) => evidenceLedgerSchema.parse(value)),
+  uploadAsset: async (projectId: string, file: File) => {
+    const response = await request<{ artifact: Artifact }>(
+      `/projects/${encodeURIComponent(projectId)}/assets`,
+      {
+        method: "POST",
+        body: file,
+        headers: {
+          "content-type": "application/octet-stream",
+          "x-greenlight-filename": encodeURIComponent(file.name),
+          "x-greenlight-mime": file.type || "application/octet-stream",
+        },
+      },
+    );
+    return response.artifact;
+  },
   artifactUrl: (artifactId: string) =>
     `/greenlight-api/artifacts/${encodeURIComponent(artifactId)}`,
 };

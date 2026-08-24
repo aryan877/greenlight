@@ -7,7 +7,7 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { useRef } from "react";
+import { type CSSProperties, useRef } from "react";
 
 import { greenlightApi } from "../api/greenlight.js";
 import type { useMediaController } from "../editor/use-media-controller.js";
@@ -16,8 +16,15 @@ import { cx, IconButton } from "./controls.js";
 
 type MediaController = ReturnType<typeof useMediaController>;
 
-const SceneCanvas = ({ scene }: { scene: Scene }) => {
+const SceneCanvas = ({
+  scene,
+  artifacts,
+}: {
+  scene: Scene;
+  artifacts: Artifact[];
+}) => {
   const visuals = scene.visual.artifact_ids.slice(0, 4);
+  const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
   return (
     <div className="relative size-full overflow-hidden bg-white">
       {visuals.length > 0 ? (
@@ -32,11 +39,22 @@ const SceneCanvas = ({ scene }: { scene: Scene }) => {
               key={visual}
               className="grid min-h-0 place-items-center rounded-[7%] bg-[#ecf2ef] p-[9%]"
             >
-              <img
-                src={greenlightApi.artifactUrl(visual)}
-                alt=""
-                className="size-full object-contain"
-              />
+              {byId.get(visual)?.mime_type.startsWith("video/") ? (
+                <video
+                  src={greenlightApi.artifactUrl(visual)}
+                  muted
+                  loop
+                  autoPlay
+                  playsInline
+                  className="size-full object-cover"
+                />
+              ) : (
+                <img
+                  src={greenlightApi.artifactUrl(visual)}
+                  alt=""
+                  className="size-full object-contain"
+                />
+              )}
             </div>
           ))}
         </div>
@@ -62,6 +80,7 @@ const SceneCanvas = ({ scene }: { scene: Scene }) => {
 
 export const ProgramMonitor = ({
   scene,
+  artifacts,
   video,
   media,
   timelineOpen,
@@ -70,6 +89,7 @@ export const ProgramMonitor = ({
   onToggleTimeline,
 }: {
   scene: Scene | null;
+  artifacts: Artifact[];
   video: Artifact | null;
   media: MediaController;
   timelineOpen: boolean;
@@ -118,7 +138,7 @@ export const ProgramMonitor = ({
               {...media.mediaEvents}
             />
           ) : scene ? (
-            <SceneCanvas scene={scene} />
+            <SceneCanvas scene={scene} artifacts={artifacts} />
           ) : (
             <div className="grid size-full place-items-center text-[12px] text-ink-tertiary">
               No scene selected
@@ -144,9 +164,27 @@ export const ProgramMonitor = ({
           max={Math.max(media.duration, 0.01)}
           step={0.01}
           value={Math.min(media.currentTime, media.duration || 0)}
+          style={
+            {
+              "--range-progress": `${media.duration > 0 ? (media.currentTime / media.duration) * 100 : 0}%`,
+            } as CSSProperties
+          }
           disabled={!video}
-          onChange={(event) => media.seek(Number(event.target.value))}
-          className="h-1 min-w-0 flex-1 accent-action disabled:opacity-30"
+          onPointerDown={media.beginScrub}
+          onInput={(event) =>
+            media.previewSeek(Number(event.currentTarget.value))
+          }
+          onPointerUp={(event) =>
+            media.endScrub(Number(event.currentTarget.value))
+          }
+          onPointerCancel={(event) =>
+            media.endScrub(Number(event.currentTarget.value))
+          }
+          onKeyUp={(event) => media.endScrub(Number(event.currentTarget.value))}
+          onChange={(event) =>
+            media.previewSeek(Number(event.currentTarget.value))
+          }
+          className="precision-range min-w-0 flex-1 disabled:opacity-30"
         />
         <span className="w-20 text-right font-mono text-[10px] text-ink-caption">
           {formatTime(media.duration)}
@@ -164,9 +202,12 @@ export const ProgramMonitor = ({
           max={1}
           step={0.01}
           value={media.volume}
+          style={
+            { "--range-progress": `${media.volume * 100}%` } as CSSProperties
+          }
           disabled={!video}
           onChange={(event) => media.updateVolume(Number(event.target.value))}
-          className="h-1 w-20 accent-action disabled:opacity-30"
+          className="precision-range w-20 disabled:opacity-30"
         />
       </div>
     </section>

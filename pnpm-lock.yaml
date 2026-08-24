@@ -132,9 +132,6 @@ importers:
       "@greenlight/contracts":
         specifier: workspace:*
         version: link:../../packages/contracts
-      "@greenlight/ui":
-        specifier: workspace:*
-        version: link:../../packages/ui
       "@tanstack/react-query":
         specifier: ^5.102.2
         version: 5.102.2(react@19.2.8)
@@ -188,21 +185,6 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
-      typescript:
-        specifier: ^5.9.2
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.33.0)(terser@5.50.0)(tsx@4.23.12)
-
-  packages/ui:
-    devDependencies:
-      "@types/react":
-        specifier: ^19.1.10
-        version: 19.2.18
-      react:
-        specifier: 19.2.8
-        version: 19.2.8
       typescript:
         specifier: ^5.9.2
         version: 5.9.3

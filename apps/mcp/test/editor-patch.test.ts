@@ -1,5 +1,6 @@
 import {
   applyEditorPatch,
+  sceneStartSeconds,
   type ContentPackage,
   type EditorPatchInput,
 } from "@greenlight/contracts";
@@ -52,9 +53,12 @@ const patch = (
     project_id: base.project_id,
     base_content_package_artifact_id: "artifact_base001",
     scene_ids: ["scene_002"],
-    track_ids: ["visual"],
+    track_ids: ["visual", "voice", "caption", "transcript"],
     artifact_ids: [],
-    time_range_seconds: { start: 10, end: 20 },
+    time_range_seconds: {
+      start: sceneStartSeconds(base.scenes, 1),
+      end: sceneStartSeconds(base.scenes, 1) + base.scenes[1]!.duration_seconds,
+    },
   },
   instruction_summary: "Change only the selected scene",
   operations,
@@ -93,6 +97,21 @@ describe("applyEditorPatch", () => {
         ]),
       ),
     ).toThrow("scene_outside_selection:scene_003");
+  });
+
+  it("rejects a voice edit when only the visual track is selected", () => {
+    const scoped = patch([
+      {
+        type: "update_scene",
+        scene_id: "scene_002",
+        narration: "A changed voice track must be explicitly selected.",
+      },
+    ]);
+    scoped.selection.track_ids = ["visual"];
+
+    expect(() => applyEditorPatch(base, scoped)).toThrow(
+      "track_outside_selection:voice",
+    );
   });
 
   it("splits one selected scene without replacing the cut", () => {

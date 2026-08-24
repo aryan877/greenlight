@@ -11,12 +11,20 @@ import { createId, now, sha256 } from "../lib/canonical.js";
 import type { GreenlightStore } from "./store.js";
 
 const mimeByExtension: Record<string, string> = {
+  ".aac": "audio/aac",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
   ".json": "application/json",
+  ".m4a": "audio/mp4",
+  ".mov": "video/quicktime",
   ".mp3": "audio/mpeg",
   ".mp4": "video/mp4",
   ".png": "image/png",
+  ".srt": "application/x-subrip",
   ".svg": "image/svg+xml",
+  ".vtt": "text/vtt",
   ".wav": "audio/wav",
+  ".webm": "video/webm",
   ".webp": "image/webp",
 };
 

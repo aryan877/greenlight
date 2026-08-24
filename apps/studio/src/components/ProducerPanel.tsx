@@ -1,21 +1,33 @@
-import type { ContentPackage, EditorSelection } from "@greenlight/contracts";
+import type {
+  Artifact,
+  ContentPackage,
+  EditorSelection,
+} from "@greenlight/contracts";
 import {
   Bot,
+  Captions,
   Check,
   CircleDot,
   Film,
+  Image as ImageIcon,
+  Mic2,
   MousePointer2,
+  Paperclip,
   Send,
   SlidersHorizontal,
   Sparkles,
+  FileText,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { greenlightApi } from "../api/greenlight.js";
 import type {
   PendingToolApproval,
   StudioAgentEvent,
+  StudioReviewDocument,
 } from "../api/trueforge.js";
+import { MEDIA_ACCEPT, MEDIA_ARTIFACT_MIME } from "../editor/media-transfer.js";
 import { cx } from "./controls.js";
 
 const eventIcon: Record<StudioAgentEvent["kind"], typeof Bot> = {
@@ -113,9 +125,11 @@ const ApprovalCard = ({
   pending: PendingToolApproval;
   content: ContentPackage | null;
   busy: boolean;
-  onDecision: (status: "allow" | "deny") => void;
+  onDecision: (status: "allow" | "deny", reason?: string) => void;
 }) => {
   const copy = approvalCopy(pending, content);
+  const [refining, setRefining] = useState(false);
+  const [reason, setReason] = useState("");
   return (
     <div className="mx-3 mb-2 overflow-hidden rounded-xl border border-warning/25 bg-warning-soft">
       <div className="border-l-[3px] border-warning p-3">
@@ -127,33 +141,132 @@ const ApprovalCard = ({
         <p className="mt-1 text-[10px] leading-4 text-ink-tertiary">
           {copy.detail}
         </p>
-        <div className="mt-3 flex gap-2">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onDecision("allow")}
-            className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-ink text-[10px] font-medium text-white hover:bg-ink-secondary disabled:opacity-40"
-          >
-            <Check size={13} /> {copy.action}
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onDecision("deny")}
-            className="grid size-8 place-items-center rounded-lg border border-line bg-surface text-ink-tertiary hover:bg-hover disabled:opacity-40"
-            aria-label="Deny action"
-          >
-            <X size={13} />
-          </button>
-        </div>
+        {refining ? (
+          <div className="mt-3">
+            <textarea
+              autoFocus
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="What should change?"
+              rows={2}
+              className="w-full resize-none rounded-lg border border-warning/25 bg-surface px-2.5 py-2 text-[10px] leading-4 text-ink outline-none placeholder:text-ink-caption"
+            />
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRefining(false)}
+                className="h-7 px-2 text-[9px] text-ink-tertiary hover:text-ink"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                disabled={!reason.trim() || busy}
+                onClick={() => onDecision("deny", reason.trim())}
+                className="h-7 rounded-md bg-ink px-3 text-[9px] font-medium text-white disabled:opacity-30"
+              >
+                Refine
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onDecision("allow")}
+              className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-ink text-[10px] font-medium text-white hover:bg-ink-secondary disabled:opacity-40"
+            >
+              <Check size={13} /> {copy.action}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setRefining(true)}
+              className="h-8 rounded-lg border border-line bg-surface px-3 text-[9px] text-ink-secondary hover:bg-hover disabled:opacity-40"
+            >
+              Refine
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onDecision("deny", "Cancelled by the creator.")}
+              className="h-8 px-1.5 text-[9px] text-ink-tertiary hover:text-ink disabled:opacity-40"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
+const ReviewDocument = ({
+  document,
+  onClose,
+}: {
+  document: StudioReviewDocument;
+  onClose: () => void;
+}) => (
+  <div
+    role="dialog"
+    aria-modal="true"
+    aria-label={document.title}
+    className="fixed inset-0 z-50 grid place-items-center bg-ink/25 p-6 backdrop-blur-[2px]"
+    onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}
+  >
+    <article className="flex max-h-[78vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-float">
+      <header className="flex items-start border-b border-line-subtle px-6 py-5">
+        <div>
+          <h2 className="text-[17px] font-medium tracking-[-0.02em] text-ink">
+            {document.title}
+          </h2>
+          <p className="mt-1 text-[10px] text-ink-tertiary">
+            {document.subtitle}
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="ml-auto grid size-8 place-items-center rounded-md text-ink-tertiary hover:bg-hover hover:text-ink"
+        >
+          <X size={14} />
+        </button>
+      </header>
+      <div className="scroll-stable min-h-0 overflow-y-auto px-6 py-2">
+        {document.sections.map((section) => (
+          <section
+            key={section.title}
+            className="border-b border-line-subtle py-5 last:border-0"
+          >
+            <h3 className="text-[10px] font-medium text-ink">
+              {section.title}
+            </h3>
+            <div className="mt-3 space-y-3">
+              {section.lines.map((line, index) => (
+                <p
+                  key={`${section.title}-${index}`}
+                  className="text-[11px] leading-5 text-ink-secondary"
+                >
+                  {line}
+                </p>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </article>
+  </div>
+);
+
 export const ProducerPanel = ({
   content,
   selection,
+  contextArtifacts,
   draftIntent,
   events,
   pendingApprovals,
@@ -162,19 +275,37 @@ export const ProducerPanel = ({
   onSend,
   onApproval,
   onRemoveScene,
+  onRemoveArtifact,
+  onAttachArtifact,
+  onImportFiles,
+  importing,
 }: {
   content: ContentPackage | null;
   selection: EditorSelection | null;
+  contextArtifacts: Artifact[];
   draftIntent: { id: string; text: string } | null;
   events: StudioAgentEvent[];
   pendingApprovals: PendingToolApproval[];
   isSending: boolean;
   isApproving: boolean;
   onSend: (instruction: string) => void;
-  onApproval: (pending: PendingToolApproval, status: "allow" | "deny") => void;
+  onApproval: (
+    pending: PendingToolApproval,
+    status: "allow" | "deny",
+    reason?: string,
+  ) => void;
   onRemoveScene: (sceneId: string) => void;
+  onRemoveArtifact: (artifactId: string) => void;
+  onAttachArtifact: (artifactId: string) => void;
+  onImportFiles: (files: File[]) => Promise<string[]>;
+  importing: boolean;
 }) => {
   const [instruction, setInstruction] = useState("");
+  const [dragActive, setDragActive] = useState(false);
+  const [openDocument, setOpenDocument] = useState<StudioReviewDocument | null>(
+    null,
+  );
+  const fileInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (draftIntent) setInstruction(draftIntent.text);
   }, [draftIntent]);
@@ -189,7 +320,18 @@ export const ProducerPanel = ({
             {events.map((event) => {
               const Icon = eventIcon[event.kind];
               return (
-                <div key={event.id} className="flex gap-2.5 px-2 py-2.5">
+                <button
+                  type="button"
+                  key={event.id}
+                  disabled={!event.document}
+                  onClick={() =>
+                    event.document && setOpenDocument(event.document)
+                  }
+                  className={cx(
+                    "flex w-full gap-2.5 rounded-lg px-2 py-2.5 text-left",
+                    event.document && "hover:bg-hover",
+                  )}
+                >
                   <span
                     className={cx(
                       "grid size-6 shrink-0 place-items-center rounded-full bg-surface-sunken text-ink-tertiary",
@@ -198,9 +340,13 @@ export const ProducerPanel = ({
                         "bg-warning-soft text-warning",
                     )}
                   >
-                    <Icon size={12} />
+                    {event.document ? (
+                      <FileText size={12} />
+                    ) : (
+                      <Icon size={12} />
+                    )}
                   </span>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <strong className="block text-[10px] font-medium leading-5 text-ink">
                       {event.label}
                     </strong>
@@ -209,8 +355,13 @@ export const ProducerPanel = ({
                         {event.detail}
                       </p>
                     ) : null}
+                    {event.document ? (
+                      <span className="mt-1 block text-[9px] font-medium text-action">
+                        Open
+                      </span>
+                    ) : null}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -223,12 +374,42 @@ export const ProducerPanel = ({
           pending={pending}
           content={content}
           busy={isApproving}
-          onDecision={(status) => onApproval(pending, status)}
+          onDecision={(status, reason) => onApproval(pending, status, reason)}
         />
       ))}
 
       <form
-        className="m-3 rounded-[20px] border border-line bg-surface-raised shadow-[0_6px_24px_rgb(17_24_39/0.09)]"
+        data-testid="producer-composer"
+        className={cx(
+          "m-3 rounded-[20px] border bg-surface-raised shadow-[0_6px_24px_rgb(17_24_39/0.09)] transition-colors",
+          dragActive ? "border-action bg-action-soft/30" : "border-line",
+        )}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setDragActive(true);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }}
+        onDragLeave={(event) => {
+          if (
+            !event.currentTarget.contains(event.relatedTarget as Node | null)
+          ) {
+            setDragActive(false);
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setDragActive(false);
+          const artifactId = event.dataTransfer.getData(MEDIA_ARTIFACT_MIME);
+          if (artifactId) {
+            onAttachArtifact(artifactId);
+            return;
+          }
+          const files = [...event.dataTransfer.files];
+          if (files.length > 0) void onImportFiles(files);
+        }}
         onSubmit={(event) => {
           event.preventDefault();
           const next = instruction.trim();
@@ -271,6 +452,49 @@ export const ProducerPanel = ({
                 +{selection.scene_ids.length - 3}
               </span>
             ) : null}
+            {contextArtifacts.slice(0, 3).map((artifact) => {
+              const original = artifact.provenance.original_filename;
+              const label =
+                typeof original === "string" ? original : artifact.kind;
+              return (
+                <span
+                  key={artifact.id}
+                  className="flex h-7 min-w-0 max-w-[210px] items-center gap-1.5 rounded-md border border-line bg-surface p-1 pr-2 text-[9px] text-ink-secondary"
+                >
+                  <span className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-sm bg-surface-sunken text-ink-caption">
+                    {artifact.kind === "image" ? (
+                      <img
+                        src={greenlightApi.artifactUrl(artifact.id)}
+                        alt=""
+                        className="size-full object-cover"
+                      />
+                    ) : artifact.kind === "video" ? (
+                      <Film size={10} />
+                    ) : artifact.kind === "narration" ? (
+                      <Mic2 size={10} />
+                    ) : artifact.kind === "caption" ? (
+                      <Captions size={10} />
+                    ) : (
+                      <ImageIcon size={10} />
+                    )}
+                  </span>
+                  <span className="truncate">{label}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${label}`}
+                    onClick={() => onRemoveArtifact(artifact.id)}
+                    className="shrink-0 text-ink-caption hover:text-ink"
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              );
+            })}
+            {contextArtifacts.length > 3 ? (
+              <span className="flex h-6 shrink-0 items-center rounded-md border border-line bg-surface px-2 font-mono text-[8px] text-ink-secondary">
+                +{contextArtifacts.length - 3} files
+              </span>
+            ) : null}
           </div>
         ) : null}
         <textarea
@@ -283,6 +507,27 @@ export const ProducerPanel = ({
           className="w-full resize-none border-0 bg-transparent px-4 pt-3 text-[12px] leading-5 text-ink outline-none placeholder:text-ink-caption"
         />
         <div className="flex items-center justify-end px-3 pb-2.5 pt-1">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={MEDIA_ACCEPT}
+            className="sr-only"
+            onChange={(event) => {
+              const files = [...(event.target.files ?? [])];
+              if (files.length > 0) void onImportFiles(files);
+              event.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            aria-label="Attach media"
+            disabled={importing}
+            onClick={() => fileInputRef.current?.click()}
+            className="grid size-8 place-items-center rounded-full text-ink-tertiary hover:bg-hover hover:text-ink disabled:opacity-30"
+          >
+            <Paperclip size={14} />
+          </button>
           <button
             type="submit"
             aria-label="Send instruction"
@@ -293,6 +538,12 @@ export const ProducerPanel = ({
           </button>
         </div>
       </form>
+      {openDocument ? (
+        <ReviewDocument
+          document={openDocument}
+          onClose={() => setOpenDocument(null)}
+        />
+      ) : null}
     </div>
   );
 };

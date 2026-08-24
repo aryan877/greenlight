@@ -7,6 +7,7 @@ export const useMediaController = () => {
   const [volume, setVolume] = useState(0.82);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const scrubbing = useRef(false);
   const playbackWindow = useRef<{ start: number; end: number } | null>(null);
   const playbackRate = useRef(1);
 
@@ -25,15 +26,44 @@ export const useMediaController = () => {
     else media.pause();
   }, []);
 
-  const seek = useCallback((seconds: number) => {
-    const media = mediaRef.current;
-    if (!media) return;
-    media.currentTime = Math.max(
-      0,
-      Math.min(seconds, media.duration || seconds),
-    );
-    setCurrentTime(media.currentTime);
+  const clampTime = useCallback(
+    (seconds: number) => {
+      const media = mediaRef.current;
+      const knownDuration = media?.duration || duration || seconds;
+      return Math.max(0, Math.min(seconds, knownDuration));
+    },
+    [duration],
+  );
+
+  const seek = useCallback(
+    (seconds: number) => {
+      const next = clampTime(seconds);
+      setCurrentTime(next);
+      if (mediaRef.current) mediaRef.current.currentTime = next;
+    },
+    [clampTime],
+  );
+
+  const beginScrub = useCallback(() => {
+    scrubbing.current = true;
   }, []);
+
+  const previewSeek = useCallback(
+    (seconds: number) => {
+      const next = clampTime(seconds);
+      setCurrentTime(next);
+      if (mediaRef.current) mediaRef.current.currentTime = next;
+    },
+    [clampTime],
+  );
+
+  const endScrub = useCallback(
+    (seconds: number) => {
+      previewSeek(seconds);
+      scrubbing.current = false;
+    },
+    [previewSeek],
+  );
 
   const updateVolume = useCallback((next: number) => {
     const safe = Math.max(0, Math.min(1, next));
@@ -75,6 +105,9 @@ export const useMediaController = () => {
     duration,
     togglePlay,
     seek,
+    beginScrub,
+    previewSeek,
+    endScrub,
     updateVolume,
     toggleMute,
     setPlaybackWindow,
@@ -84,7 +117,7 @@ export const useMediaController = () => {
       onPause: () => setPlaying(false),
       onTimeUpdate: () => {
         const media = mediaRef.current;
-        if (!media) return;
+        if (!media || scrubbing.current) return;
         const window = playbackWindow.current;
         if (window && media.currentTime >= window.end) {
           media.pause();

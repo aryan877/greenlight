@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { greenlightApi } from "./greenlight.js";
 
@@ -33,9 +33,16 @@ export const useContentPackage = (artifactId: string | null) =>
     enabled: Boolean(artifactId),
   });
 
-export const useEvidenceLedger = (artifactId: string | null) =>
-  useQuery({
-    queryKey: greenlightKeys.artifact(artifactId ?? "none"),
-    queryFn: () => greenlightApi.getEvidenceLedger(artifactId!),
-    enabled: Boolean(artifactId),
+export const useUploadAsset = (projectId: string | null) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => greenlightApi.uploadAsset(projectId!, file),
+    onSuccess: async () => {
+      if (projectId) {
+        await client.invalidateQueries({
+          queryKey: greenlightKeys.project(projectId),
+        });
+      }
+    },
   });
+};

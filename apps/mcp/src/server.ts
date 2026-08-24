@@ -1,11 +1,13 @@
 import { mkdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { timingSafeEqual } from "node:crypto";
+import { basename, resolve } from "node:path";
 
 import cors from "cors";
 import express from "express";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import { loadConfig } from "./config.js";
+import { inspectImportedMedia } from "./media-import.js";
 import { buildMcpServer } from "./mcp/tools.js";
 import { CodexImageProvider } from "./providers/codex-image.js";
 import { QualityInspector } from "./providers/quality.js";
@@ -13,7 +15,7 @@ import { OpenMojiToolkit } from "./providers/openmoji.js";
 import { RemotionRenderer } from "./providers/render.js";
 import {
   DisabledTranscriptionProvider,
-  OpenAITranscriptionProvider,
+  OpenRouterTranscriptionProvider,
 } from "./providers/transcription.js";
 import {
   DisabledVoiceProvider,
@@ -36,15 +38,35 @@ const voice =
     ? new OpenRouterVoiceProvider(config.voice)
     : new DisabledVoiceProvider();
 const transcription =
-  config.transcription.provider === "openai"
-    ? new OpenAITranscriptionProvider(config.transcription)
+  config.transcription.provider === "openrouter"
+    ? new OpenRouterTranscriptionProvider(config.transcription)
     : new DisabledTranscriptionProvider();
 const renderer = new RemotionRenderer(config.workspaceRoot, artifacts);
 const quality = new QualityInspector(artifacts);
 const youtube = new YouTubeUploader(config.youtube);
 const app = express();
 
-app.use(cors({ origin: true, credentials: false }));
+const hasMcpAccess = (authorization: string | undefined): boolean => {
+  const expected = Buffer.from(`Bearer ${config.mcpAuthToken}`);
+  const received = Buffer.from(authorization ?? "");
+  return (
+    expected.byteLength === received.byteLength &&
+    timingSafeEqual(expected, received)
+  );
+};
+
+app.use(
+  cors({
+    credentials: false,
+    origin: (origin, done) => {
+      if (!origin || origin === config.studioOrigin) {
+        done(null, true);
+        return;
+      }
+      done(new Error("origin_not_allowed"));
+    },
+  }),
+);
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/", (_request, response) => {
@@ -74,6 +96,59 @@ app.get("/api/projects/:id", (request, response) => {
   });
 });
 
+app.post(
+  "/api/projects/:id/assets",
+  express.raw({ type: "application/octet-stream", limit: "256mb" }),
+  async (request, response) => {
+    try {
+      const project = store.getProject(request.params.id);
+      if (!project) {
+        response.status(404).json({ error: "project_not_found" });
+        return;
+      }
+      const encodedFilename = request.header("x-greenlight-filename");
+      if (!encodedFilename) {
+        response.status(400).json({ error: "filename_required" });
+        return;
+      }
+      const filename = basename(decodeURIComponent(encodedFilename));
+      const bytes = Buffer.isBuffer(request.body)
+        ? request.body
+        : Buffer.from(request.body ?? []);
+      const media = inspectImportedMedia(filename, bytes);
+      const artifact = await artifacts.importBuffer({
+        projectId: project.id,
+        kind: media.kind,
+        filename: `creator-media${media.extension}`,
+        bytes,
+        provenance: {
+          producer: "creator",
+          source: "local_import",
+          original_filename: filename,
+          declared_mime_type: request.header("x-greenlight-mime") ?? null,
+          inspected_mime_type: media.mimeType,
+        },
+      });
+      response.status(201).json({ artifact });
+    } catch (error) {
+      const code =
+        error instanceof Error ? error.message : "media_import_failed";
+      if (
+        [
+          "unsupported_media_type",
+          "empty_media_file",
+          "media_content_mismatch",
+          "URI malformed",
+        ].includes(code)
+      ) {
+        response.status(400).json({ error: code });
+        return;
+      }
+      throw error;
+    }
+  },
+);
+
 app.get("/api/artifacts/:id", (request, response) => {
   try {
     const resolvedArtifact = artifacts.resolveArtifact(request.params.id);
@@ -90,6 +165,10 @@ app.get("/api/artifacts/:id", (request, response) => {
 });
 
 app.post("/mcp", async (request, response) => {
+  if (!hasMcpAccess(request.header("authorization"))) {
+    response.status(401).json({ error: "unauthorized" });
+    return;
+  }
   try {
     const server = buildMcpServer({
       artifacts,
@@ -124,7 +203,7 @@ app.post("/mcp", async (request, response) => {
   }
 });
 
-const listener = app.listen(config.port, () => {
+const listener = app.listen(config.port, "127.0.0.1", () => {
   console.log(`[greenlight-mcp] http://localhost:${config.port}/mcp`);
 });
 

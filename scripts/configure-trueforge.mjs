@@ -5,12 +5,18 @@ const trueForgeUrl = (
 ).replace(/\/$/, "");
 const mcpUrl = process.env.GREENLIGHT_MCP_URL ?? "http://localhost:8941/mcp";
 const openRouterKey = process.env.OPENROUTER_API_KEY;
+const mcpAuthToken = process.env.GREENLIGHT_MCP_AUTH_TOKEN;
 const upstreamModel =
   process.env.GREENLIGHT_ROOT_MODEL ?? "deepseek/deepseek-v4-flash-vision-exp";
 
 if (!openRouterKey) {
   throw new Error(
     "OPENROUTER_API_KEY is required. Put it in ignored .env and rerun the command.",
+  );
+}
+if (!mcpAuthToken || mcpAuthToken.length < 32) {
+  throw new Error(
+    "GREENLIGHT_MCP_AUTH_TOKEN must contain at least 32 characters.",
   );
 }
 
@@ -72,6 +78,10 @@ await request("/api/v1/settings/mcp-servers", {
       url: mcpUrl,
       description:
         "Typed Greenlight production state, artifact, media, render, quality, YouTube staging, and release tools.",
+      auth: {
+        type: "header",
+        headers: { authorization: `Bearer ${mcpAuthToken}` },
+      },
     },
   }),
 });

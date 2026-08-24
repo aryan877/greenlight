@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import {
   contentPackageSchema,
   evidenceLedgerSchema,
+  productionDurationSeconds,
   qualityReportSchema,
   type QualityCheck,
 } from "@greenlight/contracts";
@@ -90,10 +91,7 @@ export class QualityInspector {
     const hasAudio = probeResult.streams?.some(
       (stream) => stream.codec_type === "audio",
     );
-    const plannedDuration = content.scenes.reduce(
-      (total, scene) => total + scene.duration_seconds,
-      0,
-    );
+    const plannedDuration = productionDurationSeconds(content.scenes);
     const checks: QualityCheck[] = [
       {
         name: "evidence_coverage",
@@ -137,6 +135,8 @@ export class QualityInspector {
     return qualityReportSchema.parse({
       project_id: input.projectId,
       video_artifact_id: input.videoArtifactId,
+      content_package_artifact_id: input.contentPackageArtifactId,
+      evidence_ledger_artifact_id: input.evidenceLedgerArtifactId,
       passed: checks.every((check) => check.passed),
       checks,
       created_at: now(),

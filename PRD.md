@@ -31,7 +31,7 @@ Success means one 30–120 second production can move from brief to unlisted rev
 
 ### Workspace
 
-- Left: actual media thumbnails, current cut, narration, captions, timed transcripts, sources, and locales
+- Left: creator-imported project media only, with real previews and direct attachment to Producer
 - Center: resizable 16:9 Program monitor with working playback, seek, mute, volume, and fullscreen
 - Bottom: collapsible and vertically resizable bundled-scene timeline with synchronized zoom and one playhead
 - Right: concise Producer activity or scene Inspector
@@ -42,10 +42,12 @@ The visual language is a distinct light editorial system: Archivo plus IBM Plex 
 ### Selection
 
 - Click selects a scene bundle; Shift/Cmd-click adds or removes scenes.
+- Dragging across the timeline draws a marquee and selects every intersecting scene bundle.
 - Clicking the production title selects the whole cut.
 - The composer shows compact removable scene chips and a count for overflow; this never limits actual selection.
 - The serialized selection contains project, base revision, ordered scene IDs, bundled track IDs, artifact IDs, source ledger ID when relevant, and the exact time range.
 - The Producer may call `focus_editor_selection` to move Studio to the scenes it is discussing.
+- A creator may import supported local media. Greenlight copies it into the project workspace, shows it in the media browser, and adds the chosen artifact to Producer context without revealing a host path.
 
 ### Editing
 
@@ -92,12 +94,13 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 - Codex subscription image generation is an optional, bounded tool using the installed `imagegen` skill.
 - Direct GPT Image API routes default to disabled.
 - Remotion owns layout, typography, timing, captions, transitions, and final encoding; generated images are assets, not the editor.
+- Creator images, clips, narration, and caption files are signature-checked, copied into immutable content-addressed storage, and placed on scenes by artifact ID. Imported video remains a real video source in preview and export.
 
 ### Voice and transcription
 
 - Voice provider/model/voice are configuration, not hardcoded pricing logic.
 - Current voice route: OpenRouter `google/gemini-3.1-flash-tts-preview`, voice `Kore`.
-- Current transcription route: OpenAI `gpt-4o-mini-transcribe` for reference text and `whisper-1` verbose word timestamps.
+- Current transcription route: OpenRouter `openai/gpt-4o-mini-transcribe` for reference text and local `whisper.cpp` for measured word timestamps.
 - `find_spoken_phrase` returns exact start/end word boundaries for commands such as “cut after this phrase.”
 - `correct_transcript` creates a new immutable revision while preserving measured timestamps.
 - Captions are grouped from measured words; TTS duration is never distributed by character count.
@@ -126,6 +129,8 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 
 - A selected scene appears as context in the composer and an agent can focus a different valid selection.
 - Multi-select and whole-cut selection preserve ordered scene IDs with no arbitrary cap.
+- Timeline marquee selection preserves complete scene bundles and a real canvas gutter.
+- An imported media file appears with its real thumbnail/type, becomes removable Producer context, previews on the selected scene, and resolves to the same immutable file during Remotion export.
 - A scoped title/visual/timing/speed patch visibly previews before execution.
 - Deny leaves the base revision byte-for-byte unchanged; Apply writes a patch artifact and one new content package.
 - Drag reorder and manual end trim travel through TrueForge, not a parallel local mutation path.

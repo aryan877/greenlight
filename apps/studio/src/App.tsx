@@ -17,9 +17,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useProducerAgent } from "./api/trueforge.js";
 import {
   useContentPackage,
-  useEvidenceLedger,
   useProject,
   useProjects,
+  useUploadAsset,
 } from "./api/queries.js";
 import {
   GeminiIcon,
@@ -41,11 +41,9 @@ export const App = () => {
   const projects = useProjects();
   const [projectId, setProjectId] = useState<string | null>(null);
   const [selectedSceneIds, setSelectedSceneIds] = useState<string[]>([]);
-  const [leftTab, setLeftTab] = useState<"media" | "sources">("media");
-  const [rightTab, setRightTab] = useState<"producer" | "inspector">(
-    "producer",
-  );
-  const [activeLocale, setActiveLocale] = useState("en");
+  const [rightTab, setRightTab] = useState<"producer" | "details">("producer");
+  const [attachedArtifactIds, setAttachedArtifactIds] = useState<string[]>([]);
+  const [importError, setImportError] = useState<string | null>(null);
   const [draftIntent, setDraftIntent] = useState<{
     id: string;
     text: string;
@@ -58,6 +56,7 @@ export const App = () => {
   }, [projectId, projects.data]);
 
   const project = useProject(projectId);
+  const uploadAsset = useUploadAsset(projectId);
   const contentArtifact =
     project.data?.artifacts
       .filter((artifact) => artifact.kind === "content_package")
@@ -68,10 +67,14 @@ export const App = () => {
       .at(-1) ?? null;
   const videoArtifact =
     project.data?.artifacts
-      .filter((artifact) => artifact.kind === "video")
+      .filter(
+        (artifact) =>
+          artifact.kind === "video" &&
+          artifact.provenance.content_package_artifact_id ===
+            contentArtifact?.id,
+      )
       .at(-1) ?? null;
   const content = useContentPackage(contentArtifact?.id ?? null);
-  const evidence = useEvidenceLedger(evidenceArtifact?.id ?? null);
 
   useEffect(() => {
     if (
@@ -106,6 +109,7 @@ export const App = () => {
       content: content.data,
       sceneIds: selectedSceneIds,
       sourceLedgerArtifact: evidenceArtifact,
+      extraArtifactIds: attachedArtifactIds,
     });
   }, [
     content.data,
@@ -113,7 +117,13 @@ export const App = () => {
     evidenceArtifact,
     projectId,
     selectedSceneIds,
+    attachedArtifactIds,
   ]);
+
+  useEffect(() => {
+    setAttachedArtifactIds([]);
+    setImportError(null);
+  }, [projectId]);
 
   const focusFromAgent = useCallback(
     (focus: EditorFocusInput) => {
@@ -260,18 +270,52 @@ export const App = () => {
     media.seek(sceneOffset(content.data.scenes, index));
   };
 
-  const selectArtifact = (artifactId: string) => {
+  const selectScenes = (sceneIds: string[]) => {
     if (!content.data) return;
-    const scene = content.data.scenes.find((candidate) =>
-      [
-        ...candidate.visual.artifact_ids,
-        candidate.narration_artifact_id,
-        candidate.captions_artifact_id,
-        candidate.transcript_artifact_id,
-      ].includes(artifactId),
+    const ordered = content.data.scenes
+      .filter((scene) => sceneIds.includes(scene.id))
+      .map((scene) => scene.id);
+    if (ordered.length === 0) return;
+    setSelectedSceneIds(ordered);
+    const first = content.data.scenes.findIndex(
+      (scene) => scene.id === ordered[0],
     );
-    if (scene) selectScene(scene.id);
-    setRightTab("inspector");
+    if (first >= 0) media.seek(sceneOffset(content.data.scenes, first));
+  };
+
+  const selectArtifact = (artifactId: string) => {
+    setAttachedArtifactIds((current) =>
+      current.includes(artifactId)
+        ? current.filter((id) => id !== artifactId)
+        : [...current, artifactId],
+    );
+    setRightTab("producer");
+    layout.setRightOpen(true);
+  };
+
+  const importMedia = async (files: File[]) => {
+    if (!projectId) return [];
+    setImportError(null);
+    try {
+      const imported: string[] = [];
+      for (const file of files) {
+        const artifact = await uploadAsset.mutateAsync(file);
+        imported.push(artifact.id);
+      }
+      setAttachedArtifactIds((current) => [
+        ...new Set([...current, ...imported]),
+      ]);
+      setRightTab("producer");
+      layout.setRightOpen(true);
+      return imported;
+    } catch (error) {
+      setImportError(
+        error instanceof Error
+          ? `Import failed · ${error.message.replaceAll("_", " ")}`
+          : "Import failed",
+      );
+      return [];
+    }
   };
 
   const leftPaneWidth = layout.leftOpen ? layout.leftWidth : 42;
@@ -336,19 +380,12 @@ export const App = () => {
         >
           {layout.leftOpen ? (
             <MediaBrowser
-              content={content.data ?? null}
               artifacts={project.data?.artifacts ?? []}
-              sourceLedger={evidence.data ?? null}
-              activeTab={leftTab}
-              activeLocale={activeLocale}
+              attachedArtifactIds={attachedArtifactIds}
+              importing={uploadAsset.isPending}
+              importError={importError}
               onSelectArtifact={selectArtifact}
-              onTab={setLeftTab}
-              onLocale={setActiveLocale}
-              onAddLocale={() =>
-                directProducer(
-                  "Add one new language track for this selected scene. Ask me for the locale, then generate separate narration and captions without changing the visual cut.",
-                )
-              }
+              onImport={(files) => void importMedia(files)}
               onCollapse={() => layout.setLeftOpen(false)}
             />
           ) : (
@@ -371,6 +408,7 @@ export const App = () => {
         <div className="flex min-w-0 flex-1 flex-col">
           <ProgramMonitor
             scene={visibleScene}
+            artifacts={project.data?.artifacts ?? []}
             video={videoArtifact}
             media={media}
             previewing={Boolean(previewContent)}
@@ -408,6 +446,7 @@ export const App = () => {
                     onSelect={(scene, additive) =>
                       selectScene(scene.id, additive)
                     }
+                    onSelectMany={selectScenes}
                     onSeek={media.seek}
                     onIntent={directProducer}
                     onEditorCommand={runEditorCommand}
@@ -437,7 +476,7 @@ export const App = () => {
           {layout.rightOpen ? (
             <aside className="flex h-full min-h-0 flex-col bg-surface">
               <div className="flex h-10 shrink-0 items-end border-b border-line-subtle px-2">
-                {(["producer", "inspector"] as const).map((tab) => (
+                {(["producer", "details"] as const).map((tab) => (
                   <button
                     type="button"
                     key={tab}
@@ -469,6 +508,9 @@ export const App = () => {
                   <ProducerPanel
                     content={content.data ?? null}
                     selection={selection}
+                    contextArtifacts={(project.data?.artifacts ?? []).filter(
+                      (artifact) => attachedArtifactIds.includes(artifact.id),
+                    )}
                     draftIntent={draftIntent}
                     events={producer.events}
                     pendingApprovals={producer.pendingApprovals}
@@ -477,8 +519,8 @@ export const App = () => {
                     onSend={(instruction) =>
                       producer.send({ instruction, selection })
                     }
-                    onApproval={(pending, status) =>
-                      producer.decideApproval({ pending, status })
+                    onApproval={(pending, status, reason) =>
+                      producer.decideApproval({ pending, status, reason })
                     }
                     onRemoveScene={(sceneId) =>
                       setSelectedSceneIds((current) => {
@@ -486,16 +528,24 @@ export const App = () => {
                         return next.length > 0 ? next : current;
                       })
                     }
+                    onRemoveArtifact={(artifactId) =>
+                      setAttachedArtifactIds((current) =>
+                        current.filter((id) => id !== artifactId),
+                      )
+                    }
+                    onAttachArtifact={selectArtifact}
+                    onImportFiles={importMedia}
+                    importing={uploadAsset.isPending}
                   />
                 </div>
                 <div
                   className={
-                    rightTab === "inspector" ? "h-full" : "hidden h-full"
+                    rightTab === "details" ? "h-full" : "hidden h-full"
                   }
                 >
                   <InspectorPanel
                     scene={visibleScene}
-                    sourceLedger={evidence.data ?? null}
+                    onEdit={(instruction) => directProducer(instruction)}
                   />
                 </div>
               </div>

@@ -203,7 +203,7 @@ export class GreenlightStore {
     const valid = artifactSchema.parse(artifact);
     this.db
       .prepare(
-        `INSERT INTO artifacts
+        `INSERT OR IGNORE INTO artifacts
           (id, project_id, kind, sha256, relative_path, mime_type, byte_size, provenance_json, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
@@ -218,7 +218,14 @@ export class GreenlightStore {
         JSON.stringify(valid.provenance),
         valid.created_at,
       );
-    return valid;
+    const saved = this.db
+      .prepare(
+        "SELECT * FROM artifacts WHERE project_id = ? AND kind = ? AND sha256 = ?",
+      )
+      .get(valid.project_id, valid.kind, valid.sha256) as
+      ArtifactRow | undefined;
+    if (!saved) throw new Error("artifact_save_failed");
+    return toArtifact(saved);
   }
 
   getArtifact(id: string): Artifact | null {
@@ -231,10 +238,24 @@ export class GreenlightStore {
   listArtifacts(projectId: string): Artifact[] {
     const rows = this.db
       .prepare(
-        "SELECT * FROM artifacts WHERE project_id = ? ORDER BY created_at ASC",
+        "SELECT * FROM artifacts WHERE project_id = ? ORDER BY created_at ASC, rowid ASC",
       )
       .all(projectId) as ArtifactRow[];
     return rows.map(toArtifact);
+  }
+
+  getLatestArtifact(
+    projectId: string,
+    kind: Artifact["kind"],
+  ): Artifact | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM artifacts
+         WHERE project_id = ? AND kind = ?
+         ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+      )
+      .get(projectId, kind) as ArtifactRow | undefined;
+    return row ? toArtifact(row) : null;
   }
 
   beginOperation(input: {
@@ -245,11 +266,26 @@ export class GreenlightStore {
   }): { id: string; existing: boolean; result: unknown | null } {
     const existing = this.db
       .prepare(
-        "SELECT id, result_json FROM operations WHERE idempotency_key = ?",
+        `SELECT id, project_id, type, input_sha256, result_json
+         FROM operations WHERE idempotency_key = ?`,
       )
       .get(input.idempotencyKey) as
-      { id: string; result_json: string | null } | undefined;
+      | {
+          id: string;
+          project_id: string;
+          type: string;
+          input_sha256: string;
+          result_json: string | null;
+        }
+      | undefined;
     if (existing) {
+      if (
+        existing.project_id !== input.projectId ||
+        existing.type !== input.type ||
+        existing.input_sha256 !== hashJson(input.payload)
+      ) {
+        throw new Error("idempotency_key_conflict");
+      }
       return {
         id: existing.id,
         existing: true,
@@ -358,12 +394,33 @@ export class GreenlightStore {
     };
   }
 
-  updateReleasePrivacy(id: string, privacy: "public" | "scheduled"): void {
+  claimRelease(id: string, state: "publishing" | "scheduling"): void {
     const result = this.db
       .prepare(
         "UPDATE releases SET privacy = ?, updated_at = ? WHERE id = ? AND privacy = 'unlisted'",
       )
-      .run(privacy, now(), id);
+      .run(state, now(), id);
     if (result.changes !== 1) throw new Error("release_not_unlisted");
+  }
+
+  completeRelease(
+    id: string,
+    from: "publishing" | "scheduling",
+    privacy: "public" | "scheduled",
+  ): void {
+    const result = this.db
+      .prepare(
+        "UPDATE releases SET privacy = ?, updated_at = ? WHERE id = ? AND privacy = ?",
+      )
+      .run(privacy, now(), id, from);
+    if (result.changes !== 1) throw new Error("release_state_changed");
+  }
+
+  releaseClaim(id: string, from: "publishing" | "scheduling"): void {
+    this.db
+      .prepare(
+        "UPDATE releases SET privacy = 'unlisted', updated_at = ? WHERE id = ? AND privacy = ?",
+      )
+      .run(now(), id, from);
   }
 }

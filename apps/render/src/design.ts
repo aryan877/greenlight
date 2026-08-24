@@ -1,5 +1,6 @@
 import { loadFont as loadArchivo } from "@remotion/google-fonts/Archivo";
 import { loadFont as loadMono } from "@remotion/google-fonts/IBMPlexMono";
+import { VIDEO_FPS, VIDEO_TRANSITION_FRAMES } from "@greenlight/contracts";
 import { Easing } from "remotion";
 
 const editorial = loadArchivo("normal", {
@@ -17,10 +18,10 @@ export const renderSpec = {
     height: 1080,
     thumbnailWidth: 1280,
     thumbnailHeight: 720,
-    fps: 30,
+    fps: VIDEO_FPS,
   },
   timing: {
-    transitionFrames: 10,
+    transitionFrames: VIDEO_TRANSITION_FRAMES,
     enterSeconds: 0.55,
     easeOut: Easing.bezier(0.16, 1, 0.3, 1),
   },

@@ -1,9 +1,29 @@
-import type { ContentPackage, Scene } from "@greenlight/contracts";
-import { ChevronDown, Plus, Split, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  MIN_SCENE_DURATION_SECONDS,
+  VIDEO_FPS,
+  type ContentPackage,
+  type Scene,
+} from "@greenlight/contracts";
+import {
+  Captions,
+  ChevronDown,
+  Layers3,
+  Mic2,
+  Plus,
+  Split,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import { useRef, useState } from "react";
 
 import { formatTime, sceneOffset, totalDuration } from "../editor/model.js";
 import { cx, IconButton } from "./controls.js";
+
+type Marquee = {
+  pointerId: number;
+  startX: number;
+  currentX: number;
+};
 
 export const Timeline = ({
   content,
@@ -12,6 +32,7 @@ export const Timeline = ({
   previewing,
   currentTime,
   onSelect,
+  onSelectMany,
   onSeek,
   onIntent,
   onEditorCommand,
@@ -24,6 +45,7 @@ export const Timeline = ({
   previewing: boolean;
   currentTime: number;
   onSelect: (scene: Scene, additive: boolean) => void;
+  onSelectMany: (sceneIds: string[]) => void;
   onSeek: (seconds: number) => void;
   onIntent: (instruction: string) => void;
   onEditorCommand: (sceneIds: string[], instruction: string) => void;
@@ -39,7 +61,13 @@ export const Timeline = ({
     sceneId: string;
     duration: number;
   } | null>(null);
+  const [marquee, setMarquee] = useState<Marquee | null>(null);
+  const marqueeRef = useRef<Marquee | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
+  const updateMarquee = (next: Marquee | null) => {
+    marqueeRef.current = next;
+    setMarquee(next);
+  };
   const updateZoom = (delta: number) =>
     setZoom((current) => Math.min(4, Math.max(1, current + delta)));
 
@@ -61,7 +89,7 @@ export const Timeline = ({
           {content.headline}
         </button>
         <span className="ml-2 font-mono text-[9px] text-ink-caption">
-          {formatTime(duration)} · 30 fps
+          {formatTime(duration)} · {VIDEO_FPS} fps
         </span>
         <span className="ml-3 text-[9px] text-ink-tertiary">
           {selectedSceneIds.length === content.scenes.length
@@ -113,12 +141,13 @@ export const Timeline = ({
       <div className="scroll-stable min-h-0 flex-1 overflow-x-auto overflow-y-hidden bg-surface-sunken">
         <div
           className="relative h-full min-w-full"
-          style={{ width: `${zoom * 100}%` }}
+          style={{ width: `calc(${zoom * 100}% + 24px)` }}
         >
           <button
             type="button"
             aria-label="Seek timeline"
-            className="relative block h-7 w-full border-b border-line-subtle"
+            className="relative mx-3 block h-7 border-b border-line-subtle"
+            style={{ width: "calc(100% - 24px)" }}
             onClick={(event) => {
               const bounds = event.currentTarget.getBoundingClientRect();
               onSeek(((event.clientX - bounds.left) / bounds.width) * duration);
@@ -127,7 +156,14 @@ export const Timeline = ({
             {Array.from({ length: 7 }, (_, index) => (
               <span
                 key={index}
-                className="pointer-events-none absolute top-2 -translate-x-1/2 font-mono text-[8px] text-ink-caption"
+                className={cx(
+                  "pointer-events-none absolute top-2 font-mono text-[8px] text-ink-caption",
+                  index === 0
+                    ? "translate-x-0"
+                    : index === 6
+                      ? "-translate-x-full"
+                      : "-translate-x-1/2",
+                )}
                 style={{ left: `${(index / 6) * 100}%` }}
               >
                 {formatTime((index / 6) * duration)}
@@ -137,7 +173,67 @@ export const Timeline = ({
 
           <div
             ref={trackRef}
-            className="relative h-[76px] border-b border-line-subtle bg-surface"
+            data-testid="timeline-track"
+            className="relative mx-3 h-[112px] cursor-crosshair border-b border-line-subtle bg-surface"
+            style={{ width: "calc(100% - 24px)" }}
+            onPointerDown={(event) => {
+              if (
+                event.button !== 0 ||
+                (event.target as HTMLElement).closest("[data-scene-clip]")
+              ) {
+                return;
+              }
+              const bounds = event.currentTarget.getBoundingClientRect();
+              const startX = Math.max(
+                0,
+                Math.min(bounds.width, event.clientX - bounds.left),
+              );
+              event.currentTarget.setPointerCapture(event.pointerId);
+              updateMarquee({
+                pointerId: event.pointerId,
+                startX,
+                currentX: startX,
+              });
+            }}
+            onPointerMove={(event) => {
+              const active = marqueeRef.current;
+              if (!active || active.pointerId !== event.pointerId) return;
+              const bounds = event.currentTarget.getBoundingClientRect();
+              updateMarquee({
+                ...active,
+                currentX: Math.max(
+                  0,
+                  Math.min(bounds.width, event.clientX - bounds.left),
+                ),
+              });
+            }}
+            onPointerUp={(event) => {
+              const active = marqueeRef.current;
+              if (!active || active.pointerId !== event.pointerId) return;
+              const bounds = event.currentTarget.getBoundingClientRect();
+              const endX = Math.max(
+                0,
+                Math.min(bounds.width, event.clientX - bounds.left),
+              );
+              const left = Math.min(active.startX, endX);
+              const right = Math.max(active.startX, endX);
+              updateMarquee(null);
+              event.currentTarget.releasePointerCapture(event.pointerId);
+              if (right - left < 4) return;
+              const selected = content.scenes.flatMap((scene, index) => {
+                const sceneLeft =
+                  (sceneOffset(content.scenes, index) / duration) *
+                  bounds.width;
+                const sceneRight =
+                  sceneLeft +
+                  (scene.duration_seconds / duration) * bounds.width;
+                return sceneRight >= left && sceneLeft <= right
+                  ? [scene.id]
+                  : [];
+              });
+              if (selected.length > 0) onSelectMany(selected);
+            }}
+            onPointerCancel={() => updateMarquee(null)}
           >
             {content.scenes.map((scene, index) => {
               const left =
@@ -152,7 +248,8 @@ export const Timeline = ({
               return (
                 <div
                   key={scene.id}
-                  draggable={!previewing}
+                  data-scene-clip
+                  draggable={!previewing && !marquee}
                   onDragStart={(event) => {
                     setDraggedSceneId(scene.id);
                     event.dataTransfer.effectAllowed = "move";
@@ -188,7 +285,7 @@ export const Timeline = ({
                     );
                   }}
                   className={cx(
-                    "group absolute inset-y-1.5 min-w-0 rounded-md border bg-surface-raised transition-[border-color,background-color,box-shadow] duration-100",
+                    "group absolute bottom-1 top-5 min-w-0 cursor-default overflow-hidden rounded-md border bg-surface-raised transition-[border-color,background-color,box-shadow] duration-100",
                     selected
                       ? "z-10 border-action bg-action-soft/45 ring-1 ring-action/20"
                       : "border-line hover:border-line-strong hover:bg-hover",
@@ -210,40 +307,50 @@ export const Timeline = ({
                       );
                       onSeek(sceneOffset(content.scenes, index));
                     }}
-                    className="size-full overflow-hidden rounded-[inherit] px-3 text-left"
+                    className="grid size-full grid-rows-3 overflow-hidden rounded-[inherit] text-left"
                   >
-                    <span className="block truncate text-[10px] font-medium text-ink">
-                      {scene.title}
+                    <span className="flex min-w-0 items-center gap-1.5 bg-track-video px-2.5 text-[9px] text-ink">
+                      <Layers3
+                        size={10}
+                        className="shrink-0 text-track-video-strong"
+                      />
+                      <span className="truncate font-medium">
+                        {scene.title}
+                      </span>
+                      <span className="ml-auto shrink-0 font-mono text-[7px] text-ink-caption">
+                        {formatTime(displayedDuration)}
+                        {scene.playback_rate !== 1
+                          ? ` · ${scene.playback_rate.toFixed(2)}×`
+                          : ""}
+                      </span>
                     </span>
-                    <span className="mt-1 block font-mono text-[8px] text-ink-caption">
-                      {formatTime(displayedDuration)}
-                      {scene.playback_rate !== 1
-                        ? ` · ${scene.playback_rate.toFixed(2)}×`
-                        : ""}
+                    <span
+                      className={cx(
+                        "flex min-w-0 items-center gap-1.5 border-t border-white/80 px-2.5 text-[8px] text-ink-secondary",
+                        scene.narration_artifact_id
+                          ? "bg-track-voice"
+                          : "bg-surface-sunken",
+                      )}
+                    >
+                      <Mic2
+                        size={9}
+                        className="shrink-0 text-track-voice-strong"
+                      />
+                      <span className="truncate">{scene.narration}</span>
                     </span>
-                    <span className="absolute inset-x-2 bottom-2 flex h-1 gap-1">
-                      <i
-                        className="min-w-0 flex-1 rounded-full bg-track-video-strong not-italic"
-                        title="Visual"
+                    <span
+                      className={cx(
+                        "flex min-w-0 items-center gap-1.5 border-t border-white/80 px-2.5 text-[8px] text-ink-secondary",
+                        scene.captions_artifact_id
+                          ? "bg-track-caption"
+                          : "bg-surface-sunken",
+                      )}
+                    >
+                      <Captions
+                        size={9}
+                        className="shrink-0 text-track-caption-strong"
                       />
-                      <i
-                        className={cx(
-                          "min-w-0 flex-1 rounded-full not-italic",
-                          scene.narration_artifact_id
-                            ? "bg-track-voice-strong"
-                            : "bg-line-strong",
-                        )}
-                        title="Voice"
-                      />
-                      <i
-                        className={cx(
-                          "min-w-0 flex-1 rounded-full not-italic",
-                          scene.captions_artifact_id
-                            ? "bg-track-caption-strong"
-                            : "bg-line-strong",
-                        )}
-                        title="Captions"
-                      />
+                      <span className="truncate">{scene.narration}</span>
                     </span>
                   </button>
                   {selected && !previewing ? (
@@ -268,7 +375,7 @@ export const Timeline = ({
                           setTrim({
                             sceneId: scene.id,
                             duration: Math.max(
-                              0.1,
+                              MIN_SCENE_DURATION_SECONDS,
                               Math.min(initial, Math.round(seconds * 10) / 10),
                             ),
                           });
@@ -279,7 +386,7 @@ export const Timeline = ({
                             ((pointer.clientX - startX) / trackWidth) *
                               duration;
                           const next = Math.max(
-                            0.1,
+                            MIN_SCENE_DURATION_SECONDS,
                             Math.min(initial, Math.round(seconds * 10) / 10),
                           );
                           setTrim(null);
@@ -301,6 +408,15 @@ export const Timeline = ({
                 </div>
               );
             })}
+            {marquee ? (
+              <div
+                className="pointer-events-none absolute inset-y-1 z-30 rounded-sm border border-action bg-action/10"
+                style={{
+                  left: Math.min(marquee.startX, marquee.currentX),
+                  width: Math.abs(marquee.currentX - marquee.startX),
+                }}
+              />
+            ) : null}
             <div
               className="pointer-events-none absolute -top-7 bottom-0 z-20 w-px bg-action"
               style={{ left: `${playhead}%` }}
@@ -309,11 +425,11 @@ export const Timeline = ({
             </div>
           </div>
 
-          <div className="flex h-8 items-center justify-between px-3 text-[9px] text-ink-caption">
+          <div className="flex h-8 items-center justify-between px-4 text-[9px] text-ink-caption">
             <span>
               {previewing
                 ? "Preview · approve or reject on the right"
-                : "Click a scene · Shift-click to add more"}
+                : "Drag to select · Shift-click to add"}
             </span>
             <span>Visual · Voice · Captions stay together</span>
           </div>

@@ -2,7 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 
 import type { ContentPackage, Scene } from "@greenlight/contracts";
 import { fitText } from "@remotion/layout-utils";
-import { Audio } from "@remotion/media";
+import { Audio, Video } from "@remotion/media";
 import { TransitionSeries, linearTiming } from "@remotion/transitions";
 import { fade } from "@remotion/transitions/fade";
 import {
@@ -237,10 +237,24 @@ const OpenMojiTreatment = ({ assetFiles, scene }: TreatmentProps) => {
                   opacity: enter,
                 }}
               >
-                <Img
-                  src={staticFile(file)}
-                  style={{ width: "72%", height: "72%", objectFit: "contain" }}
-                />
+                {/\.(mp4|mov|webm)$/i.test(file) ? (
+                  <Video
+                    src={staticFile(file)}
+                    muted
+                    loop
+                    objectFit="cover"
+                    style={{ width: "100%", height: "100%", borderRadius: 54 }}
+                  />
+                ) : (
+                  <Img
+                    src={staticFile(file)}
+                    style={{
+                      width: "72%",
+                      height: "72%",
+                      objectFit: "contain",
+                    }}
+                  />
+                )}
               </div>
             );
           })}
@@ -264,9 +278,13 @@ const treatments = {
 
 const EditorialScene = ({
   assetFiles,
+  isFirst,
+  isLast,
   scene,
 }: {
   assetFiles: Record<string, string>;
+  isFirst: boolean;
+  isLast: boolean;
   scene: Scene;
 }) => {
   const Treatment = treatments[scene.visual.treatment];
@@ -296,6 +314,27 @@ const EditorialScene = ({
         <Audio
           playbackRate={scene.playback_rate}
           src={staticFile(narrationFile)}
+          volume={(frame) => {
+            const duration = Math.round(scene.duration_seconds * FPS);
+            const fadeIn = isFirst
+              ? 1
+              : interpolate(frame, [0, TRANSITION_FRAMES], [0, 1], {
+                  extrapolateLeft: "clamp",
+                  extrapolateRight: "clamp",
+                });
+            const fadeOut = isLast
+              ? 1
+              : interpolate(
+                  frame,
+                  [duration - TRANSITION_FRAMES, duration],
+                  [1, 0],
+                  {
+                    extrapolateLeft: "clamp",
+                    extrapolateRight: "clamp",
+                  },
+                );
+            return Math.min(fadeIn, fadeOut);
+          }}
         />
       ) : null}
     </AbsoluteFill>
@@ -318,7 +357,12 @@ export const GreenlightFilm = ({ assetFiles, content }: RenderProject) => {
         durationInFrames={Math.round(scene.duration_seconds * FPS)}
         premountFor={FPS}
       >
-        <EditorialScene assetFiles={assetFiles} scene={scene} />
+        <EditorialScene
+          assetFiles={assetFiles}
+          isFirst={index === 0}
+          isLast={index === content.scenes.length - 1}
+          scene={scene}
+        />
       </TransitionSeries.Sequence>,
     );
     if (index < content.scenes.length - 1) {
@@ -342,7 +386,10 @@ export const GreenlightThumbnail = ({ assetFiles, content }: RenderProject) => {
   const firstAsset = content.scenes
     .flatMap((scene) => scene.visual.artifact_ids)
     .map((id) => assetFiles[id])
-    .find(Boolean);
+    .find(
+      (file): file is string =>
+        typeof file === "string" && !/\.(mp4|mov|webm)$/i.test(file),
+    );
   return (
     <AbsoluteFill
       style={{

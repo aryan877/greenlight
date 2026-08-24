@@ -1,17 +1,17 @@
-import type {
-  Artifact,
-  ContentPackage,
-  EditorSelection,
-  Scene,
+import {
+  productionDurationSeconds,
+  sceneStartSeconds,
+  type Artifact,
+  type ContentPackage,
+  type EditorSelection,
+  type Scene,
 } from "@greenlight/contracts";
 
 export const sceneOffset = (scenes: Scene[], index: number) =>
-  scenes
-    .slice(0, index)
-    .reduce((sum, scene) => sum + scene.duration_seconds, 0);
+  sceneStartSeconds(scenes, index);
 
 export const totalDuration = (content: ContentPackage) =>
-  content.scenes.reduce((sum, scene) => sum + scene.duration_seconds, 0);
+  productionDurationSeconds(content.scenes);
 
 export const formatTime = (seconds: number) => {
   const safe = Math.max(0, seconds);
@@ -33,6 +33,7 @@ export const createSelection = (input: {
   content: ContentPackage;
   sceneIds: string[];
   sourceLedgerArtifact: Artifact | null;
+  extraArtifactIds?: string[];
 }): EditorSelection => {
   const selected = input.content.scenes
     .map((scene, index) => ({ scene, index }))
@@ -42,7 +43,10 @@ export const createSelection = (input: {
   const first = selected[0]!;
   const last = selected.at(-1)!;
   const artifactIds = [
-    ...new Set(selected.flatMap(({ scene }) => sceneArtifacts(scene))),
+    ...new Set([
+      ...selected.flatMap(({ scene }) => sceneArtifacts(scene)),
+      ...(input.extraArtifactIds ?? []),
+    ]),
   ];
   if (
     selected.some(({ scene }) => scene.claim_ids.length > 0) &&

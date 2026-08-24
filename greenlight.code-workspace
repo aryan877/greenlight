@@ -6,15 +6,15 @@
     },
     {
       "name": "TrueForge source (reference)",
-      "path": "/Users/aryankumar/trueforge-hackathon/trueforge-main",
+      "path": "../../../../trueforge-hackathon/trueforge-main",
     },
     {
       "name": "TrueForge cookbook (reference)",
-      "path": "/Users/aryankumar/trueforge-hackathon/trueforge-examples",
+      "path": "../../../../trueforge-hackathon/trueforge-examples",
     },
     {
       "name": "YouTube uploader (reference)",
-      "path": "/Users/aryankumar/youtube-uploader",
+      "path": "../../../../youtube-uploader",
     },
   ],
   "settings": {

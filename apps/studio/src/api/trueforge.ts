@@ -5,7 +5,7 @@ import {
   type EditorSelection,
 } from "@greenlight/contracts";
 import { mergeEventDelta, TrueForge } from "@truefoundry/trueforge-sdk";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { greenlightKeys } from "./queries.js";
 
@@ -15,6 +15,16 @@ export type StudioAgentEvent = {
   label: string;
   detail: string;
   sceneIds: string[];
+  document?: StudioReviewDocument;
+};
+
+export type StudioReviewDocument = {
+  title: string;
+  subtitle: string;
+  sections: Array<{
+    title: string;
+    lines: string[];
+  }>;
 };
 
 export type PendingToolApproval = {
@@ -95,6 +105,74 @@ const toolPresentation = (
     generate_image: { kind: "artifact", label: "Created a visual" },
     run_quality_checks: { kind: "tool", label: "Checked the finished cut" },
   };
+  if (call.function.name === "save_evidence_ledger") {
+    const sources = Array.isArray(args.sources)
+      ? (args.sources as Array<Record<string, unknown>>)
+      : [];
+    const claims = Array.isArray(args.claims)
+      ? (args.claims as Array<Record<string, unknown>>)
+      : [];
+    return {
+      kind: "artifact",
+      label: "Research is ready",
+      detail: `${sources.length} references · ${claims.length} checked claims`,
+      sceneIds,
+      document: {
+        title: "Research",
+        subtitle: "The facts behind this production",
+        sections: [
+          {
+            title: "Claims",
+            lines: claims
+              .map((claim) => String(claim.text ?? ""))
+              .filter(Boolean),
+          },
+          {
+            title: "References",
+            lines: sources
+              .map((source) => String(source.title ?? source.url ?? ""))
+              .filter(Boolean),
+          },
+        ],
+      },
+    };
+  }
+  if (call.function.name === "save_content_package") {
+    const scenes = Array.isArray(args.scenes)
+      ? (args.scenes as Array<Record<string, unknown>>)
+      : [];
+    const metadata =
+      args.metadata && typeof args.metadata === "object"
+        ? (args.metadata as Record<string, unknown>)
+        : {};
+    return {
+      kind: "artifact",
+      label: "Storyboard is ready",
+      detail: `${scenes.length} scenes · ${String(metadata.title ?? args.headline ?? "Untitled")}`,
+      sceneIds,
+      document: {
+        title: String(args.headline ?? "Storyboard"),
+        subtitle: String(args.dek ?? "Script, scenes, and release copy"),
+        sections: [
+          {
+            title: "Scenes",
+            lines: scenes.map((scene, index) => {
+              const title = String(scene.title ?? `Scene ${index + 1}`);
+              const narration = String(scene.narration ?? "");
+              return `${index + 1}. ${title}${narration ? ` — ${narration}` : ""}`;
+            }),
+          },
+          {
+            title: "YouTube",
+            lines: [
+              String(metadata.title ?? ""),
+              String(metadata.description ?? ""),
+            ].filter(Boolean),
+          },
+        ],
+      },
+    };
+  }
   const presentation = presentations[call.function.name];
   return presentation
     ? { ...presentation, detail: presentation.detail ?? "", sceneIds }
@@ -153,6 +231,7 @@ export const useProducerAgent = (
   onFocus: (focus: EditorFocusInput) => void,
 ) => {
   const sessionId = useRef<string | null>(null);
+  const activeProjectId = useRef(projectId);
   const eventStore = useRef(new Map<string, WireEvent>());
   const [events, setEvents] = useState<StudioAgentEvent[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<
@@ -160,11 +239,21 @@ export const useProducerAgent = (
   >([]);
   const queryClient = useQueryClient();
 
+  useEffect(() => {
+    activeProjectId.current = projectId;
+    sessionId.current = null;
+    eventStore.current.clear();
+    setEvents([]);
+    setPendingApprovals([]);
+  }, [projectId]);
+
   const consume = useCallback(
     async (
       stream: Awaited<ReturnType<typeof trueforge.sessions.createTurnStream>>,
+      streamProjectId: string,
     ) => {
       for await (const envelope of stream.withMetadata()) {
+        if (activeProjectId.current !== streamProjectId) return;
         const incoming = envelope.data as unknown as WireEvent;
         let event = incoming;
         if (incoming.type === "model.message.delta") {
@@ -267,6 +356,7 @@ export const useProducerAgent = (
       instruction: string;
       selection: EditorSelection | null;
     }) => {
+      if (!projectId) throw new Error("project_not_selected");
       if (!sessionId.current) {
         const created = await trueforge.sessions.create({
           agent: { name: "greenlight-producer" },
@@ -282,12 +372,12 @@ export const useProducerAgent = (
           input: [
             {
               type: "user.message",
-              content: `${input.instruction}${selectionContext}`,
+              content: `PROJECT_ID: ${projectId}\n\n${input.instruction}${selectionContext}`,
             },
           ],
         },
       );
-      await consume(stream);
+      await consume(stream, projectId);
     },
     onSuccess: async () => {
       if (projectId) {
@@ -305,6 +395,7 @@ export const useProducerAgent = (
       reason?: string;
     }) => {
       if (!sessionId.current) throw new Error("producer_session_missing");
+      if (!projectId) throw new Error("project_not_selected");
       const stream = await trueforge.sessions.createTurnStream(
         sessionId.current,
         {
@@ -324,7 +415,7 @@ export const useProducerAgent = (
       setPendingApprovals((current) =>
         current.filter((item) => item.toolCallId !== input.pending.toolCallId),
       );
-      await consume(stream);
+      await consume(stream, projectId);
     },
     onSuccess: async () => {
       if (projectId) {

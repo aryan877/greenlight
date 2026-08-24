@@ -61,14 +61,19 @@ try {
       }
     },
   });
-  const composition = await selectComposition({
+  const filmComposition = await selectComposition({
     serveUrl,
     id: "GreenlightFilm",
     inputProps,
   });
+  const thumbnailComposition = await selectComposition({
+    serveUrl,
+    id: "GreenlightThumbnail",
+    inputProps,
+  });
 
   await renderMedia({
-    composition,
+    composition: filmComposition,
     serveUrl,
     codec: "h264",
     audioCodec: "aac",
@@ -79,13 +84,7 @@ try {
     },
   });
   await renderStill({
-    composition: {
-      ...composition,
-      id: "GreenlightThumbnail",
-      width: 1280,
-      height: 720,
-      durationInFrames: 1,
-    },
+    composition: thumbnailComposition,
     serveUrl,
     output: thumbnailPath,
     inputProps,

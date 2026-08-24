@@ -9,13 +9,14 @@ The editor is the product surface. Selecting one or many scene bundles gives the
 - TrueForge root agent with typed MCP tools, sandbox, dynamic subagents, streamed turns, and resumable approvals
 - Immutable projects and artifacts in SQLite plus content-addressed local files
 - Scene-bundle selection with no arbitrary selection or scene-count cap
-- Shift/Cmd multi-select, whole-cut selection, drag reorder, end trim, timeline zoom, playback, mute, volume, and resizable/collapsible panes
+- Click, Shift/Cmd, and marquee multi-select; whole-cut selection, drag reorder, end trim, timeline zoom, playback, mute, volume, and resizable/collapsible panes
+- A creator-media bin with real previews, signature-checked import, click/drag attachment, and direct file drop into Producer
 - Agent-driven Studio focus through `focus_editor_selection`
 - One shared Zod patch contract and reducer for Studio preview and MCP persistence
 - OpenMoji search and attachment with licensed SVG provenance
 - Optional bounded Codex-subscription image generation; GPT Image API routes stay disabled
 - Gemini voice through OpenRouter with provider/model provenance
-- Core timed transcription: `gpt-4o-mini-transcribe` reference text plus Whisper word boundaries, exact phrase lookup, corrections, and captions derived from measured timing
+- Core timed transcription: OpenRouter `gpt-4o-mini-transcribe` reference text plus local `whisper.cpp` word boundaries, exact phrase lookup, corrections, and captions derived from measured timing
 - Deterministic Remotion render, thumbnail, FFprobe-backed quality checks, and playback-rate support
 - Local YouTube OAuth wrapper, unlisted-first staging, immutable release snapshots, and approval-gated publish/schedule tools
 
@@ -41,14 +42,15 @@ Greenlight MCP
 
 ## Run locally
 
-Requirements: Node 22+, pnpm 9+, FFmpeg/FFprobe, and a local TrueForge server.
+Requirements: Node 22+, pnpm 9+, FFmpeg/FFprobe, `whisper-cli`, a local Whisper model, and a local TrueForge server. Greenlight defaults to `~/.cache/greenlight/models/ggml-base.bin`; override `GREENLIGHT_WHISPER_MODEL` for a larger multilingual model.
 
 ```bash
 pnpm install
 cp .env.example .env
+openssl rand -hex 32 # paste as GREENLIGHT_MCP_AUTH_TOKEN
 ```
 
-Put provider keys only in `.env`. At minimum, the current root model needs `OPENROUTER_API_KEY`. `OPENAI_API_KEY` is needed only when timed transcription is called. Never commit `.env`.
+Put provider keys only in `.env`. The current root model, voice, and reference transcription use `OPENROUTER_API_KEY`. Precise word timing runs locally through `whisper.cpp`; no separate OpenAI key is needed. Never commit `.env`.
 
 Start TrueForge in one terminal:
 
@@ -82,11 +84,14 @@ The suite covers contracts, scoped patch safety, storage, voice conversion, tran
 ## Safety boundaries
 
 - Models receive artifact IDs, never host paths or OAuth credentials.
+- Creator media is copied into content-addressed project storage; the original stays untouched and no external symlink enters the workspace.
 - Visual, narration, caption, transcript, timing, and source context move as one scene bundle.
 - Local edits create immutable revisions; the base cut is never overwritten.
 - Generated narration is never given estimated word timing.
 - YouTube uploads are unlisted first.
+- TrueForge authenticates to the MCP service with a private header; the Studio never receives that credential.
 - `apply_editor_patch`, render, upload, publish, and schedule are TrueForge approval-gated in the hackathon agent.
+- Publish and schedule atomically claim an unlisted release before contacting YouTube, preventing concurrent release attempts.
 - Public release rechecks the exact immutable snapshot and configured channel allowlist.
 - There is no delete-video tool.
 
@@ -96,7 +101,6 @@ The suite covers contracts, scoped patch safety, storage, voice conversion, tran
 - `apps/mcp` — typed production tools, providers, storage, render and YouTube boundaries
 - `apps/render` — Remotion composition and deterministic render entrypoint
 - `packages/contracts` — canonical schemas, types, and patch reducer
-- `packages/ui` — shared editorial tokens
 - `agents/producer` — TrueForge agent manifest and instructions
 - `research` — dated hackathon, TrueForge, provider, Remotion, and design references
 

@@ -4,10 +4,22 @@ import {
   contentPackageSchema,
   editorPatchInputSchema,
   evidenceLedgerSchema,
+  productionDurationSeconds,
   projectBriefSchema,
+  sceneStartSeconds,
 } from "../src/index.js";
 
 describe("Greenlight contracts", () => {
+  it("uses one transition-aware clock for scene starts and final duration", () => {
+    const scenes = [
+      { duration_seconds: 8 },
+      { duration_seconds: 7 },
+      { duration_seconds: 6 },
+    ];
+    expect(sceneStartSeconds(scenes, 1)).toBeCloseTo(7.6667, 3);
+    expect(productionDurationSeconds(scenes)).toBeCloseTo(20.3333, 3);
+  });
+
   it("applies safe brief defaults", () => {
     const brief = projectBriefSchema.parse({
       topic: "Why agent approvals matter",

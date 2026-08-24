@@ -1,5 +1,25 @@
 import { z } from "zod";
 
+export const VIDEO_FPS = 30;
+export const VIDEO_TRANSITION_FRAMES = 10;
+export const VIDEO_TRANSITION_SECONDS = VIDEO_TRANSITION_FRAMES / VIDEO_FPS;
+export const MIN_SCENE_DURATION_SECONDS = VIDEO_TRANSITION_SECONDS * 2;
+
+export const sceneStartSeconds = (
+  scenes: ReadonlyArray<{ duration_seconds: number }>,
+  index: number,
+) =>
+  scenes
+    .slice(0, index)
+    .reduce((sum, scene) => sum + scene.duration_seconds, 0) -
+  Math.max(0, index) * VIDEO_TRANSITION_SECONDS;
+
+export const productionDurationSeconds = (
+  scenes: ReadonlyArray<{ duration_seconds: number }>,
+) =>
+  scenes.reduce((sum, scene) => sum + scene.duration_seconds, 0) -
+  Math.max(0, scenes.length - 1) * VIDEO_TRANSITION_SECONDS;
+
 export const idSchema = z
   .string()
   .min(8)
@@ -99,7 +119,7 @@ export const sceneSchema = z.object({
   captions_artifact_id: idSchema.nullable().default(null),
   transcript_artifact_id: idSchema.nullable().default(null),
   claim_ids: z.array(idSchema),
-  duration_seconds: z.number().min(0.1).max(120),
+  duration_seconds: z.number().min(MIN_SCENE_DURATION_SECONDS).max(120),
   playback_rate: z.number().min(0.5).max(3).default(1),
   visual: z.object({
     treatment: z.enum([
@@ -201,6 +221,8 @@ export const qualityCheckSchema = z.object({
 export const qualityReportSchema = z.object({
   project_id: idSchema,
   video_artifact_id: idSchema,
+  content_package_artifact_id: idSchema,
+  evidence_ledger_artifact_id: idSchema,
   passed: z.boolean(),
   checks: z.array(qualityCheckSchema).min(1),
   created_at: z.string().datetime(),
@@ -212,6 +234,7 @@ export const releaseSnapshotSchema = z.object({
   youtube_video_id: z.string().min(6).max(32),
   channel_id: z.string().min(6).max(64),
   video_sha256: sha256Schema,
+  content_package_sha256: sha256Schema,
   metadata_sha256: sha256Schema,
   quality_report_sha256: sha256Schema,
   evidence_ledger_sha256: sha256Schema,
@@ -408,7 +431,11 @@ export const editorPatchOperationSchema = z.discriminatedUnion("type", [
       captions_artifact_id: idSchema.nullable().optional(),
       transcript_artifact_id: idSchema.nullable().optional(),
       claim_ids: z.array(idSchema).optional(),
-      duration_seconds: z.number().min(0.1).max(120).optional(),
+      duration_seconds: z
+        .number()
+        .min(MIN_SCENE_DURATION_SECONDS)
+        .max(120)
+        .optional(),
       playback_rate: z.number().min(0.5).max(3).optional(),
       visual: sceneVisualPatchSchema.optional(),
     })
@@ -513,17 +540,43 @@ export const applyEditorPatch = (
   }
 
   const selectedSceneIds = new Set(selection.scene_ids);
+  const selectedTrackIds = new Set(selection.track_ids);
   for (const sceneId of selectedSceneIds) requireScene(base.scenes, sceneId);
-  const totalDuration = base.scenes.reduce(
-    (total, scene) => total + scene.duration_seconds,
-    0,
-  );
+  const totalDuration = productionDurationSeconds(base.scenes);
   if (
     selection.time_range_seconds &&
     selection.time_range_seconds.end > totalDuration
   ) {
     throw new Error("selection_time_range_outside_production");
   }
+  if (selection.time_range_seconds && selectedSceneIds.size > 0) {
+    const selectedIndexes = [...selectedSceneIds].map((sceneId) =>
+      requireScene(base.scenes, sceneId),
+    );
+    const selectedStart = Math.min(
+      ...selectedIndexes.map((index) => sceneStartSeconds(base.scenes, index)),
+    );
+    const selectedEnd = Math.max(
+      ...selectedIndexes.map(
+        (index) =>
+          sceneStartSeconds(base.scenes, index) +
+          base.scenes[index]!.duration_seconds,
+      ),
+    );
+    const epsilon = 1 / VIDEO_FPS;
+    if (
+      selection.time_range_seconds.start > selectedStart + epsilon ||
+      selection.time_range_seconds.end < selectedEnd - epsilon
+    ) {
+      throw new Error("selection_time_range_excludes_scene");
+    }
+  }
+
+  const requireTrack = (trackId: string): void => {
+    if (!selectedTrackIds.has(trackId)) {
+      throw new Error(`track_outside_selection:${trackId}`);
+    }
+  };
 
   const next = structuredClone(base);
   next.localized_narration_tracks ??= [];
@@ -532,6 +585,28 @@ export const applyEditorPatch = (
     switch (operation.type) {
       case "update_scene": {
         requireSelectedScene(selectedSceneIds, operation.scene_id);
+        if (
+          operation.kind !== undefined ||
+          operation.title !== undefined ||
+          operation.claim_ids !== undefined ||
+          operation.visual !== undefined ||
+          operation.duration_seconds !== undefined
+        ) {
+          requireTrack("visual");
+        }
+        if (
+          operation.narration !== undefined ||
+          operation.narration_artifact_id !== undefined ||
+          operation.playback_rate !== undefined
+        ) {
+          requireTrack("voice");
+        }
+        if (operation.captions_artifact_id !== undefined) {
+          requireTrack("caption");
+        }
+        if (operation.transcript_artifact_id !== undefined) {
+          requireTrack("transcript");
+        }
         const index = requireScene(next.scenes, operation.scene_id);
         const current = next.scenes[index]!;
         if (
@@ -573,6 +648,9 @@ export const applyEditorPatch = (
       }
       case "split_scene": {
         requireSelectedScene(selectedSceneIds, operation.scene_id);
+        requireTrack("visual");
+        requireTrack("voice");
+        requireTrack("caption");
         const index = requireScene(next.scenes, operation.scene_id);
         const current = next.scenes[index]!;
         if (operation.first.id !== operation.scene_id) {
@@ -595,6 +673,7 @@ export const applyEditorPatch = (
       }
       case "remove_scene": {
         requireSelectedScene(selectedSceneIds, operation.scene_id);
+        requireTrack("visual");
         const index = requireScene(next.scenes, operation.scene_id);
         next.scenes.splice(index, 1);
         next.localized_narration_tracks =
@@ -604,6 +683,7 @@ export const applyEditorPatch = (
         break;
       }
       case "reorder_scenes": {
+        requireTrack("visual");
         if (
           selectedSceneIds.size > 0 &&
           selectedSceneIds.size !== next.scenes.length
@@ -626,6 +706,7 @@ export const applyEditorPatch = (
         break;
       }
       case "upsert_localized_track": {
+        requireTrack("voice");
         requireSelectedScene(selectedSceneIds, operation.track.scene_id);
         requireScene(next.scenes, operation.track.scene_id);
         const index = next.localized_narration_tracks.findIndex(
@@ -636,6 +717,7 @@ export const applyEditorPatch = (
         break;
       }
       case "remove_localized_track": {
+        requireTrack("voice");
         const index = next.localized_narration_tracks.findIndex(
           (track) => track.id === operation.track_id,
         );

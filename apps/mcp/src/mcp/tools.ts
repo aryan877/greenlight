@@ -25,8 +25,7 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-import { createId } from "../lib/canonical.js";
-import { hashJson } from "../lib/canonical.js";
+import { createId, hashJson } from "../lib/canonical.js";
 import type { CodexImageProvider } from "../providers/codex-image.js";
 import type { QualityInspector } from "../providers/quality.js";
 import type { OpenMojiToolkit } from "../providers/openmoji.js";
@@ -220,7 +219,7 @@ export const buildMcpServer = ({
     {
       title: "Read one Greenlight artifact",
       description:
-        "Read a selected JSON artifact by ID. Binary media returns metadata only; use the artifact ID with the relevant media tool.",
+        "Read a selected artifact by ID. JSON returns its value; binary media returns its kind, MIME type, provenance, and stable project-workspace reference. Never use or request a host path.",
       inputSchema: getArtifactInputSchema.shape,
       annotations: {
         readOnlyHint: true,
@@ -341,7 +340,7 @@ export const buildMcpServer = ({
     {
       title: "Apply a scoped editor revision",
       description:
-        "Apply validated scene, split, ordering, or localized-track operations to the exact selected content package. Saves an immutable edit patch and a new content-package revision; never overwrites the base cut.",
+        "Apply validated scene, media, split, ordering, or localized-track operations to the exact selected content package. Creator-imported images and videos are placed by artifact ID in scene.visual.artifact_ids. Saves an immutable edit and content-package revision; never overwrites the base cut.",
       inputSchema: editorPatchInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -365,10 +364,77 @@ export const buildMcpServer = ({
       if (!store.getProject(selection.project_id)) {
         throw new Error("project_not_found");
       }
+      const latestContent = store.getLatestArtifact(
+        selection.project_id,
+        "content_package",
+      );
+      if (latestContent?.id !== selection.base_content_package_artifact_id) {
+        throw new Error("stale_content_package");
+      }
       const base = contentPackageSchema.parse(
         await artifacts.readJson(selection.base_content_package_artifact_id),
       );
       const revised = applyEditorPatch(base, request);
+      const requireArtifactKind = (
+        artifactId: string | null,
+        kinds: string[],
+      ) => {
+        if (!artifactId) return;
+        const resolved = artifacts.resolveArtifact(artifactId).artifact;
+        if (
+          resolved.project_id !== selection.project_id ||
+          !kinds.includes(resolved.kind)
+        ) {
+          throw new Error("invalid_scene_media_artifact");
+        }
+      };
+      for (const scene of revised.scenes) {
+        for (const artifactId of scene.visual.artifact_ids) {
+          requireArtifactKind(artifactId, ["image", "video", "thumbnail"]);
+        }
+        requireArtifactKind(scene.narration_artifact_id, ["narration"]);
+        requireArtifactKind(scene.captions_artifact_id, ["caption"]);
+        requireArtifactKind(scene.transcript_artifact_id, ["transcript"]);
+      }
+      for (const track of revised.localized_narration_tracks ?? []) {
+        requireArtifactKind(track.narration_artifact_id, ["narration"]);
+        requireArtifactKind(track.captions_artifact_id, ["caption"]);
+        requireArtifactKind(track.transcript_artifact_id, ["transcript"]);
+      }
+      const permittedSceneIds = new Set(selection.scene_ids);
+      for (const operation of request.operations) {
+        if (operation.type === "split_scene") {
+          permittedSceneIds.add(operation.second.id);
+        }
+      }
+      const requireArtifactScope = (artifactId: string | null) => {
+        if (!artifactId || selection.artifact_ids.includes(artifactId)) return;
+        const artifact = artifacts.resolveArtifact(artifactId).artifact;
+        const sceneId = artifact.provenance.scene_id;
+        if (typeof sceneId !== "string" || !permittedSceneIds.has(sceneId)) {
+          throw new Error("artifact_outside_selection");
+        }
+      };
+      for (const operation of request.operations) {
+        if (operation.type === "update_scene") {
+          for (const artifactId of operation.visual?.artifact_ids ?? []) {
+            requireArtifactScope(artifactId);
+          }
+          requireArtifactScope(operation.narration_artifact_id ?? null);
+          requireArtifactScope(operation.captions_artifact_id ?? null);
+          requireArtifactScope(operation.transcript_artifact_id ?? null);
+        }
+        if (operation.type === "split_scene") {
+          for (const scene of [operation.first, operation.second]) {
+            for (const artifactId of scene.visual.artifact_ids) {
+              requireArtifactScope(artifactId);
+            }
+            requireArtifactScope(scene.narration_artifact_id);
+            requireArtifactScope(scene.captions_artifact_id);
+            requireArtifactScope(scene.transcript_artifact_id);
+          }
+        }
+      }
       const patchArtifact = await artifacts.importJson({
         projectId: selection.project_id,
         kind: "edit_patch",
@@ -493,7 +559,7 @@ export const buildMcpServer = ({
     {
       title: "Transcribe narration with word timing",
       description:
-        "Create an immutable transcript for one narration artifact. Uses gpt-4o-mini-transcribe for the reference text and Whisper word timestamps for precise captioning and phrase cuts.",
+        "Create an immutable transcript for one narration artifact. Uses OpenRouter gpt-4o-mini-transcribe for the reference text and local whisper.cpp word timestamps for precise captioning and phrase cuts.",
       inputSchema: transcribeAudioInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -738,6 +804,8 @@ export const buildMcpServer = ({
         provenance: {
           producer: "greenlight_quality_inspector",
           video_artifact_id: request.video_artifact_id,
+          content_package_artifact_id: request.content_package_artifact_id,
+          evidence_ledger_artifact_id: request.evidence_ledger_artifact_id,
           contract_version: 1,
         },
       });
@@ -796,6 +864,16 @@ export const buildMcpServer = ({
         await artifacts.readJson(request.quality_report_artifact_id),
       );
       if (!qualityReport.passed) throw new Error("quality_report_failed");
+      if (
+        qualityReport.project_id !== request.project_id ||
+        qualityReport.video_artifact_id !== request.video_artifact_id ||
+        qualityReport.content_package_artifact_id !==
+          request.content_package_artifact_id ||
+        qualityReport.evidence_ledger_artifact_id !==
+          request.evidence_ledger_artifact_id
+      ) {
+        throw new Error("quality_report_input_mismatch");
+      }
       const contentPackage = contentPackageSchema.parse(
         await artifacts.readJson(request.content_package_artifact_id),
       );
@@ -833,7 +911,8 @@ export const buildMcpServer = ({
           youtube_video_id: uploaded.video_id,
           channel_id: uploaded.channel.channel_id,
           video_sha256: video.artifact.sha256,
-          metadata_sha256: content.artifact.sha256,
+          content_package_sha256: content.artifact.sha256,
+          metadata_sha256: hashJson(contentPackage.metadata),
           quality_report_sha256: qualityArtifact.artifact.sha256,
           evidence_ledger_sha256: evidence.artifact.sha256,
           privacy: "unlisted",
@@ -896,11 +975,20 @@ export const buildMcpServer = ({
         if (!operation.result) throw new Error("operation_already_started");
         return result(operation.result);
       }
+      if (release.privacy !== "unlisted") {
+        store.failOperation(operation.id, "release_not_unlisted");
+        throw new Error("release_not_unlisted");
+      }
+      store.claimRelease(request.youtube_release_id, "publishing");
       try {
         const youtubeResult = await youtube.publish(
           release.snapshot.youtube_video_id,
         );
-        store.updateReleasePrivacy(request.youtube_release_id, "public");
+        store.completeRelease(
+          request.youtube_release_id,
+          "publishing",
+          "public",
+        );
         const output = {
           youtube: youtubeResult,
           project: store.setProjectStage(request.project_id, "released"),
@@ -908,6 +996,7 @@ export const buildMcpServer = ({
         store.finishOperation(operation.id, output);
         return result(output);
       } catch (error) {
+        store.releaseClaim(request.youtube_release_id, "publishing");
         store.failOperation(operation.id, "publish_failed");
         throw error;
       }
@@ -950,12 +1039,21 @@ export const buildMcpServer = ({
         if (!operation.result) throw new Error("operation_already_started");
         return result(operation.result);
       }
+      if (release.privacy !== "unlisted") {
+        store.failOperation(operation.id, "release_not_unlisted");
+        throw new Error("release_not_unlisted");
+      }
+      store.claimRelease(request.youtube_release_id, "scheduling");
       try {
         const youtubeResult = await youtube.schedule(
           release.snapshot.youtube_video_id,
           request.publish_at,
         );
-        store.updateReleasePrivacy(request.youtube_release_id, "scheduled");
+        store.completeRelease(
+          request.youtube_release_id,
+          "scheduling",
+          "scheduled",
+        );
         const output = {
           youtube: youtubeResult,
           project: store.setProjectStage(request.project_id, "released"),
@@ -963,6 +1061,7 @@ export const buildMcpServer = ({
         store.finishOperation(operation.id, output);
         return result(output);
       } catch (error) {
+        store.releaseClaim(request.youtube_release_id, "scheduling");
         store.failOperation(operation.id, "schedule_failed");
         throw error;
       }

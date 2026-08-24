@@ -9,8 +9,9 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "dev": "turbo run dev --parallel",
-    "dev:mcp": "pnpm --filter @greenlight/mcp dev",
+    "predev": "pnpm --filter @greenlight/contracts build",
+    "dev": "node --env-file-if-exists=.env node_modules/turbo/bin/turbo run dev --parallel",
+    "dev:mcp": "node --env-file-if-exists=.env node_modules/tsx/dist/cli.mjs watch apps/mcp/src/server.ts",
     "dev:render": "pnpm --filter @greenlight/render studio",
     "dev:studio": "pnpm --filter @greenlight/studio dev",
     "studio:seed": "tsx scripts/seed-studio.ts",

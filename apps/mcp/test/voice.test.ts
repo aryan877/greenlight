@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   OpenRouterVoiceProvider,
+  TestVoiceProvider,
   pcm16MonoToWav,
 } from "../src/providers/voice.js";
 
@@ -37,5 +38,15 @@ describe("voice provider", () => {
       provider: "openrouter",
       model: "provider/model",
     });
+  });
+
+  it("offers a deterministic offline adapter only for tests", async () => {
+    const provider = new TestVoiceProvider();
+    const first = await provider.generate({ script: "Same line." });
+    const second = await provider.generate({ script: "Same line." });
+
+    expect(first.bytes).toEqual(second.bytes);
+    expect(first.provenance).toEqual(second.provenance);
+    expect(provider.describe().provider).toBe("test");
   });
 });

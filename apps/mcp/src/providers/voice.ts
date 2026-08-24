@@ -125,3 +125,29 @@ export class DisabledVoiceProvider implements VoiceProvider {
     throw new Error("voice_provider_disabled");
   }
 }
+
+export class TestVoiceProvider implements VoiceProvider {
+  describe() {
+    return {
+      available: true,
+      model: "deterministic-pcm",
+      provider: "test",
+      voice_id: "fixture",
+    };
+  }
+
+  async generate({ script }: VoiceRequest): Promise<VoiceResult> {
+    const durationSeconds = 0.1;
+    const pcm = new Uint8Array(24_000 * 2 * durationSeconds);
+    return {
+      bytes: pcm16MonoToWav(pcm),
+      durationSeconds,
+      extension: ".wav",
+      provenance: {
+        provider: "test",
+        model: "deterministic-pcm",
+        script_sha256: sha256(script),
+      },
+    };
+  }
+}

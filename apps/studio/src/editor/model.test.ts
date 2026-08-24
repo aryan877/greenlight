@@ -58,6 +58,7 @@ describe("editor selection", () => {
       content,
       sceneIds,
       sourceLedgerArtifact: sourceLedger,
+      extraArtifactIds: ["artifact_local_clip"],
     });
 
     expect(selection.scene_ids).toEqual(sceneIds);
@@ -70,6 +71,9 @@ describe("editor selection", () => {
     ]);
     expect(selection.artifact_ids).toContain("transcript_004");
     expect(selection.artifact_ids).toContain(sourceLedger.id);
-    expect(selection.time_range_seconds).toEqual({ start: 6, end: 36 });
+    expect(selection.artifact_ids).toContain("artifact_local_clip");
+    expect(selection.time_range_seconds).not.toBeNull();
+    expect(selection.time_range_seconds!.start).toBeCloseTo(5, 5);
+    expect(selection.time_range_seconds!.end).toBeCloseTo(30.3333, 3);
   });
 });
