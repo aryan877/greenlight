@@ -53,7 +53,7 @@ const QuestionCard = ({
   const [answer, setAnswer] = useState("");
   return (
     <div className="mx-3 mb-2 rounded-xl border border-action/25 bg-action-soft p-3">
-      <p className="text-[11px] font-medium leading-5 text-ink">
+      <p className="text-[14px] font-medium leading-6 text-ink">
         {pending.question}
       </p>
       {pending.options.length > 0 ? (
@@ -64,7 +64,7 @@ const QuestionCard = ({
               type="button"
               disabled={busy}
               onClick={() => onAnswer(option)}
-              className="rounded-md border border-action/20 bg-surface px-2.5 py-1.5 text-left text-[9px] text-ink-secondary hover:border-action hover:text-ink disabled:opacity-40"
+              className="rounded-md border border-action/20 bg-surface px-3 py-2 text-left text-[12px] leading-4 text-ink-secondary hover:border-action hover:text-ink disabled:opacity-40"
             >
               {option}
             </button>
@@ -83,7 +83,7 @@ const QuestionCard = ({
           value={answer}
           onChange={(event) => setAnswer(event.target.value)}
           placeholder="Or answer in your own words"
-          className="min-w-0 flex-1 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[9px] text-ink outline-none focus:border-action"
+          className="min-w-0 flex-1 rounded-md border border-line bg-surface px-3 py-2 text-[12px] leading-4 text-ink outline-none focus:border-action"
         />
         <button
           type="submit"
@@ -193,12 +193,14 @@ const ApprovalCard = ({
   return (
     <div className="mx-3 mb-2 overflow-hidden rounded-xl border border-warning/25 bg-warning-soft">
       <div className="border-l-[3px] border-warning p-3">
-        <div className="flex items-center gap-2 text-[10px] font-medium text-warning">
+        <div className="flex items-center gap-2 text-[12px] font-medium text-warning">
           <CircleDot size={14} className="text-warning" />
           Needs your approval
         </div>
-        <p className="mt-2 text-[12px] font-medium text-ink">{copy.title}</p>
-        <p className="mt-1 text-[10px] leading-4 text-ink-tertiary">
+        <p className="mt-2 text-[14px] font-medium leading-5 text-ink">
+          {copy.title}
+        </p>
+        <p className="mt-1 text-[12px] leading-5 text-ink-tertiary">
           {copy.detail}
         </p>
         {refining ? (
@@ -209,13 +211,13 @@ const ApprovalCard = ({
               onChange={(event) => setReason(event.target.value)}
               placeholder="What should change?"
               rows={2}
-              className="w-full resize-none rounded-lg border border-warning/25 bg-surface px-2.5 py-2 text-[10px] leading-4 text-ink outline-none placeholder:text-ink-caption"
+              className="w-full resize-none rounded-lg border border-warning/25 bg-surface px-3 py-2 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-caption"
             />
             <div className="mt-2 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setRefining(false)}
-                className="h-7 px-2 text-[9px] text-ink-tertiary hover:text-ink"
+                className="h-8 px-2 text-[11px] text-ink-tertiary hover:text-ink"
               >
                 Back
               </button>
@@ -223,7 +225,7 @@ const ApprovalCard = ({
                 type="button"
                 disabled={!reason.trim() || busy}
                 onClick={() => onDecision("deny", reason.trim())}
-                className="h-7 rounded-md bg-ink px-3 text-[9px] font-medium text-white disabled:opacity-30"
+                className="h-8 rounded-md bg-ink px-3 text-[11px] font-medium text-white disabled:opacity-30"
               >
                 Refine
               </button>
@@ -235,7 +237,7 @@ const ApprovalCard = ({
               type="button"
               disabled={busy}
               onClick={() => onDecision("allow")}
-              className="flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg bg-ink text-[10px] font-medium text-white hover:bg-ink-secondary disabled:opacity-40"
+              className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-ink text-[12px] font-medium text-white hover:bg-ink-secondary disabled:opacity-40"
             >
               <Check size={13} /> {copy.action}
             </button>
@@ -243,7 +245,7 @@ const ApprovalCard = ({
               type="button"
               disabled={busy}
               onClick={() => setRefining(true)}
-              className="h-8 rounded-lg border border-line bg-surface px-3 text-[9px] text-ink-secondary hover:bg-hover disabled:opacity-40"
+              className="h-9 rounded-lg border border-line bg-surface px-3 text-[11px] text-ink-secondary hover:bg-hover disabled:opacity-40"
             >
               Refine
             </button>
@@ -251,7 +253,7 @@ const ApprovalCard = ({
               type="button"
               disabled={busy}
               onClick={() => onDecision("deny", "Cancelled by the creator.")}
-              className="h-8 px-1.5 text-[9px] text-ink-tertiary hover:text-ink disabled:opacity-40"
+              className="h-9 px-1.5 text-[11px] text-ink-tertiary hover:text-ink disabled:opacity-40"
             >
               Cancel
             </button>
@@ -398,11 +400,11 @@ export const ProducerPanel = ({
                           "border border-warning/30 bg-warning-soft text-ink",
                       )}
                     >
-                      <p className="whitespace-pre-wrap text-[10px] leading-4">
+                      <p className="whitespace-pre-wrap text-[14px] leading-6">
                         {event.label}
                       </p>
                       {event.delivery === "sending" ? (
-                        <span className="mt-1 block text-[8px] text-white/60">
+                        <span className="mt-1 block text-[10px] leading-4 text-white/60">
                           Sending…
                         </span>
                       ) : null}
@@ -411,7 +413,7 @@ export const ProducerPanel = ({
                           type="button"
                           onClick={() => onRetryInstruction(event.id)}
                           disabled={isSending}
-                          className="mt-1.5 flex items-center gap-1 text-[8px] font-medium text-warning hover:underline disabled:opacity-40"
+                          className="mt-1.5 flex items-center gap-1 text-[10px] font-medium text-warning hover:underline disabled:opacity-40"
                         >
                           <RotateCcw size={9} /> Retry
                         </button>
@@ -449,16 +451,16 @@ export const ProducerPanel = ({
                     )}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <strong className="block text-[10px] font-medium leading-5 text-ink">
+                    <strong className="block text-[12px] font-medium leading-5 text-ink">
                       {event.label}
                     </strong>
                     {event.detail ? (
-                      <p className="mt-0.5 line-clamp-5 whitespace-pre-wrap text-[10px] leading-4 text-ink-tertiary">
+                      <p className="mt-0.5 line-clamp-5 whitespace-pre-wrap text-[12px] leading-5 text-ink-tertiary">
                         {event.detail}
                       </p>
                     ) : null}
                     {event.document ? (
-                      <span className="mt-1 block text-[9px] font-medium text-action">
+                      <span className="mt-1 block text-[11px] font-medium text-action">
                         Open
                       </span>
                     ) : null}
@@ -622,7 +624,7 @@ export const ProducerPanel = ({
           }
           disabled={conversationPaused}
           rows={3}
-          className="w-full resize-none border-0 bg-transparent px-4 pt-3 text-[12px] leading-5 text-ink outline-none placeholder:text-ink-caption disabled:cursor-not-allowed disabled:bg-surface-sunken/40"
+          className="w-full resize-none border-0 bg-transparent px-4 pt-3 text-[14px] leading-6 text-ink outline-none placeholder:text-ink-caption disabled:cursor-not-allowed disabled:bg-surface-sunken/40"
         />
         <div className="flex items-center justify-end px-3 pb-2.5 pt-1">
           <input
