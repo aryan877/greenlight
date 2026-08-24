@@ -108,8 +108,11 @@ describe("GreenlightStore", () => {
     expect(() => store.claimRelease(release.id, "publishing")).toThrow(
       "release_not_unlisted",
     );
-    store.completeRelease(release.id, "publishing", "public");
-    expect(store.getRelease(release.id)?.privacy).toBe("public");
+    store.rollbackReleaseClaim(release.id, "publishing");
+    expect(store.getRelease(release.id)?.privacy).toBe("unlisted");
+    expect(() => store.rollbackReleaseClaim(release.id, "publishing")).toThrow(
+      "release_rollback_failed",
+    );
     store.close();
   });
 

@@ -14,14 +14,16 @@ describe("transcription", () => {
   it("uses OpenRouter text with independently measured local word timing", async () => {
     const directory = await mkdtemp(join(tmpdir(), "greenlight-transcript-"));
     const audio = join(directory, "voice.wav");
+    const timingModel = join(directory, "ggml-base.bin");
     await writeFile(audio, Uint8Array.from([82, 73, 70, 70]));
+    await writeFile(timingModel, Uint8Array.from([0]));
     let body: Record<string, unknown> | null = null;
     const provider = new OpenRouterTranscriptionProvider(
       {
         apiKey: "test",
         transcriptionModel: "openai/gpt-4o-mini-transcribe",
         timingBinaryPath: "whisper-cli",
-        timingModelPath: "/models/ggml-base.bin",
+        timingModelPath: timingModel,
       },
       async (_url, init) => {
         body = JSON.parse(String(init?.body)) as Record<string, unknown>;
@@ -75,6 +77,25 @@ describe("transcription", () => {
       { index: 0, text: "Hello,", start_seconds: 0.12, end_seconds: 0.48 },
       { index: 1, text: "world.", start_seconds: 0.5, end_seconds: 0.94 },
     ]);
+  });
+
+  it("fails before provider work when the timing model is missing", async () => {
+    const provider = new OpenRouterTranscriptionProvider({
+      apiKey: "test",
+      transcriptionModel: "openai/gpt-4o-mini-transcribe",
+      timingBinaryPath: "whisper-cli",
+      timingModelPath: "/missing/greenlight-whisper-model.bin",
+    });
+
+    await expect(
+      provider.transcribe({
+        absolutePath: "/missing/audio.wav",
+        filename: "audio.wav",
+        mimeType: "audio/wav",
+        locale: "en",
+        prompt: null,
+      }),
+    ).rejects.toThrow("transcription_provider_not_configured");
   });
 
   it("finds a phrase using exact measured word boundaries", () => {

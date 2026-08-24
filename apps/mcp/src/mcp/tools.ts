@@ -996,7 +996,15 @@ export const buildMcpServer = ({
         store.finishOperation(operation.id, output);
         return result(output);
       } catch (error) {
-        store.releaseClaim(request.youtube_release_id, "publishing");
+        try {
+          store.rollbackReleaseClaim(request.youtube_release_id, "publishing");
+        } catch (rollbackError) {
+          store.failOperation(operation.id, "release_rollback_failed");
+          throw new AggregateError(
+            [error, rollbackError],
+            "publish_failed_and_release_rollback_failed",
+          );
+        }
         store.failOperation(operation.id, "publish_failed");
         throw error;
       }
@@ -1061,7 +1069,15 @@ export const buildMcpServer = ({
         store.finishOperation(operation.id, output);
         return result(output);
       } catch (error) {
-        store.releaseClaim(request.youtube_release_id, "scheduling");
+        try {
+          store.rollbackReleaseClaim(request.youtube_release_id, "scheduling");
+        } catch (rollbackError) {
+          store.failOperation(operation.id, "release_rollback_failed");
+          throw new AggregateError(
+            [error, rollbackError],
+            "schedule_failed_and_release_rollback_failed",
+          );
+        }
         store.failOperation(operation.id, "schedule_failed");
         throw error;
       }

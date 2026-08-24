@@ -10,6 +10,14 @@ const workspaceRoot = resolve(
 const workspacePath = (value: string): string =>
   isAbsolute(value) ? value : resolve(workspaceRoot, value);
 
+export const parseMcpPort = (value: string | undefined): number => {
+  const port = Number(value ?? 8941);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("GREENLIGHT_MCP_PORT must be an integer from 1 to 65535");
+  }
+  return port;
+};
+
 export type GreenlightConfig = {
   artifactDir: string;
   dataDir: string;
@@ -68,7 +76,7 @@ export const loadConfig = (): GreenlightConfig => {
     artifactDir,
     dataDir,
     mcpAuthToken,
-    port: Number(process.env.GREENLIGHT_MCP_PORT ?? 8941),
+    port: parseMcpPort(process.env.GREENLIGHT_MCP_PORT),
     studioOrigin: new URL(
       process.env.GREENLIGHT_STUDIO_ORIGIN ?? "http://127.0.0.1:4173",
     ).origin,

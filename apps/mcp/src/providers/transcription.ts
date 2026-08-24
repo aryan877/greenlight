@@ -191,7 +191,11 @@ export class OpenRouterTranscriptionProvider implements TranscriptionProvider {
     locale: string;
     prompt: string | null;
   }): Promise<TranscriptionResult> {
-    if (!this.config.apiKey || !this.config.timingModelPath) {
+    if (
+      !this.config.apiKey ||
+      !this.config.timingModelPath ||
+      !existsSync(this.config.timingModelPath)
+    ) {
       throw new Error("transcription_provider_not_configured");
     }
     const bytes = await readFile(input.absolutePath);
@@ -201,7 +205,6 @@ export class OpenRouterTranscriptionProvider implements TranscriptionProvider {
         headers: {
           authorization: `Bearer ${this.config.apiKey}`,
           "content-type": "application/json",
-          "http-referer": "https://github.com/aryan877/greenlight",
           "x-title": "Greenlight Studio",
         },
         body: JSON.stringify({

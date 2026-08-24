@@ -416,11 +416,12 @@ export class GreenlightStore {
     if (result.changes !== 1) throw new Error("release_state_changed");
   }
 
-  releaseClaim(id: string, from: "publishing" | "scheduling"): void {
-    this.db
+  rollbackReleaseClaim(id: string, from: "publishing" | "scheduling"): void {
+    const result = this.db
       .prepare(
         "UPDATE releases SET privacy = 'unlisted', updated_at = ? WHERE id = ? AND privacy = ?",
       )
       .run(now(), id, from);
+    if (result.changes !== 1) throw new Error("release_rollback_failed");
   }
 }
