@@ -5,6 +5,14 @@ beforeAll(() => {
 });
 
 describe("Producer event projection", () => {
+  it("keeps creator cancellation explicit when resuming a paused question", async () => {
+    const { CREATOR_CANCELLED_QUESTION } = await import("./trueforge.js");
+
+    expect(CREATOR_CANCELLED_QUESTION).toBe(
+      "The creator cancelled this request. Stop here and make no changes.",
+    );
+  });
+
   it("keeps clarification text visible and exposes the exact paused question", async () => {
     const { describeEvent, pendingQuestionsFromEvent } =
       await import("./trueforge.js");

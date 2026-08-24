@@ -45,10 +45,12 @@ const QuestionCard = ({
   pending,
   busy,
   onAnswer,
+  onCancel,
 }: {
   pending: PendingQuestion;
   busy: boolean;
   onAnswer: (answer: string) => void;
+  onCancel: () => void;
 }) => {
   const [answer, setAnswer] = useState("");
   return (
@@ -72,13 +74,21 @@ const QuestionCard = ({
         </div>
       ) : null}
       <form
-        className="mt-2 flex gap-1.5"
+        className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_auto] gap-1.5"
         onSubmit={(event) => {
           event.preventDefault();
           const value = answer.trim();
           if (value && !busy) onAnswer(value);
         }}
       >
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onCancel}
+          className="rounded-md border border-line bg-surface px-3 text-[12px] font-medium text-ink-secondary hover:border-ink-caption hover:text-ink disabled:opacity-40"
+        >
+          Cancel
+        </button>
         <input
           value={answer}
           onChange={(event) => setAnswer(event.target.value)}
@@ -340,6 +350,7 @@ export const ProducerPanel = ({
   onRetryInstruction,
   onApproval,
   onAnswerQuestion,
+  onCancelQuestion,
   onRemoveScene,
   onRemoveArtifact,
   onAttachArtifact,
@@ -364,6 +375,7 @@ export const ProducerPanel = ({
     reason?: string,
   ) => void;
   onAnswerQuestion: (pending: PendingQuestion, answer: string) => void;
+  onCancelQuestion: (pending: PendingQuestion) => void;
   onRemoveScene: (sceneId: string) => void;
   onRemoveArtifact: (artifactId: string) => void;
   onAttachArtifact: (artifactId: string) => void;
@@ -478,6 +490,7 @@ export const ProducerPanel = ({
           pending={pending}
           busy={isAnswering}
           onAnswer={(answer) => onAnswerQuestion(pending, answer)}
+          onCancel={() => onCancelQuestion(pending)}
         />
       ))}
 

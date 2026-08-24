@@ -49,6 +49,9 @@ export type PendingQuestion = {
   options: string[];
 };
 
+export const CREATOR_CANCELLED_QUESTION =
+  "The creator cancelled this request. Stop here and make no changes.";
+
 type ProducerSendInput = {
   instruction: string;
   selection: EditorSelection | null;
@@ -752,6 +755,8 @@ export const useProducerAgent = (
     decideApproval: approval.mutate,
     isApproving: approval.isPending,
     answerQuestion: question.mutate,
+    cancelQuestion: (pending: PendingQuestion) =>
+      question.mutate({ pending, answer: CREATOR_CANCELLED_QUESTION }),
     isAnswering: question.isPending,
   };
 };

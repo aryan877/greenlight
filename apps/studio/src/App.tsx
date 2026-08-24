@@ -528,6 +528,7 @@ export const App = () => {
                     onAnswerQuestion={(pending, answer) =>
                       producer.answerQuestion({ pending, answer })
                     }
+                    onCancelQuestion={producer.cancelQuestion}
                     onRemoveScene={(sceneId) =>
                       setSelectedSceneIds((current) => {
                         const next = current.filter((id) => id !== sceneId);
