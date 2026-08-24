@@ -497,7 +497,9 @@ export const useProducerAgent = (
       }
       const restoredInstruction = (latestTurn.input ?? []).find((item) => {
         const value = item as unknown as Record<string, unknown>;
-        return value.type === "user.message" && typeof value.content === "string";
+        return (
+          value.type === "user.message" && typeof value.content === "string"
+        );
       }) as { content?: string } | undefined;
       const instruction = restoredInstruction?.content
         ?.replace(/^PROJECT_ID:[^\n]+\n\n/, "")
@@ -644,9 +646,16 @@ export const useProducerAgent = (
   const retryInstruction = useCallback(
     (eventId: string) => {
       const input = outgoingStore.current.get(eventId);
-      if (input && !send.isPending) send.mutate(input);
+      if (
+        input &&
+        !send.isPending &&
+        pendingApprovals.length === 0 &&
+        pendingQuestions.length === 0
+      ) {
+        send.mutate(input);
+      }
     },
-    [send],
+    [pendingApprovals.length, pendingQuestions.length, send],
   );
 
   const approval = useMutation({
@@ -718,12 +727,26 @@ export const useProducerAgent = (
     },
   });
 
+  const sendInstruction = useCallback(
+    (input: ProducerSendInput) => {
+      if (
+        send.isPending ||
+        pendingApprovals.length > 0 ||
+        pendingQuestions.length > 0
+      ) {
+        return;
+      }
+      send.mutate(input);
+    },
+    [pendingApprovals.length, pendingQuestions.length, send],
+  );
+
   return {
     events,
     pendingApprovals,
     pendingQuestions,
     sessionId: sessionId.current,
-    send: send.mutate,
+    send: sendInstruction,
     retryInstruction,
     isSending: send.isPending,
     decideApproval: approval.mutate,

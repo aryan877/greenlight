@@ -377,6 +377,8 @@ export const ProducerPanel = ({
   useEffect(() => {
     if (draftIntent) setInstruction(draftIntent.text);
   }, [draftIntent]);
+  const conversationPaused =
+    pendingQuestions.length > 0 || pendingApprovals.length > 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -522,7 +524,7 @@ export const ProducerPanel = ({
         onSubmit={(event) => {
           event.preventDefault();
           const next = instruction.trim();
-          if (!next || isSending) return;
+          if (!next || isSending || conversationPaused) return;
           onSend(next);
           setInstruction("");
         }}
@@ -610,10 +612,17 @@ export const ProducerPanel = ({
           value={instruction}
           onChange={(event) => setInstruction(event.target.value)}
           placeholder={
-            selection ? "Edit this selection…" : "Direct the production…"
+            pendingQuestions.length > 0
+              ? "Answer the question above…"
+              : pendingApprovals.length > 0
+                ? "Review the change above…"
+                : selection
+                  ? "Edit this selection…"
+                  : "Direct the production…"
           }
+          disabled={conversationPaused}
           rows={3}
-          className="w-full resize-none border-0 bg-transparent px-4 pt-3 text-[12px] leading-5 text-ink outline-none placeholder:text-ink-caption"
+          className="w-full resize-none border-0 bg-transparent px-4 pt-3 text-[12px] leading-5 text-ink outline-none placeholder:text-ink-caption disabled:cursor-not-allowed disabled:bg-surface-sunken/40"
         />
         <div className="flex items-center justify-end px-3 pb-2.5 pt-1">
           <input
@@ -640,7 +649,7 @@ export const ProducerPanel = ({
           <button
             type="submit"
             aria-label="Send instruction"
-            disabled={!instruction.trim() || isSending}
+            disabled={!instruction.trim() || isSending || conversationPaused}
             className="ml-auto grid size-8 place-items-center rounded-full bg-ink text-white transition-colors hover:bg-ink-secondary disabled:cursor-not-allowed disabled:opacity-30"
           >
             <ArrowUp size={15} strokeWidth={2.2} />
