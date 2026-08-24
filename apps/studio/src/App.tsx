@@ -514,13 +514,19 @@ export const App = () => {
                     draftIntent={draftIntent}
                     events={producer.events}
                     pendingApprovals={producer.pendingApprovals}
+                    pendingQuestions={producer.pendingQuestions}
                     isSending={producer.isSending}
                     isApproving={producer.isApproving}
+                    isAnswering={producer.isAnswering}
                     onSend={(instruction) =>
                       producer.send({ instruction, selection })
                     }
+                    onRetryInstruction={producer.retryInstruction}
                     onApproval={(pending, status, reason) =>
                       producer.decideApproval({ pending, status, reason })
+                    }
+                    onAnswerQuestion={(pending, answer) =>
+                      producer.answerQuestion({ pending, answer })
                     }
                     onRemoveScene={(sceneId) =>
                       setSelectedSceneIds((current) => {

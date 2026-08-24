@@ -13,6 +13,7 @@ import {
   Mic2,
   MousePointer2,
   Paperclip,
+  RotateCcw,
   Send,
   SlidersHorizontal,
   Sparkles,
@@ -24,6 +25,7 @@ import { useEffect, useRef, useState } from "react";
 import { greenlightApi } from "../api/greenlight.js";
 import type {
   PendingToolApproval,
+  PendingQuestion,
   StudioAgentEvent,
   StudioReviewDocument,
 } from "../api/trueforge.js";
@@ -36,6 +38,64 @@ const eventIcon: Record<StudioAgentEvent["kind"], typeof Bot> = {
   artifact: Film,
   approval: CircleDot,
   message: Bot,
+  instruction: MousePointer2,
+};
+
+const QuestionCard = ({
+  pending,
+  busy,
+  onAnswer,
+}: {
+  pending: PendingQuestion;
+  busy: boolean;
+  onAnswer: (answer: string) => void;
+}) => {
+  const [answer, setAnswer] = useState("");
+  return (
+    <div className="mx-3 mb-2 rounded-xl border border-action/25 bg-action-soft p-3">
+      <p className="text-[11px] font-medium leading-5 text-ink">
+        {pending.question}
+      </p>
+      {pending.options.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {pending.options.map((option) => (
+            <button
+              key={option}
+              type="button"
+              disabled={busy}
+              onClick={() => onAnswer(option)}
+              className="rounded-md border border-action/20 bg-surface px-2.5 py-1.5 text-left text-[9px] text-ink-secondary hover:border-action hover:text-ink disabled:opacity-40"
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <form
+        className="mt-2 flex gap-1.5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const value = answer.trim();
+          if (value && !busy) onAnswer(value);
+        }}
+      >
+        <input
+          value={answer}
+          onChange={(event) => setAnswer(event.target.value)}
+          placeholder="Or answer in your own words"
+          className="min-w-0 flex-1 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[9px] text-ink outline-none focus:border-action"
+        />
+        <button
+          type="submit"
+          disabled={!answer.trim() || busy}
+          aria-label="Answer Producer"
+          className="grid size-7 place-items-center rounded-md bg-ink text-white disabled:opacity-30"
+        >
+          <Send size={12} />
+        </button>
+      </form>
+    </div>
+  );
 };
 
 const approvalCopy = (
@@ -270,10 +330,14 @@ export const ProducerPanel = ({
   draftIntent,
   events,
   pendingApprovals,
+  pendingQuestions,
   isSending,
   isApproving,
+  isAnswering,
   onSend,
+  onRetryInstruction,
   onApproval,
+  onAnswerQuestion,
   onRemoveScene,
   onRemoveArtifact,
   onAttachArtifact,
@@ -286,14 +350,18 @@ export const ProducerPanel = ({
   draftIntent: { id: string; text: string } | null;
   events: StudioAgentEvent[];
   pendingApprovals: PendingToolApproval[];
+  pendingQuestions: PendingQuestion[];
   isSending: boolean;
   isApproving: boolean;
+  isAnswering: boolean;
   onSend: (instruction: string) => void;
+  onRetryInstruction: (eventId: string) => void;
   onApproval: (
     pending: PendingToolApproval,
     status: "allow" | "deny",
     reason?: string,
   ) => void;
+  onAnswerQuestion: (pending: PendingQuestion, answer: string) => void;
   onRemoveScene: (sceneId: string) => void;
   onRemoveArtifact: (artifactId: string) => void;
   onAttachArtifact: (artifactId: string) => void;
@@ -318,6 +386,38 @@ export const ProducerPanel = ({
         ) : (
           <div className="space-y-1">
             {events.map((event) => {
+              if (event.kind === "instruction") {
+                return (
+                  <div key={event.id} className="flex justify-end py-1">
+                    <div
+                      className={cx(
+                        "max-w-[88%] rounded-xl rounded-br-sm bg-ink px-3 py-2 text-white",
+                        event.delivery === "failed" &&
+                          "border border-warning/30 bg-warning-soft text-ink",
+                      )}
+                    >
+                      <p className="whitespace-pre-wrap text-[10px] leading-4">
+                        {event.label}
+                      </p>
+                      {event.delivery === "sending" ? (
+                        <span className="mt-1 block text-[8px] text-white/60">
+                          Sending…
+                        </span>
+                      ) : null}
+                      {event.delivery === "failed" ? (
+                        <button
+                          type="button"
+                          onClick={() => onRetryInstruction(event.id)}
+                          disabled={isSending}
+                          className="mt-1.5 flex items-center gap-1 text-[8px] font-medium text-warning hover:underline disabled:opacity-40"
+                        >
+                          <RotateCcw size={9} /> Retry
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              }
               const Icon = eventIcon[event.kind];
               return (
                 <button
@@ -367,6 +467,15 @@ export const ProducerPanel = ({
           </div>
         )}
       </div>
+
+      {pendingQuestions.map((pending) => (
+        <QuestionCard
+          key={pending.toolCallId}
+          pending={pending}
+          busy={isAnswering}
+          onAnswer={(answer) => onAnswerQuestion(pending, answer)}
+        />
+      ))}
 
       {pendingApprovals.map((pending) => (
         <ApprovalCard
