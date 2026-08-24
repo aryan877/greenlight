@@ -84,7 +84,7 @@ app.get("/health", (_request, response) => {
 const studioProject = (project: Project, artifactCount: number) => ({
   ...project,
   artifact_count: artifactCount,
-  workspace_path: resolve(config.artifactDir, project.id),
+  workspace_path: `artifacts/${project.id}`,
 });
 
 app.get("/api/projects", (_request, response) => {
