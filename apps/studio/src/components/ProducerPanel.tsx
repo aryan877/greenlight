@@ -105,19 +105,19 @@ const QuestionCard = ({
   return (
     <div className="mx-3 my-4 grid grid-cols-[20px_minmax(0,1fr)] gap-3">
       <AgentMark />
-      <section className="overflow-hidden border border-action/25 bg-surface-raised">
+      <section className="overflow-hidden rounded-xl border border-action/25 bg-surface-raised">
         <p className="border-l-2 border-action px-4 pb-3 pt-3.5 text-[14px] font-medium leading-6 text-ink">
           {pending.question}
         </p>
         {pending.options.length > 0 ? (
-          <div className="grid gap-px border-y border-line-subtle bg-line-subtle">
+          <div className="grid gap-1.5 border-y border-line-subtle p-2">
             {pending.options.map((option) => (
               <button
                 key={option}
                 type="button"
                 disabled={busy}
                 onClick={() => onAnswer(option)}
-                className="bg-surface px-4 py-3 text-left text-[13px] leading-5 text-ink-secondary transition-colors hover:bg-action-soft hover:text-ink disabled:opacity-40"
+                className="rounded-lg border border-line bg-surface px-4 py-3 text-left text-[13px] leading-5 text-ink-secondary transition-colors hover:border-action hover:bg-action-soft hover:text-ink disabled:opacity-40"
               >
                 {option}
               </button>
@@ -136,7 +136,7 @@ const QuestionCard = ({
             type="button"
             disabled={busy}
             onClick={onCancel}
-            className="border border-line bg-surface px-3 text-[12px] font-medium text-ink-secondary hover:border-line-strong hover:text-ink disabled:opacity-40"
+            className="rounded-lg border border-line bg-surface px-3 text-[12px] font-medium text-ink-secondary hover:border-line-strong hover:text-ink disabled:opacity-40"
           >
             Cancel
           </button>
@@ -144,13 +144,13 @@ const QuestionCard = ({
             value={answer}
             onChange={(event) => setAnswer(event.target.value)}
             placeholder="Write your own answer"
-            className="min-w-0 flex-1 border border-line bg-surface px-3 py-2 text-[13px] leading-5 text-ink outline-none focus:border-action"
+            className="min-w-0 flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-[13px] leading-5 text-ink outline-none focus:border-action"
           />
           <button
             type="submit"
             disabled={!answer.trim() || busy}
             aria-label="Answer Greenlight"
-            className="grid size-9 place-items-center bg-control text-control-ink disabled:opacity-30"
+            className="grid size-9 place-items-center rounded-full bg-control text-control-ink disabled:opacity-30"
           >
             <ArrowUp size={14} strokeWidth={2.2} />
           </button>
@@ -270,7 +270,7 @@ const ApprovalCard = ({
   const [refining, setRefining] = useState(false);
   const [reason, setReason] = useState("");
   return (
-    <div className="mx-3 my-4 overflow-hidden border border-warning/25 bg-warning-soft">
+    <div className="mx-3 my-4 overflow-hidden rounded-xl border border-warning/25 bg-warning-soft">
       <div className="border-l-2 border-warning p-4">
         <div className="flex items-center gap-2 text-[12px] font-medium text-warning">
           Needs your approval
@@ -295,7 +295,7 @@ const ApprovalCard = ({
               <button
                 type="button"
                 onClick={() => setRefining(false)}
-                className="h-8 px-2 text-[11px] text-ink-tertiary hover:text-ink"
+                className="h-8 rounded-lg px-2 text-[11px] text-ink-tertiary hover:text-ink"
               >
                 Back
               </button>
@@ -303,7 +303,7 @@ const ApprovalCard = ({
                 type="button"
                 disabled={!reason.trim() || busy}
                 onClick={() => onDecision("deny", reason.trim())}
-                className="h-8 bg-control px-3 text-[11px] font-medium text-control-ink disabled:opacity-30"
+                className="h-8 rounded-lg bg-control px-3 text-[11px] font-medium text-control-ink disabled:opacity-30"
               >
                 Refine
               </button>
@@ -315,7 +315,7 @@ const ApprovalCard = ({
               type="button"
               disabled={busy}
               onClick={() => onDecision("allow")}
-              className="flex h-9 flex-1 items-center justify-center gap-1.5 bg-control text-[12px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-40"
+              className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-control text-[12px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-40"
             >
               <Check size={13} /> {copy.action}
             </button>
@@ -323,7 +323,7 @@ const ApprovalCard = ({
               type="button"
               disabled={busy}
               onClick={() => setRefining(true)}
-              className="h-9 border border-line bg-surface px-3 text-[11px] text-ink-secondary hover:bg-hover disabled:opacity-40"
+              className="h-9 rounded-lg border border-line bg-surface px-3 text-[11px] text-ink-secondary hover:bg-hover disabled:opacity-40"
             >
               Refine
             </button>
@@ -331,7 +331,7 @@ const ApprovalCard = ({
               type="button"
               disabled={busy}
               onClick={() => onDecision("deny", "Cancelled by the creator.")}
-              className="h-9 px-1.5 text-[11px] text-ink-tertiary hover:text-ink disabled:opacity-40"
+              className="h-9 rounded-lg px-1.5 text-[11px] text-ink-tertiary hover:bg-hover hover:text-ink disabled:opacity-40"
             >
               Cancel
             </button>
@@ -478,7 +478,7 @@ const VoicePickerCard = ({
           type="button"
           aria-label="Close voice picker"
           onClick={onCancel}
-          className="grid size-7 place-items-center text-ink-tertiary hover:text-ink"
+          className="grid size-7 place-items-center rounded-full text-ink-tertiary hover:bg-hover hover:text-ink"
         >
           <X size={14} />
         </button>
@@ -494,7 +494,7 @@ const VoicePickerCard = ({
         </p>
       ) : (
         <>
-          <label className="mx-3 mt-3 flex h-9 items-center gap-2 border border-line bg-surface px-3 focus-within:border-action">
+          <label className="mx-3 mt-3 flex h-9 items-center gap-2 rounded-lg border border-line bg-surface px-3 focus-within:border-action">
             <Search size={13} className="text-ink-caption" />
             <input
               value={query}
@@ -564,7 +564,7 @@ const VoicePickerCard = ({
         <button
           type="button"
           onClick={onCancel}
-          className="h-8 px-3 text-[12px] text-ink-tertiary hover:text-ink"
+          className="h-8 rounded-lg px-3 text-[12px] text-ink-tertiary hover:bg-hover hover:text-ink"
         >
           Cancel
         </button>
@@ -572,7 +572,7 @@ const VoicePickerCard = ({
           type="button"
           disabled={!selected}
           onClick={() => selected && onChoose(selected)}
-          className="h-8 bg-control px-3 text-[12px] font-medium text-control-ink disabled:opacity-30"
+          className="h-8 rounded-lg bg-control px-3 text-[12px] font-medium text-control-ink disabled:opacity-30"
         >
           Use {selected?.id ?? "voice"}
         </button>
@@ -1053,7 +1053,7 @@ export const ProducerPanel = ({
                     "Fill the selected gap with the best available material and show me the plan first.",
                   )
                 }
-                className="shrink-0 border border-warning/25 bg-warning-soft px-2.5 py-1.5 text-[10px] font-medium text-ink-secondary hover:border-warning hover:text-ink"
+                className="shrink-0 rounded-lg border border-warning/25 bg-warning-soft px-2.5 py-1.5 text-[10px] font-medium text-ink-secondary hover:border-warning hover:text-ink"
               >
                 Fill this gap
               </button>
@@ -1063,7 +1063,7 @@ export const ProducerPanel = ({
                 key={intent.label}
                 type="button"
                 onClick={() => setInstruction(intent.prompt)}
-                className="shrink-0 border border-line bg-surface px-2.5 py-1.5 text-[10px] font-medium text-ink-secondary hover:border-action hover:text-ink"
+                className="shrink-0 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[10px] font-medium text-ink-secondary hover:border-action hover:text-ink"
               >
                 {intent.label}
               </button>

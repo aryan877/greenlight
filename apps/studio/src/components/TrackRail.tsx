@@ -27,6 +27,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { pointInsideProducer } from "../editor/pointer-target.js";
 import { cx } from "./controls.js";
 
 export type TrackDraft = {
@@ -131,6 +132,8 @@ export const TrackRail = ({
     track: EditorTimelineTrack,
   ) => {
     if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     const dragTracks = selectedTrackIds.includes(track.id)
       ? tracks.filter((candidate) => selectedTrackIds.includes(candidate.id))
@@ -155,15 +158,12 @@ export const TrackRail = ({
         event.clientY - active.startY,
       ) >= 5;
     if (!moved) return;
-    const target = document.elementFromPoint(event.clientX, event.clientY);
     dragRef.current = { ...active, moved: true };
     setDragPreview({
       tracks: active.tracks,
       x: event.clientX,
       y: event.clientY,
-      overProducer: Boolean(
-        target?.closest('[data-testid="producer-composer"]'),
-      ),
+      overProducer: pointInsideProducer(event.clientX, event.clientY),
     });
   };
 
@@ -182,11 +182,11 @@ export const TrackRail = ({
       );
       return;
     }
-    const target = document.elementFromPoint(event.clientX, event.clientY);
-    if (target?.closest('[data-testid="producer-composer"]')) {
+    if (pointInsideProducer(event.clientX, event.clientY)) {
       onAttachTracks(active.tracks);
       return;
     }
+    const target = document.elementFromPoint(event.clientX, event.clientY);
     const targetTrackId = target?.closest<HTMLElement>(
       "[data-timeline-track-id]",
     )?.dataset.timelineTrackId;
@@ -208,7 +208,7 @@ export const TrackRail = ({
   };
 
   return (
-    <div className="sticky left-0 top-0 z-40 h-full w-[156px] border-r border-line-strong bg-surface">
+    <div className="sticky left-0 top-0 z-40 h-full w-[156px] bg-surface">
       <div className="relative flex h-7 items-center justify-between border-b border-line-subtle px-2.5 text-[9px] font-medium text-ink-tertiary">
         <span>Tracks</span>
         <button
@@ -271,7 +271,7 @@ export const TrackRail = ({
               );
             }}
             className={cx(
-              "group flex h-8 cursor-grab select-none items-center gap-1 border-b border-line-subtle px-2 text-[9px] active:cursor-grabbing focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-action",
+              "group flex h-8 cursor-grab select-none items-center gap-1 border-b border-line-subtle px-2 text-[9px] active:cursor-grabbing focus-visible:bg-hover focus-visible:outline-none",
               selected && "bg-action-soft",
             )}
           >
@@ -313,25 +313,16 @@ export const TrackRail = ({
                 className="h-5 min-w-0 flex-1 border border-action bg-surface-raised px-1 text-[9px] text-ink outline-none"
               />
             ) : (
-              <button
-                type="button"
+              <span
                 className="min-w-0 flex-1 truncate text-left"
                 title={`${track.name}. Double-click to rename.`}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onSelectTrack(
-                    track.id,
-                    event.shiftKey || event.metaKey || event.ctrlKey,
-                  );
-                }}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
                   setRenamingTrackId(track.id);
                 }}
               >
                 {track.name}
-              </button>
+              </span>
             )}
             {track.kind === "audio" ? (
               <>

@@ -50,6 +50,7 @@ import {
   buildTimelineTrimPlan,
   maximumTimelineItemDuration,
 } from "../editor/operations.js";
+import { pointInsideProducer } from "../editor/pointer-target.js";
 import { TrackRail, type TrackDraft } from "./TrackRail.js";
 import { cx, IconButton } from "./controls.js";
 
@@ -477,10 +478,7 @@ export const Timeline = ({
         event.clientY - active.startY,
       ) >= 5;
     if (!moved) return;
-    const hoverTarget = document.elementFromPoint(event.clientX, event.clientY);
-    const overProducer = Boolean(
-      hoverTarget?.closest('[data-testid="producer-composer"]'),
-    );
+    const overProducer = pointInsideProducer(event.clientX, event.clientY);
     let dropIndex = active.dropIndex;
     const dragItems = items.filter((candidate) =>
       active.itemIds.includes(candidate.id),
@@ -588,11 +586,10 @@ export const Timeline = ({
       return;
     }
     suppressClickRef.current = item.id;
-    const dropTarget = document.elementFromPoint(event.clientX, event.clientY);
     const dragItems = items.filter((candidate) =>
       active.itemIds.includes(candidate.id),
     );
-    if (dropTarget?.closest('[data-testid="producer-composer"]')) {
+    if (pointInsideProducer(event.clientX, event.clientY)) {
       onAttachItemsToProducer(dragItems);
       return;
     }
