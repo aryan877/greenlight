@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 import {
   formatRulerTime,
@@ -50,9 +51,15 @@ type ClipDrag = {
   pointerId: number;
   sceneId: string;
   startX: number;
-  currentX: number;
   dropIndex: number;
   moved: boolean;
+};
+
+type DragPreview = {
+  sceneId: string;
+  x: number;
+  y: number;
+  overProducer: boolean;
 };
 
 const MIN_ZOOM = 0.5;
@@ -118,6 +125,7 @@ export const Timeline = ({
   const [trackWidth, setTrackWidth] = useState(1000);
   const [draggedSceneId, setDraggedSceneId] = useState<string | null>(null);
   const [dropSceneId, setDropSceneId] = useState<string | null>(null);
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   const [trim, setTrim] = useState<{
     sceneId: string;
     duration: number;
@@ -450,7 +458,6 @@ export const Timeline = ({
                         pointerId: event.pointerId,
                         sceneId: scene.id,
                         startX: event.clientX,
-                        currentX: event.clientX,
                         dropIndex: index,
                         moved: false,
                       };
@@ -494,10 +501,23 @@ export const Timeline = ({
                         dropIndex < 0 ? remaining.length : dropIndex;
                       clipDragRef.current = {
                         ...active,
-                        currentX: event.clientX,
                         dropIndex: resolvedIndex,
                         moved: true,
                       };
+                      const hoverTarget = document.elementFromPoint(
+                        event.clientX,
+                        event.clientY,
+                      );
+                      setDragPreview({
+                        sceneId: scene.id,
+                        x: event.clientX,
+                        y: event.clientY,
+                        overProducer: Boolean(
+                          hoverTarget?.closest(
+                            '[data-testid="producer-composer"]',
+                          ),
+                        ),
+                      });
                       setDraggedSceneId(scene.id);
                       setDropSceneId(
                         remaining[resolvedIndex]?.id ?? "timeline-end",
@@ -513,6 +533,7 @@ export const Timeline = ({
                         return;
                       }
                       clipDragRef.current = null;
+                      setDragPreview(null);
                       if (
                         event.currentTarget.hasPointerCapture(event.pointerId)
                       ) {
@@ -559,6 +580,7 @@ export const Timeline = ({
                     }}
                     onPointerCancel={() => {
                       clipDragRef.current = null;
+                      setDragPreview(null);
                       setDraggedSceneId(null);
                       setDropSceneId(null);
                     }}
@@ -815,6 +837,37 @@ export const Timeline = ({
           </div>
         </div>
       </div>
+      {dragPreview
+        ? createPortal(
+            <div
+              className={cx(
+                "pointer-events-none fixed z-[100] flex h-9 max-w-[260px] select-none items-center gap-2 border bg-surface-raised px-3 text-[12px] font-medium text-ink shadow-float transition-[border-color,background-color,transform] duration-100 ease-product",
+                dragPreview.overProducer
+                  ? "border-action bg-action-soft"
+                  : "border-line-strong",
+              )}
+              style={{
+                left: dragPreview.x + 14,
+                top: dragPreview.y + 14,
+                transform: dragPreview.overProducer
+                  ? "translateY(-2px)"
+                  : undefined,
+              }}
+            >
+              <Layers3 size={13} className="shrink-0 text-action" />
+              <span className="truncate">
+                {content.scenes.find(({ id }) => id === dragPreview.sceneId)
+                  ?.title ?? "Scene"}
+              </span>
+              {dragPreview.overProducer ? (
+                <span className="shrink-0 font-mono text-[8px] uppercase tracking-[0.08em] text-action">
+                  Attach
+                </span>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 };

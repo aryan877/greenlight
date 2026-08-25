@@ -1,28 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeProducerDraft } from "../editor/producer-draft.js";
+import { attachProducerSceneReference } from "../editor/producer-draft.js";
 
 describe("Producer composer references", () => {
-  it("appends multiple scene mentions without erasing creator text", () => {
-    const first = mergeProducerDraft("Make this tighter.", {
-      id: "draft_one",
-      text: "@“Edit one scene”",
-      mode: "append",
+  it("keeps dropped scenes as deduplicated structured references", () => {
+    const first = attachProducerSceneReference([], {
+      sceneId: "scene_edit",
+      title: "Edit one scene",
     });
-    const second = mergeProducerDraft(first, {
-      id: "draft_two",
-      text: "@“Build it that way”",
-      mode: "append",
+    const second = attachProducerSceneReference(first, {
+      sceneId: "scene_build",
+      title: "Build it that way",
     });
 
-    expect(second).toBe(
-      "Make this tighter. @“Edit one scene” @“Build it that way” ",
-    );
+    expect(second.map(({ sceneId }) => sceneId)).toEqual([
+      "scene_edit",
+      "scene_build",
+    ]);
     expect(
-      mergeProducerDraft(second, {
-        id: "draft_three",
-        text: "@“Edit one scene”",
-        mode: "append",
+      attachProducerSceneReference(second, {
+        sceneId: "scene_edit",
+        title: "Edit one scene",
       }),
     ).toBe(second);
   });

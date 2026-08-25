@@ -11,6 +11,7 @@ import {
   CircleDot,
   Film,
   Image as ImageIcon,
+  Layers3,
   LoaderCircle,
   Mic2,
   MousePointer2,
@@ -35,8 +36,9 @@ import type {
 } from "../api/trueforge.js";
 import { MEDIA_ACCEPT, MEDIA_ARTIFACT_MIME } from "../editor/media-transfer.js";
 import {
-  mergeProducerDraft,
+  attachProducerSceneReference,
   type ProducerDraftIntent,
+  type ProducerSceneReference,
 } from "../editor/producer-draft.js";
 import { cx } from "./controls.js";
 
@@ -585,6 +587,9 @@ export const ProducerPanel = ({
   importing: boolean;
 }) => {
   const [instruction, setInstruction] = useState("");
+  const [sceneReferences, setSceneReferences] = useState<
+    ProducerSceneReference[]
+  >([]);
   const [dragActive, setDragActive] = useState(false);
   const [voicePickerOpen, setVoicePickerOpen] = useState(false);
   const [openDocument, setOpenDocument] = useState<StudioReviewDocument | null>(
@@ -593,7 +598,13 @@ export const ProducerPanel = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!draftIntent) return;
-    setInstruction((current) => mergeProducerDraft(current, draftIntent));
+    if (draftIntent.mode === "replace") {
+      setInstruction(draftIntent.text);
+      return;
+    }
+    setSceneReferences((current) =>
+      attachProducerSceneReference(current, draftIntent),
+    );
   }, [draftIntent]);
   const conversationPaused =
     pendingQuestions.length > 0 || pendingApprovals.length > 0;
@@ -787,6 +798,7 @@ export const ProducerPanel = ({
           if (!next || isSending || conversationPaused) return;
           onSend(next);
           setInstruction("");
+          setSceneReferences([]);
         }}
       >
         {selection && content ? (
@@ -890,22 +902,50 @@ export const ProducerPanel = ({
             ) : null}
           </div>
         ) : null}
-        <textarea
-          value={instruction}
-          onChange={(event) => setInstruction(event.target.value)}
-          placeholder={
-            pendingQuestions.length > 0
-              ? "Answer the question above…"
-              : pendingApprovals.length > 0
-                ? "Review the change above…"
-                : selection
-                  ? "Edit this selection…"
-                  : "Direct the production…"
-          }
-          disabled={conversationPaused}
-          rows={3}
-          className="w-full resize-none border-0 bg-transparent px-4 pt-3 text-[14px] leading-6 text-ink outline-none placeholder:text-ink-caption disabled:cursor-not-allowed disabled:bg-surface-sunken/40"
-        />
+        <div className="flex min-h-[88px] flex-wrap content-start items-start gap-1.5 px-3 pt-3">
+          {sceneReferences.map((reference) => (
+            <span
+              key={reference.sceneId}
+              data-testid="producer-scene-reference"
+              className="flex h-7 max-w-full shrink-0 items-center gap-1.5 rounded-md border border-action/20 bg-action-soft px-2 text-[12px] font-medium text-ink-secondary"
+            >
+              <Layers3 size={12} className="shrink-0 text-action" />
+              <span className="max-w-[220px] truncate">{reference.title}</span>
+              <button
+                type="button"
+                aria-label={`Remove ${reference.title} from the instruction`}
+                onClick={() => {
+                  setSceneReferences((current) =>
+                    current.filter(
+                      ({ sceneId }) => sceneId !== reference.sceneId,
+                    ),
+                  );
+                }}
+                className="-mr-1 grid size-5 shrink-0 place-items-center rounded-sm text-ink-caption transition-colors duration-100 hover:bg-surface hover:text-ink"
+              >
+                <X size={11} />
+              </button>
+            </span>
+          ))}
+          <textarea
+            value={instruction}
+            onChange={(event) => setInstruction(event.target.value)}
+            placeholder={
+              pendingQuestions.length > 0
+                ? "Answer the question above…"
+                : pendingApprovals.length > 0
+                  ? "Review the change above…"
+                  : sceneReferences.length > 0
+                    ? "What should change?"
+                    : selection
+                      ? "Edit this selection…"
+                      : "Direct the production…"
+            }
+            disabled={conversationPaused}
+            rows={3}
+            className="min-w-[180px] flex-1 resize-none border-0 bg-transparent px-1 text-[14px] leading-6 text-ink outline-none placeholder:text-ink-caption disabled:cursor-not-allowed disabled:bg-surface-sunken/40"
+          />
+        </div>
         <div className="flex items-center justify-end px-3 pb-2.5 pt-1">
           <input
             ref={fileInputRef}

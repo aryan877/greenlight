@@ -808,8 +808,9 @@ export const App = () => {
                       layout.setRightOpen(true);
                       setDraftIntent({
                         id: crypto.randomUUID(),
-                        text: `@“${scene.title}”`,
-                        mode: "append",
+                        sceneId: scene.id,
+                        title: scene.title,
+                        mode: "attach-scene",
                       });
                     }}
                     onSelectGap={selectGap}
