@@ -7,7 +7,6 @@ import {
   type EditorSelection,
 } from "@greenlight/contracts";
 import {
-  Aperture,
   LockKeyhole,
   PanelLeftOpen,
   PanelRightClose,
@@ -28,6 +27,7 @@ import {
 } from "./api/queries.js";
 import {
   GeminiIcon,
+  GreenlightMark,
   RemotionIcon,
   TrueForgeIcon,
   YouTubeIcon,
@@ -40,10 +40,14 @@ import { ProjectSwitcher } from "./components/ProjectSwitcher.js";
 import { MediaBrowser } from "./components/MediaBrowser.js";
 import { ReleasePanel } from "./components/ReleasePanel.js";
 import { Timeline } from "./components/Timeline.js";
+import { ThemeToggle } from "./components/ThemeToggle.js";
 import {
   changeSceneSpeed,
   createSelection,
   createTimelineContext,
+  timelineItems,
+  timelineTracks,
+  videoItemId,
   sceneOffset,
   splitSceneAtPlayhead,
   totalDuration,
@@ -69,7 +73,8 @@ export const App = () => {
   const projects = useProjects();
   const createProject = useCreateProject();
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [selectedSceneIds, setSelectedSceneIds] = useState<string[]>([]);
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
+  const [selectedTrackIds, setSelectedTrackIds] = useState<string[]>([]);
   const [selectedGapAfterSceneIds, setSelectedGapAfterSceneIds] = useState<
     string[]
   >([]);
@@ -137,6 +142,24 @@ export const App = () => {
   const editorArtifactId =
     directRevision?.artifactId ?? contentArtifact?.id ?? null;
   const editorContent = directRevision?.content ?? content.data ?? null;
+  const editorItems = useMemo(
+    () => (editorContent ? timelineItems(editorContent) : []),
+    [editorContent],
+  );
+  const editorTracks = useMemo(
+    () => (editorContent ? timelineTracks(editorContent) : []),
+    [editorContent],
+  );
+  const selectedSceneIds = useMemo(
+    () => [
+      ...new Set(
+        editorItems
+          .filter((item) => selectedItemIds.includes(item.id))
+          .map((item) => item.scene_id),
+      ),
+    ],
+    [editorItems, selectedItemIds],
+  );
   const releaseThumbnailArtifact =
     project.data?.artifacts.find(
       (artifact) =>
@@ -173,19 +196,21 @@ export const App = () => {
   useEffect(() => {
     if (
       editorContent?.scenes[0] &&
-      (selectedSceneIds.length === 0 ||
-        selectedSceneIds.some(
-          (sceneId) =>
-            !editorContent.scenes.some((scene) => scene.id === sceneId),
+      ((selectedItemIds.length === 0 && selectedTrackIds.length === 0) ||
+        selectedItemIds.some(
+          (itemId) => !editorItems.some((item) => item.id === itemId),
         ))
     ) {
-      setSelectedSceneIds([editorContent.scenes[0].id]);
+      setSelectedItemIds([videoItemId(editorContent.scenes[0].id)]);
     }
-  }, [editorContent, selectedSceneIds]);
+  }, [editorContent, editorItems, selectedItemIds, selectedTrackIds]);
 
   const selectedScene =
     editorContent?.scenes.find(
-      (scene) => scene.id === selectedSceneIds.at(-1),
+      (scene) =>
+        scene.id ===
+        editorItems.find((item) => item.id === selectedItemIds.at(-1))
+          ?.scene_id,
     ) ?? null;
 
   const selection = useMemo<EditorSelection | null>(() => {
@@ -193,7 +218,7 @@ export const App = () => {
       !projectId ||
       !editorArtifactId ||
       !editorContent ||
-      selectedSceneIds.length === 0
+      (selectedItemIds.length === 0 && selectedTrackIds.length === 0)
     ) {
       return null;
     }
@@ -201,7 +226,8 @@ export const App = () => {
       projectId,
       contentArtifactId: editorArtifactId,
       content: editorContent,
-      sceneIds: selectedSceneIds,
+      itemIds: selectedItemIds,
+      trackIds: selectedTrackIds,
       gapAfterSceneIds: selectedGapAfterSceneIds,
       playheadSeconds: media.currentTime,
       sourceLedgerArtifact: evidenceArtifact,
@@ -212,7 +238,8 @@ export const App = () => {
     editorArtifactId,
     evidenceArtifact,
     projectId,
-    selectedSceneIds,
+    selectedItemIds,
+    selectedTrackIds,
     selectedGapAfterSceneIds,
     attachedArtifactIds,
     media.currentTime,
@@ -246,7 +273,7 @@ export const App = () => {
       if (
         focus.selection.project_id !== projectId ||
         !editorContent ||
-        !focus.selection.scene_ids[0]
+        (!focus.selection.item_ids[0] && !focus.selection.scene_ids[0])
       ) {
         return;
       }
@@ -258,7 +285,16 @@ export const App = () => {
         editorContent.scenes.some((scene) => scene.id === sceneId),
       );
       if (validSceneIds.length === 0) return;
-      setSelectedSceneIds(validSceneIds);
+      const validItemIds =
+        focus.selection.item_ids.length > 0
+          ? focus.selection.item_ids.filter((itemId) =>
+              editorItems.some((item) => item.id === itemId),
+            )
+          : editorItems
+              .filter((item) => validSceneIds.includes(item.scene_id))
+              .map((item) => item.id);
+      if (validItemIds.length === 0) return;
+      setSelectedItemIds(validItemIds);
       setRightTab("producer");
       layout.setRightOpen(true);
       media.seek(
@@ -266,7 +302,7 @@ export const App = () => {
           sceneOffset(editorContent.scenes, sceneIndex),
       );
     },
-    [editorContent, layout, media, projectId],
+    [editorContent, editorItems, layout, media, projectId],
   );
 
   const producer = useProducerAgent(projectId, focusFromAgent);
@@ -283,6 +319,7 @@ export const App = () => {
 
   useEffect(() => {
     setSelectedGapAfterSceneIds([]);
+    setSelectedTrackIds([]);
     undoStack.current = [];
     redoStack.current = [];
     setHistorySize({ undo: 0, redo: 0 });
@@ -469,6 +506,66 @@ export const App = () => {
     ],
   );
 
+  const applyDirectTrackOperations = useCallback(
+    (
+      trackIds: string[],
+      operations: EditorPatchOperation[],
+      summary: string,
+    ) => {
+      void persistDirectOperations({
+        selection: createSelection({
+          projectId: projectId!,
+          contentArtifactId: editorArtifactId!,
+          content: editorContent!,
+          trackIds,
+          playheadSeconds: media.currentTime,
+          sourceLedgerArtifact: evidenceArtifact,
+        }),
+        operations,
+        summary,
+        recordHistory: true,
+      });
+    },
+    [
+      editorArtifactId,
+      editorContent,
+      evidenceArtifact,
+      media.currentTime,
+      persistDirectOperations,
+      projectId,
+    ],
+  );
+
+  const applyDirectItemOperations = useCallback(
+    (
+      itemIds: string[],
+      operations: EditorPatchOperation[],
+      summary: string,
+    ) => {
+      void persistDirectOperations({
+        selection: createSelection({
+          projectId: projectId!,
+          contentArtifactId: editorArtifactId!,
+          content: editorContent!,
+          itemIds,
+          playheadSeconds: media.currentTime,
+          sourceLedgerArtifact: evidenceArtifact,
+        }),
+        operations,
+        summary,
+        recordHistory: true,
+      });
+    },
+    [
+      editorArtifactId,
+      editorContent,
+      evidenceArtifact,
+      media.currentTime,
+      persistDirectOperations,
+      projectId,
+    ],
+  );
+
   const updateRelease = useCallback(
     (
       operation: Extract<EditorPatchOperation, { type: "update_release" }>,
@@ -480,6 +577,7 @@ export const App = () => {
         selection: {
           project_id: projectId,
           base_content_package_artifact_id: editorArtifactId,
+          item_ids: [],
           scene_ids: [],
           track_ids: ["release"],
           artifact_ids: thumbnailId ? [thumbnailId] : [],
@@ -595,40 +693,60 @@ export const App = () => {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [redo, undo]);
 
-  const selectScene = (sceneId: string, additive = false) => {
-    if (!editorContent) return;
-    const index = editorContent.scenes.findIndex(
-      (scene) => scene.id === sceneId,
-    );
-    if (index < 0) return;
-    setSelectedSceneIds((current) => {
-      if (!additive) return [sceneId];
-      if (current.includes(sceneId)) {
-        const next = current.filter((id) => id !== sceneId);
-        return next.length > 0 ? next : [sceneId];
+  const selectItem = (itemId: string, additive = false) => {
+    const item = editorItems.find((candidate) => candidate.id === itemId);
+    if (!item) return;
+    setSelectedItemIds((current) => {
+      if (!additive) return [itemId];
+      if (current.includes(itemId)) {
+        const next = current.filter((id) => id !== itemId);
+        return next.length > 0 ? next : [itemId];
       }
-      return editorContent.scenes
-        .filter((scene) => [...current, sceneId].includes(scene.id))
-        .map((scene) => scene.id);
+      return editorItems
+        .filter((candidate) => [...current, itemId].includes(candidate.id))
+        .map((candidate) => candidate.id);
     });
-    if (!additive) setSelectedGapAfterSceneIds([]);
-    media.seek(sceneOffset(editorContent.scenes, index));
+    if (!additive) {
+      setSelectedGapAfterSceneIds([]);
+      setSelectedTrackIds([]);
+    }
+    media.seek(item.start_seconds);
   };
 
-  const selectScenes = (sceneIds: string[]) => {
-    if (!editorContent) return;
-    const ordered = editorContent.scenes
-      .filter((scene) => sceneIds.includes(scene.id))
-      .map((scene) => scene.id);
+  const selectItems = (itemIds: string[]) => {
+    const ordered = editorItems
+      .filter((item) => itemIds.includes(item.id))
+      .map((item) => item.id);
     if (ordered.length === 0) return;
-    setSelectedSceneIds(ordered);
+    setSelectedItemIds(ordered);
+    setSelectedTrackIds([]);
+    const selectedScenes = new Set(
+      editorItems
+        .filter((item) => ordered.includes(item.id))
+        .map((item) => item.scene_id),
+    );
     setSelectedGapAfterSceneIds((current) =>
-      current.filter((sceneId) => ordered.includes(sceneId)),
+      current.filter((sceneId) => selectedScenes.has(sceneId)),
     );
-    const first = editorContent.scenes.findIndex(
-      (scene) => scene.id === ordered[0],
-    );
-    if (first >= 0) media.seek(sceneOffset(editorContent.scenes, first));
+    const first = editorItems.find((item) => item.id === ordered[0]);
+    if (first) media.seek(first.start_seconds);
+  };
+
+  const selectTrack = (trackId: string, additive = false) => {
+    if (!editorTracks.some((track) => track.id === trackId)) return;
+    setSelectedTrackIds((current) => {
+      if (!additive) return [trackId];
+      if (current.includes(trackId)) {
+        return current.filter((id) => id !== trackId);
+      }
+      return editorTracks
+        .filter((track) => [...current, trackId].includes(track.id))
+        .map((track) => track.id);
+    });
+    if (!additive) {
+      setSelectedItemIds([]);
+      setSelectedGapAfterSceneIds([]);
+    }
   };
 
   const selectGap = (sceneId: string, additive = false) => {
@@ -638,12 +756,9 @@ export const App = () => {
     );
     const scene = editorContent.scenes[index];
     if (!scene?.gap_after_seconds) return;
-    setSelectedSceneIds((current) =>
-      additive
-        ? editorContent.scenes
-            .filter((item) => [...current, sceneId].includes(item.id))
-            .map((item) => item.id)
-        : [sceneId],
+    const itemId = videoItemId(sceneId);
+    setSelectedItemIds((current) =>
+      additive ? [...new Set([...current, itemId])] : [itemId],
     );
     setSelectedGapAfterSceneIds((current) =>
       additive
@@ -704,7 +819,7 @@ export const App = () => {
           type="button"
           className="flex h-9 items-center gap-2 rounded-lg px-2 hover:bg-hover"
         >
-          <Aperture size={18} className="text-action" strokeWidth={2} />
+          <GreenlightMark size={18} className="text-action" strokeWidth={2} />
           <strong className="text-[13px] font-semibold tracking-[-0.02em]">
             Greenlight
           </strong>
@@ -723,11 +838,14 @@ export const App = () => {
               target_duration_seconds: 60,
               tone: "clear, curious, cinematic",
             });
-            setSelectedSceneIds([]);
+            setSelectedItemIds([]);
             setProjectId(created.id);
           }}
         />
 
+        <div className="ml-auto mr-1.5">
+          <ThemeToggle />
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -735,7 +853,7 @@ export const App = () => {
             layout.setRightOpen(true);
           }}
           className={cx(
-            "ml-auto flex h-8 items-center gap-2 border border-line-subtle px-3 text-[10px] font-medium text-ink-secondary hover:border-ink-caption hover:text-ink",
+            "flex h-8 items-center gap-2 border border-line-subtle px-3 text-[10px] font-medium text-ink-secondary hover:border-ink-caption hover:text-ink",
             rightTab === "release" && "border-action text-action",
           )}
         >
@@ -831,62 +949,52 @@ export const App = () => {
                 className="shrink-0 overflow-hidden"
                 style={{ height: layout.timelineHeight }}
               >
-                {editorContent && selectedSceneIds.length > 0 ? (
+                {editorContent ? (
                   <Timeline
                     content={visibleContent ?? editorContent}
-                    selectedSceneIds={selectedSceneIds}
+                    selectedItemIds={selectedItemIds}
+                    selectedTrackIds={selectedTrackIds}
                     selectedGapAfterSceneIds={selectedGapAfterSceneIds}
                     previewSceneIds={previewSceneIds}
                     previewing={Boolean(previewContent)}
                     currentTime={media.currentTime}
-                    onSelect={(scene, additive) =>
-                      selectScene(scene.id, additive)
-                    }
-                    onSelectMany={(sceneIds, gapIds = []) => {
-                      const requiredSceneIds = [
-                        ...new Set([...sceneIds, ...gapIds]),
+                    onSelectItem={selectItem}
+                    onSelectTrack={selectTrack}
+                    onSelectMany={(itemIds, gapIds = []) => {
+                      const requiredItemIds = [
+                        ...new Set([...itemIds, ...gapIds.map(videoItemId)]),
                       ];
-                      selectScenes(requiredSceneIds);
+                      selectItems(requiredItemIds);
                       setSelectedGapAfterSceneIds(gapIds);
                     }}
                     onSeek={media.seek}
+                    onScrubStart={media.beginScrub}
+                    onScrub={media.previewSeek}
+                    onScrubEnd={media.endScrub}
                     onIntent={directProducer}
                     onDirectEdit={applyDirectOperations}
+                    onDirectItemEdit={applyDirectItemOperations}
+                    onDirectTrackEdit={applyDirectTrackOperations}
                     onCutAtPlayhead={cutAtPlayhead}
-                    onAttachSceneToProducer={(sceneId) => {
-                      const scene = editorContent.scenes.find(
-                        (candidate) => candidate.id === sceneId,
-                      );
-                      if (!scene) return;
-                      setSelectedSceneIds((current) =>
-                        editorContent.scenes
-                          .filter((candidate) =>
-                            [...current, sceneId].includes(candidate.id),
-                          )
-                          .map((candidate) => candidate.id),
-                      );
+                    onAttachItemsToProducer={(items) => {
+                      if (items.length === 0) return;
+                      setSelectedItemIds(items.map((item) => item.id));
                       media.seek(
-                        sceneOffset(
-                          editorContent.scenes,
-                          editorContent.scenes.findIndex(
-                            (candidate) => candidate.id === sceneId,
-                          ),
-                        ),
+                        Math.min(...items.map((item) => item.start_seconds)),
                       );
                       setRightTab("producer");
                       layout.setRightOpen(true);
-                      setDraftIntent({
-                        id: crypto.randomUUID(),
-                        sceneId: scene.id,
-                        title: scene.title,
-                        mode: "attach-scene",
-                      });
+                    }}
+                    onAttachTracksToProducer={(tracks) => {
+                      setSelectedTrackIds(tracks.map((track) => track.id));
+                      setSelectedItemIds([]);
+                      setSelectedGapAfterSceneIds([]);
+                      setRightTab("producer");
+                      layout.setRightOpen(true);
                     }}
                     onSelectGap={selectGap}
                     onSelectAll={() =>
-                      setSelectedSceneIds(
-                        editorContent.scenes.map((scene) => scene.id),
-                      )
+                      setSelectedItemIds(editorItems.map((item) => item.id))
                     }
                     onCollapse={() => layout.setTimelineOpen(false)}
                     canUndo={historySize.undo > 0}
@@ -961,6 +1069,9 @@ export const App = () => {
                     pendingApprovals={producer.pendingApprovals}
                     pendingQuestions={producer.pendingQuestions}
                     selectedGapAfterSceneIds={selectedGapAfterSceneIds}
+                    selectedTracks={editorTracks.filter((track) =>
+                      selectedTrackIds.includes(track.id),
+                    )}
                     isSending={producer.isSending}
                     isApproving={producer.isApproving}
                     isAnswering={producer.isAnswering}
@@ -979,11 +1090,16 @@ export const App = () => {
                       producer.answerQuestion({ pending, answer })
                     }
                     onCancelQuestion={producer.cancelQuestion}
-                    onRemoveScene={(sceneId) =>
-                      setSelectedSceneIds((current) => {
-                        const next = current.filter((id) => id !== sceneId);
+                    onRemoveItem={(itemId) =>
+                      setSelectedItemIds((current) => {
+                        const next = current.filter((id) => id !== itemId);
                         return next.length > 0 ? next : current;
                       })
+                    }
+                    onRemoveTrack={(trackId) =>
+                      setSelectedTrackIds((current) =>
+                        current.filter((id) => id !== trackId),
+                      )
                     }
                     onRemoveArtifact={(artifactId) =>
                       setAttachedArtifactIds((current) =>

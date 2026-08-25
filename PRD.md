@@ -4,7 +4,7 @@ Status: implementation · 25 August 2026
 
 ## Product
 
-Greenlight is an agentic YouTube production editor. A creator gives it a topic, audience, goal, and permitted sources. A TrueForge Producer researches, verifies, scripts, builds editable scene bundles, creates media, renders a short video, checks it, and stages it on YouTube as unlisted. A person owns every material edit and the final decision to broadcast.
+Greenlight is an agentic YouTube production editor. A creator gives it a topic, audience, goal, and permitted sources. A TrueForge Producer researches, verifies, scripts, creates media, edits independent timeline clips, renders a short video, checks it, and stages it on YouTube as unlisted. A person owns every material edit and the final decision to broadcast.
 
 Greenlight is not a prompt-to-video slot machine, a generic chat UI, or a promise of views. It improves controllable inputs—research, story, pacing, editability, packaging, and release discipline.
 
@@ -19,8 +19,8 @@ Success means one 30–120 second production can move from brief to unlisted rev
 ## Principles
 
 1. The timeline is primary; chat is the command surface beside it.
-2. A scene is one bundle: visual, narration, timed transcript, captions, timing, locale, and sources.
-3. Any number of scene bundles may be selected. Selection is typed context, never a file path.
+2. Video, audio, and caption clips are independent timeline items. Selecting aligned items together is an explicit creator action, not hidden linking.
+3. Any number of clips, tracks, or gaps may be selected. Selection is typed context, never a file path.
 4. Agent and manual edits use one patch format and one immutable revision model. Manual editor controls apply immediately and remain undoable; Producer-authored mutations preview before approval.
 5. Agent preview is exact: Studio runs the same reducer the MCP tool will persist.
 6. Word edits use measured transcript timing; generated timing is not guessed.
@@ -35,7 +35,7 @@ Success means one 30–120 second production can move from brief to unlisted rev
 
 - Left: creator-imported project media only, with real previews and direct attachment to Producer
 - Center: resizable 16:9 Program monitor with working playback, seek, mute, volume, and fullscreen
-- Bottom: collapsible and vertically resizable bundled-scene timeline with synchronized zoom and one playhead
+- Bottom: collapsible and vertically resizable non-linear timeline with synchronized zoom and one playhead
 - Right: concise AI Producer activity, scene Details, or the YouTube Release workspace
 - All side panes collapse and resize; the canvas never overlaps the timeline
 
@@ -43,22 +43,22 @@ The visual language is a distinct light editorial system: Archivo plus IBM Plex 
 
 ### Selection
 
-- Click selects a scene bundle; Shift/Cmd-click adds or removes scenes.
-- Dragging across the timeline draws a marquee and selects every intersecting scene bundle.
+- Click selects one clip; Shift/Cmd-click adds or removes exact clips.
+- Dragging anywhere empty in the timeline draws a two-dimensional marquee and selects every intersecting clip.
 - Clicking the production title selects the whole cut.
-- The composer shows compact removable scene chips and a count for overflow; this never limits actual selection.
-- The serialized selection contains project, base revision, ordered scene IDs, bundled track IDs, artifact IDs, source ledger ID when relevant, and the exact time range.
+- The composer shows compact removable item, gap, media, and track tokens; this never limits actual selection.
+- The serialized selection contains project, base revision, exact item and track IDs, scene references, artifact IDs, source ledger ID when relevant, and the exact time range.
 - Every Producer turn also carries a compact `EDITOR_TIMELINE` map of the complete current cut. `EDITOR_SELECTION` is the creator's current emphasis, not the agent's only context.
-- Dragging a scene into the composer appends a readable inline mention, preserves existing draft text, and attaches that scene's typed context.
+- Dragging a timeline item or selected set into the composer attaches exact structured tokens with the correct media-kind icons.
 - The Producer may call `focus_editor_selection` to move Studio to the scenes it is discussing.
 - A creator may import supported local media. Greenlight copies it into the project workspace, shows it in the media browser, and adds the chosen artifact to Producer context without revealing a host path.
 
 ### Editing
 
-- Natural language may change one field, multiple fields, several scenes, or the full cut.
-- Drag reorder, end trim, speed, split, track controls, scrubbing, and undo/redo run directly in Studio without invoking TrueForge.
+- Natural language may change one field, multiple fields, several clips, a track, or the full cut.
+- Clip and track selection, reorder, trim, split, mixer controls, scrubbing, and undo/redo run directly in Studio without invoking TrueForge.
 - The Producer may operate the same commands when asked; it first focuses its interpreted target in the real timeline and asks one concise question only when the target is ambiguous.
-- Split, remove, speed, localized track, visual, voice, caption, transcript, timing, and order changes are typed patch operations.
+- Split, remove, speed, track, visual, voice, caption, transcript, timing, placement, and order changes are typed patch operations.
 - Scene and gap timing is validated against the 30-fps production grid.
 - Shortening preserves the removed frames as an explicit gap unless a separate structural edit resolves them.
 - A scene cannot be extended beyond recorded unused source frames or beyond its existing gap.
@@ -138,9 +138,9 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 
 ## Acceptance criteria
 
-- A selected scene appears as context in the composer and an agent can focus a different valid selection.
-- Multi-select and whole-cut selection preserve ordered scene IDs with no arbitrary cap.
-- Timeline marquee selection preserves complete scene bundles and a real canvas gutter.
+- A selected clip or track appears as exact context in the composer and an agent can focus a different valid selection.
+- Multi-select and whole-cut selection preserve exact ordered item IDs with no arbitrary cap.
+- Timeline marquee selection works across all lanes and the empty canvas below them.
 - An imported media file appears with its real thumbnail/type, becomes removable Producer context, previews on the selected scene, and resolves to the same immutable file during Remotion export.
 - A scoped title/visual/timing/speed patch visibly previews before execution.
 - A trim preserves removed frames as a visible gap, a split preserves duration, and source-backed extension cannot exceed recorded handles.

@@ -58,6 +58,69 @@ export type PendingQuestion = {
 export const CREATOR_CANCELLED_QUESTION =
   "The creator cancelled this request. Stop here and make no changes.";
 
+const asideDivider = /\s+(?:—|–|--+)\s+/g;
+
+export const cleanConversationText = (value: string): string =>
+  value
+    .replace(/[*_`#]/g, "")
+    .replace(asideDivider, ". ")
+    .replace(/\s+([,.!?])/g, "$1")
+    .replace(/\.{2,}/g, ".")
+    .replace(/\s+/g, " ")
+    .replace(/^["']\s*/, "")
+    .trim();
+
+export const cleanQuestionChoice = (value: string): string =>
+  cleanConversationText(value.split(/\s+(?:—|–|--+)\s+/, 1)[0] ?? value);
+
+export const cleanCreatorQuestion = (value: string): string =>
+  cleanConversationText(
+    value
+      .replace(/\s*\(scene_[a-z0-9_-]+\)\s*/gi, " ")
+      .replace(/\bscene_[a-z0-9_-]+\b/gi, "this scene"),
+  );
+
+export const questionDecisionLabel = (answer: string): string =>
+  answer === CREATOR_CANCELLED_QUESTION
+    ? "Cancelled"
+    : cleanQuestionChoice(answer);
+
+export const approvalDecisionLabel = (
+  status: "allow" | "deny",
+  reason?: string,
+): string => {
+  if (status === "allow") return "Approved";
+  if (!reason || /cancel/i.test(reason)) return "Cancelled";
+  return `Requested a revision: ${cleanConversationText(reason)}`;
+};
+
+export const creatorDecisionFromTurnInput = (
+  input: unknown[] | null | undefined,
+): string | null => {
+  for (const item of input ?? []) {
+    if (!item || typeof item !== "object") continue;
+    const value = item as Record<string, unknown>;
+    if (
+      value.type === "user.tool_response" &&
+      typeof value.content === "string"
+    ) {
+      return questionDecisionLabel(value.content);
+    }
+    if (value.type !== "user.tool_approval") continue;
+    const approval = value.approval;
+    if (!approval || typeof approval !== "object") continue;
+    const decision = approval as Record<string, unknown>;
+    if (decision.status === "allow") return "Approved";
+    if (decision.status === "deny") {
+      return approvalDecisionLabel(
+        "deny",
+        typeof decision.reason === "string" ? decision.reason : undefined,
+      );
+    }
+  }
+  return null;
+};
+
 type ProducerSendInput = {
   instruction: string;
   selection: EditorSelection | null;
@@ -276,7 +339,9 @@ export const pendingQuestionsFromEvent = (
     if (!call || call.function.name !== "ask_user_question") return [];
     const args = parseArguments(call);
     const question =
-      typeof args.question === "string" ? args.question.trim() : "";
+      typeof args.question === "string"
+        ? cleanCreatorQuestion(args.question)
+        : "";
     if (!question) return [];
     return [
       {
@@ -286,9 +351,10 @@ export const pendingQuestionsFromEvent = (
         toolCallId: call.id,
         question,
         options: Array.isArray(args.options)
-          ? args.options.filter(
-              (option): option is string => typeof option === "string",
-            )
+          ? args.options
+              .filter((option): option is string => typeof option === "string")
+              .map(cleanQuestionChoice)
+              .filter(Boolean)
           : [],
       },
     ];
@@ -376,7 +442,7 @@ const toolPresentation = (
             lines: scenes.map((scene, index) => {
               const title = String(scene.title ?? `Scene ${index + 1}`);
               const narration = String(scene.narration ?? "");
-              return `${index + 1}. ${title}${narration ? ` — ${narration}` : ""}`;
+              return `${index + 1}. ${title}${narration ? `: ${narration}` : ""}`;
             }),
           },
           {
@@ -397,23 +463,20 @@ const toolPresentation = (
 };
 
 const creatorFacingSentence = (value: string): string | null => {
-  const content = value
-    .replace(/[*_`#]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const content = cleanConversationText(value);
   if (!content) return null;
   if (/^(done|patch applied successfully)\.?$/i.test(content)) {
     return "Change applied.";
   }
   if (
-    /patch (?:was )?(?:cancelled|canceled|not applied)|no changes were made/i.test(
+    /patch (?:was )?(?:cancelled|canceled|not applied)|no changes were made|stopped,? no changes|cancelled again/i.test(
       content,
     )
   ) {
-    return "Change cancelled.";
+    return null;
   }
   if (/^(?:yes|confirmed)\b.*\bcurrent cut\b/i.test(content)) {
-    return "Yes — I can see the current cut.";
+    return "Yes. I can see the current cut.";
   }
   if (/^frame math\b/i.test(content)) return null;
   const sentences =
@@ -427,7 +490,7 @@ const creatorFacingSentence = (value: string): string | null => {
         !/(?:\bartifact[_-]?[a-z0-9]+|\bscene_[a-z0-9_-]+|frame math|frames? \d|gapafter|base_content_package|content_package_artifact|sha256|current revision)/i.test(
           sentence,
         ) &&
-        !/^(got it|understood|okay|let me|i(?:'ll| will)|now i|first[, ]|to begin)/i.test(
+        !/^(got it|on it|understood|okay|let me|i(?:'ll| will)|now i|first[, ]|to begin)/i.test(
           sentence,
         ),
     ) ?? null
@@ -874,6 +937,19 @@ export const useProducerAgent = (
           },
         ]);
       }
+      const restoredDecision = creatorDecisionFromTurnInput(latestTurn.input);
+      if (restoredDecision) {
+        appendEvents([
+          {
+            id: `decision-${latestTurn.id}`,
+            kind: "instruction",
+            label: restoredDecision,
+            detail: "",
+            sceneIds: [],
+            delivery: "sent",
+          },
+        ]);
+      }
       const persisted = await trueforge.sessions.listTurnEvents(
         restoredSessionId,
         latestTurn.id,
@@ -1032,98 +1108,163 @@ export const useProducerAgent = (
     [pendingApprovals.length, pendingQuestions.length, send],
   );
 
-  const approval = useMutation({
-    mutationFn: async (input: {
-      pending: PendingToolApproval;
-      status: "allow" | "deny";
-      reason?: string;
-    }) => {
-      if (!sessionId.current) throw new Error("producer_session_missing");
-      if (!projectId) throw new Error("project_not_selected");
-      const stream = await trueforge.sessions.createTurnStream(
-        sessionId.current,
-        {
-          previousTurnId: input.pending.turnId,
-          input: [
-            {
-              type: "user.tool_approval",
-              threadId: input.pending.threadId,
-              toolCallId: input.pending.toolCallId,
-              approval:
-                input.status === "allow"
-                  ? { status: "allow" }
-                  : { status: "deny", reason: input.reason },
-            },
-          ],
-        },
-      );
-      await consume(stream, projectId);
-      setPendingApprovals((current) =>
-        current.filter((item) => item.toolCallId !== input.pending.toolCallId),
-      );
-    },
-    onSuccess: async () => {
-      if (projectId) {
-        await queryClient.invalidateQueries({
-          queryKey: greenlightKeys.project(projectId),
-        });
-      }
-    },
-    onError: (_error, input) => {
-      appendEvents([
-        {
-          id: `approval-delivery-${input.pending.toolCallId}-${crypto.randomUUID()}`,
-          kind: "message",
-          label: "Couldn’t send your decision.",
-          detail: "The preview is still waiting. Try again.",
-          sceneIds: selectionSceneIds(input.pending.arguments),
-        },
-      ]);
-    },
-  });
+  type ApprovalInput = {
+    pending: PendingToolApproval;
+    status: "allow" | "deny";
+    reason?: string;
+  };
 
-  const question = useMutation({
-    mutationFn: async (input: { pending: PendingQuestion; answer: string }) => {
-      if (!sessionId.current) throw new Error("producer_session_missing");
-      if (!projectId) throw new Error("project_not_selected");
-      const stream = await trueforge.sessions.createTurnStream(
-        sessionId.current,
-        {
-          previousTurnId: input.pending.turnId,
-          input: [
-            {
-              type: "user.tool_response",
-              threadId: input.pending.threadId,
-              toolCallId: input.pending.toolCallId,
-              content: input.answer,
-            },
-          ],
-        },
-      );
-      await consume(stream, projectId);
-      setPendingQuestions((current) =>
-        current.filter((item) => item.toolCallId !== input.pending.toolCallId),
-      );
+  const approval = useMutation<void, Error, ApprovalInput, { eventId: string }>(
+    {
+      mutationFn: async (input: {
+        pending: PendingToolApproval;
+        status: "allow" | "deny";
+        reason?: string;
+      }) => {
+        if (!sessionId.current) throw new Error("producer_session_missing");
+        if (!projectId) throw new Error("project_not_selected");
+        const stream = await trueforge.sessions.createTurnStream(
+          sessionId.current,
+          {
+            previousTurnId: input.pending.turnId,
+            input: [
+              {
+                type: "user.tool_approval",
+                threadId: input.pending.threadId,
+                toolCallId: input.pending.toolCallId,
+                approval:
+                  input.status === "allow"
+                    ? { status: "allow" }
+                    : { status: "deny", reason: input.reason },
+              },
+            ],
+          },
+        );
+        await consume(stream, projectId);
+        setPendingApprovals((current) =>
+          current.filter(
+            (item) => item.toolCallId !== input.pending.toolCallId,
+          ),
+        );
+      },
+      onMutate: (input) => {
+        const eventId = `approval-decision-${input.pending.toolCallId}-${crypto.randomUUID()}`;
+        appendEvents([
+          {
+            id: eventId,
+            kind: "instruction",
+            label: approvalDecisionLabel(input.status, input.reason),
+            detail: "",
+            sceneIds: selectionSceneIds(input.pending.arguments),
+            delivery: "sending",
+          },
+        ]);
+        return { eventId };
+      },
+      onSuccess: async (_data, _input, context) => {
+        setEvents((current) =>
+          current.map((item) =>
+            item.id === context?.eventId
+              ? { ...item, delivery: "sent" as const }
+              : item,
+          ),
+        );
+        if (projectId) {
+          await queryClient.invalidateQueries({
+            queryKey: greenlightKeys.project(projectId),
+          });
+        }
+      },
+      onError: (_error, _input, context) => {
+        setEvents((current) =>
+          current.map((item) =>
+            item.id === context?.eventId
+              ? {
+                  ...item,
+                  delivery: "failed" as const,
+                  detail: "That decision was not sent. Try again.",
+                }
+              : item,
+          ),
+        );
+      },
     },
-    onSuccess: async () => {
-      if (projectId) {
-        await queryClient.invalidateQueries({
-          queryKey: greenlightKeys.project(projectId),
-        });
-      }
+  );
+
+  type QuestionInput = { pending: PendingQuestion; answer: string };
+
+  const question = useMutation<void, Error, QuestionInput, { eventId: string }>(
+    {
+      mutationFn: async (input: {
+        pending: PendingQuestion;
+        answer: string;
+      }) => {
+        if (!sessionId.current) throw new Error("producer_session_missing");
+        if (!projectId) throw new Error("project_not_selected");
+        const stream = await trueforge.sessions.createTurnStream(
+          sessionId.current,
+          {
+            previousTurnId: input.pending.turnId,
+            input: [
+              {
+                type: "user.tool_response",
+                threadId: input.pending.threadId,
+                toolCallId: input.pending.toolCallId,
+                content: input.answer,
+              },
+            ],
+          },
+        );
+        await consume(stream, projectId);
+        setPendingQuestions((current) =>
+          current.filter(
+            (item) => item.toolCallId !== input.pending.toolCallId,
+          ),
+        );
+      },
+      onMutate: (input) => {
+        const eventId = `question-decision-${input.pending.toolCallId}-${crypto.randomUUID()}`;
+        appendEvents([
+          {
+            id: eventId,
+            kind: "instruction",
+            label: questionDecisionLabel(input.answer),
+            detail: "",
+            sceneIds: [],
+            delivery: "sending",
+          },
+        ]);
+        return { eventId };
+      },
+      onSuccess: async (_data, _input, context) => {
+        setEvents((current) =>
+          current.map((item) =>
+            item.id === context?.eventId
+              ? { ...item, delivery: "sent" as const }
+              : item,
+          ),
+        );
+        if (projectId) {
+          await queryClient.invalidateQueries({
+            queryKey: greenlightKeys.project(projectId),
+          });
+        }
+      },
+      onError: (_error, _input, context) => {
+        setEvents((current) =>
+          current.map((item) =>
+            item.id === context?.eventId
+              ? {
+                  ...item,
+                  delivery: "failed" as const,
+                  detail: "That answer was not sent. Try again.",
+                }
+              : item,
+          ),
+        );
+      },
     },
-    onError: (_error, input) => {
-      appendEvents([
-        {
-          id: `answer-delivery-${input.pending.toolCallId}-${crypto.randomUUID()}`,
-          kind: "message",
-          label: "Couldn’t send your answer.",
-          detail: "The question is still open. Try again.",
-          sceneIds: [],
-        },
-      ]);
-    },
-  });
+  );
 
   const sendInstruction = useCallback(
     (input: ProducerSendInput) => {

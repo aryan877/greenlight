@@ -80,6 +80,7 @@ describe("editor patch revisions", () => {
           selection: {
             project_id: project.id,
             base_content_package_artifact_id: base.id,
+            item_ids: [],
             scene_ids: ["scene_open"],
             track_ids: ["visual", "voice", "caption", "transcript"],
             artifact_ids: [],

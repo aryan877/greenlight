@@ -1,10 +1,14 @@
 import {
   effectiveAudioTracks,
+  effectiveCaptionTracks,
+  effectiveVideoTracks,
   MIN_SCENE_DURATION_SECONDS,
   VIDEO_FPS,
   type ContentPackage,
   type EditorPatchOperation,
-  type Scene,
+  type EditorTimelineItem,
+  type EditorTimelineItemKind,
+  type EditorTimelineTrack,
 } from "@greenlight/contracts";
 import {
   Captions,
@@ -17,9 +21,11 @@ import {
   Undo2,
   ZoomIn,
   ZoomOut,
+  type LucideIcon,
 } from "lucide-react";
 import {
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   useEffect,
   useMemo,
   useRef,
@@ -33,53 +39,92 @@ import {
   sceneOffset,
   sceneTimelineDuration,
   snapToFrame,
-  totalDuration,
+  timelineItems,
+  timelineTracks,
   timelineTicks,
+  totalDuration,
+  videoItemId,
 } from "../editor/model.js";
-import { AudioTrackRail } from "./AudioTrackRail.js";
+import {
+  buildTimelineMovePlan,
+  buildTimelineTrimPlan,
+  maximumTimelineItemDuration,
+} from "../editor/operations.js";
+import { TrackRail, type TrackDraft } from "./TrackRail.js";
 import { cx, IconButton } from "./controls.js";
 
 type Marquee = {
   pointerId: number;
   startX: number;
+  startY: number;
   currentX: number;
-  originSceneId: string | null;
+  currentY: number;
   additive: boolean;
 };
 
-type ClipDrag = {
+type ItemDrag = {
   pointerId: number;
-  sceneId: string;
+  primaryItemId: string;
+  itemIds: string[];
   startX: number;
+  startY: number;
+  startTime: number;
+  deltaSeconds: number;
+  targetTrackId: string | null;
   dropIndex: number;
   moved: boolean;
 };
 
 type DragPreview = {
-  sceneId: string;
+  items: EditorTimelineItem[];
   x: number;
   y: number;
   overProducer: boolean;
 };
 
+const RAIL_WIDTH = 156;
+const RULER_HEIGHT = 28;
+const LANE_HEIGHT = 32;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 8;
 const ZOOM_STEP = 0.1;
 
+const intersects = (a: DOMRect, b: DOMRect) =>
+  a.right >= b.left &&
+  a.left <= b.right &&
+  a.bottom >= b.top &&
+  a.top <= b.bottom;
+
+const ITEM_ICONS = {
+  video: Layers3,
+  audio: Mic2,
+  caption: Captions,
+} satisfies Record<EditorTimelineItemKind, LucideIcon>;
+
+const itemIcon = (kind: EditorTimelineItemKind) => ITEM_ICONS[kind];
+
 export const Timeline = ({
   content,
-  selectedSceneIds,
+  selectedItemIds,
+  selectedTrackIds,
   selectedGapAfterSceneIds,
   previewSceneIds,
   previewing,
   currentTime,
-  onSelect,
+  onSelectItem,
+  onSelectTrack,
   onSelectMany,
   onSeek,
+  onScrubStart,
+  onScrub,
+  onScrubEnd,
   onIntent,
   onDirectEdit,
+  onDirectItemEdit,
+  onDirectTrackEdit,
   onCutAtPlayhead,
-  onAttachSceneToProducer,
+  onAttachItemsToProducer,
+  onAttachTracksToProducer,
   onSelectGap,
   onSelectAll,
   onCollapse,
@@ -90,22 +135,38 @@ export const Timeline = ({
   onRedo,
 }: {
   content: ContentPackage;
-  selectedSceneIds: string[];
+  selectedItemIds: string[];
+  selectedTrackIds: string[];
   selectedGapAfterSceneIds: string[];
   previewSceneIds: string[];
   previewing: boolean;
   currentTime: number;
-  onSelect: (scene: Scene, additive: boolean) => void;
-  onSelectMany: (sceneIds: string[], gapAfterSceneIds?: string[]) => void;
+  onSelectItem: (itemId: string, additive: boolean) => void;
+  onSelectTrack: (trackId: string, additive: boolean) => void;
+  onSelectMany: (itemIds: string[], gapAfterSceneIds?: string[]) => void;
   onSeek: (seconds: number) => void;
+  onScrubStart: () => void;
+  onScrub: (seconds: number) => void;
+  onScrubEnd: (seconds: number) => void;
   onIntent: (instruction: string) => void;
   onDirectEdit: (
     sceneIds: string[],
     operations: EditorPatchOperation[],
     summary: string,
   ) => void;
+  onDirectItemEdit: (
+    itemIds: string[],
+    operations: EditorPatchOperation[],
+    summary: string,
+  ) => void;
+  onDirectTrackEdit: (
+    trackIds: string[],
+    operations: EditorPatchOperation[],
+    summary: string,
+  ) => void;
   onCutAtPlayhead: (sceneId: string) => void;
-  onAttachSceneToProducer: (sceneId: string) => void;
+  onAttachItemsToProducer: (items: EditorTimelineItem[]) => void;
+  onAttachTracksToProducer: (tracks: EditorTimelineTrack[]) => void;
   onSelectGap: (sceneId: string, additive: boolean) => void;
   onSelectAll: () => void;
   onCollapse: () => void;
@@ -117,36 +178,130 @@ export const Timeline = ({
 }) => {
   const duration = totalDuration(content);
   const audioTracks = effectiveAudioTracks(content);
-  const laneCount = 2 + audioTracks.length;
-  const laneHeight = 32;
-  const trackHeight = laneCount * laneHeight + 8;
+  const items = useMemo(() => timelineItems(content), [content]);
+  const tracks = useMemo(() => timelineTracks(content), [content]);
+  const laneIndex = useMemo(
+    () => new Map(tracks.map((track, index) => [track.id, index])),
+    [tracks],
+  );
+  const lanesHeight = tracks.length * LANE_HEIGHT;
+  const workspaceHeight = Math.max(lanesHeight + RULER_HEIGHT + 44, 190);
   const playhead = (Math.min(currentTime, duration) / duration) * 100;
   const [zoom, setZoom] = useState(1);
   const [trackWidth, setTrackWidth] = useState(1000);
-  const [draggedSceneId, setDraggedSceneId] = useState<string | null>(null);
-  const [dropSceneId, setDropSceneId] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
+  const [draggedItemIds, setDraggedItemIds] = useState<string[]>([]);
+  const [dragTransform, setDragTransform] = useState<{
+    deltaSeconds: number;
+    targetTrackId: string | null;
+    primaryTrackId: string;
+  } | null>(null);
+  const [dropSceneId, setDropSceneId] = useState<string | null>(null);
   const [trim, setTrim] = useState<{
-    sceneId: string;
+    itemId: string;
     duration: number;
   } | null>(null);
   const [marquee, setMarquee] = useState<Marquee | null>(null);
   const marqueeRef = useRef<Marquee | null>(null);
-  const clipDragRef = useRef<ClipDrag | null>(null);
-  const trackRef = useRef<HTMLDivElement>(null);
+  const itemDragRef = useRef<ItemDrag | null>(null);
+  const suppressClickRef = useRef<string | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const timeAxisRef = useRef<HTMLDivElement>(null);
+
+  const addTrack = (draft: TrackDraft) => {
+    const id = `track_${draft.kind}_${crypto.randomUUID()}`;
+    const ordinal = tracks.filter(
+      (track) =>
+        track.kind === draft.kind &&
+        (draft.kind !== "audio" || track.role === draft.role),
+    ).length;
+    const name = ordinal === 0 ? draft.name : `${draft.name} ${ordinal + 1}`;
+    if (draft.kind === "video") {
+      onDirectTrackEdit(
+        ["visual", id],
+        [
+          {
+            type: "upsert_video_track",
+            track: { id, name, kind: "video", protected: false },
+          },
+        ],
+        `Add ${name}`,
+      );
+      return;
+    }
+    if (draft.kind === "caption") {
+      onDirectTrackEdit(
+        ["caption", id],
+        [
+          {
+            type: "upsert_caption_track",
+            track: { id, name, kind: "caption", protected: false },
+          },
+        ],
+        `Add ${name}`,
+      );
+      return;
+    }
+    onDirectTrackEdit(
+      ["voice", id],
+      [
+        {
+          type: "upsert_audio_track",
+          track: {
+            id,
+            name,
+            role: draft.role ?? "narration",
+            locale: null,
+            voice_label: null,
+            muted: false,
+            solo: false,
+            export_enabled: true,
+            gain: 1,
+            clips: [],
+          },
+        },
+      ],
+      `Add ${name}`,
+    );
+  };
+
+  const deleteTrack = (track: EditorTimelineTrack) => {
+    if (track.protected) return;
+    const operation: EditorPatchOperation =
+      track.kind === "video"
+        ? { type: "remove_video_track", track_id: track.id }
+        : track.kind === "caption"
+          ? { type: "remove_caption_track", track_id: track.id }
+          : { type: "remove_audio_track", track_id: track.id };
+    onDirectTrackEdit(
+      [
+        track.kind === "video"
+          ? "visual"
+          : track.kind === "caption"
+            ? "caption"
+            : "voice",
+        track.id,
+      ],
+      [operation],
+      `Delete ${track.name}`,
+    );
+  };
+
   const updateMarquee = (next: Marquee | null) => {
     marqueeRef.current = next;
     setMarquee(next);
   };
+
   useEffect(() => {
-    const track = trackRef.current;
-    if (!track) return;
+    const timeAxis = timeAxisRef.current;
+    if (!timeAxis) return;
     const observer = new ResizeObserver(([entry]) => {
       if (entry) setTrackWidth(entry.contentRect.width);
     });
-    observer.observe(track);
+    observer.observe(timeAxis);
     return () => observer.disconnect();
   }, []);
+
   const ruler = useMemo(
     () => timelineTicks(duration, trackWidth),
     [duration, trackWidth],
@@ -159,6 +314,310 @@ export const Timeline = ({
       local <= scene.duration_seconds - MIN_SCENE_DURATION_SECONDS
     );
   });
+
+  const positionInCanvas = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ): { x: number; y: number } => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)),
+      y: Math.max(0, Math.min(bounds.height, event.clientY - bounds.top)),
+    };
+  };
+
+  const timeFromClientX = (clientX: number) => {
+    const bounds = timeAxisRef.current?.getBoundingClientRect();
+    if (!bounds) return currentTime;
+    const ratio =
+      Math.max(0, Math.min(bounds.width, clientX - bounds.left)) / bounds.width;
+    return ratio * duration;
+  };
+
+  const beginPlayheadDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onScrubStart();
+    onScrub(timeFromClientX(event.clientX));
+  };
+
+  const beginMarquee = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || previewing || editing) return;
+    const target = event.target as HTMLElement;
+    if (
+      target.closest("[data-timeline-item-id]") ||
+      target.closest("[data-timeline-gap]") ||
+      target.closest("button, input, [data-trim-handle]")
+    ) {
+      return;
+    }
+    const point = positionInCanvas(event);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    updateMarquee({
+      pointerId: event.pointerId,
+      startX: point.x,
+      startY: point.y,
+      currentX: point.x,
+      currentY: point.y,
+      additive: event.shiftKey || event.metaKey || event.ctrlKey,
+    });
+  };
+
+  const moveMarquee = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const active = marqueeRef.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    const point = positionInCanvas(event);
+    updateMarquee({ ...active, currentX: point.x, currentY: point.y });
+  };
+
+  const finishMarquee = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const active = marqueeRef.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    const point = positionInCanvas(event);
+    const canvasBounds = event.currentTarget.getBoundingClientRect();
+    const selectionRect = new DOMRect(
+      canvasBounds.left + Math.min(active.startX, point.x),
+      canvasBounds.top + Math.min(active.startY, point.y),
+      Math.abs(point.x - active.startX),
+      Math.abs(point.y - active.startY),
+    );
+    updateMarquee(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (selectionRect.width < 4 && selectionRect.height < 4) return;
+
+    const hitItemIds = [
+      ...event.currentTarget.querySelectorAll<HTMLElement>(
+        "[data-timeline-item-id]",
+      ),
+    ].flatMap((element) => {
+      const itemId = element.dataset.timelineItemId;
+      return itemId &&
+        intersects(selectionRect, element.getBoundingClientRect())
+        ? [itemId]
+        : [];
+    });
+    const hitGapIds = [
+      ...event.currentTarget.querySelectorAll<HTMLElement>(
+        "[data-timeline-gap]",
+      ),
+    ].flatMap((element) => {
+      const sceneId = element.dataset.timelineGap;
+      return sceneId &&
+        intersects(selectionRect, element.getBoundingClientRect())
+        ? [sceneId]
+        : [];
+    });
+    const nextItemIds = active.additive
+      ? [...new Set([...selectedItemIds, ...hitItemIds])]
+      : hitItemIds;
+    const nextGapIds = active.additive
+      ? [...new Set([...selectedGapAfterSceneIds, ...hitGapIds])]
+      : hitGapIds;
+    if (nextItemIds.length > 0 || nextGapIds.length > 0) {
+      onSelectMany(nextItemIds, nextGapIds);
+    }
+  };
+
+  const startItemDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    item: EditorTimelineItem,
+  ) => {
+    event.stopPropagation();
+    if (
+      event.button !== 0 ||
+      previewing ||
+      editing ||
+      event.shiftKey ||
+      event.metaKey ||
+      event.ctrlKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const dragItems = selectedItemIds.includes(item.id)
+      ? items.filter((candidate) => selectedItemIds.includes(candidate.id))
+      : [item];
+    const sceneIndex = content.scenes.findIndex(
+      (scene) => scene.id === item.scene_id,
+    );
+    itemDragRef.current = {
+      pointerId: event.pointerId,
+      primaryItemId: item.id,
+      itemIds: dragItems.map((candidate) => candidate.id),
+      startX: event.clientX,
+      startY: event.clientY,
+      startTime: timeFromClientX(event.clientX),
+      deltaSeconds: 0,
+      targetTrackId: null,
+      dropIndex: Math.max(0, sceneIndex),
+      moved: false,
+    };
+  };
+
+  const moveItemDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    item: EditorTimelineItem,
+  ) => {
+    const active = itemDragRef.current;
+    if (
+      !active ||
+      active.pointerId !== event.pointerId ||
+      active.primaryItemId !== item.id
+    ) {
+      return;
+    }
+    const moved =
+      active.moved ||
+      Math.hypot(
+        event.clientX - active.startX,
+        event.clientY - active.startY,
+      ) >= 5;
+    if (!moved) return;
+    const hoverTarget = document.elementFromPoint(event.clientX, event.clientY);
+    const overProducer = Boolean(
+      hoverTarget?.closest('[data-testid="producer-composer"]'),
+    );
+    let dropIndex = active.dropIndex;
+    const dragItems = items.filter((candidate) =>
+      active.itemIds.includes(candidate.id),
+    );
+    const rawDelta = snapToFrame(
+      timeFromClientX(event.clientX) - active.startTime,
+    );
+    const minimumStart = Math.min(
+      ...dragItems.map((candidate) => candidate.start_seconds),
+    );
+    const maximumEnd = Math.max(
+      ...dragItems.map((candidate) => candidate.end_seconds),
+    );
+    const deltaSeconds = Math.max(
+      -minimumStart,
+      Math.min(duration - maximumEnd, rawDelta),
+    );
+    const axisBounds = timeAxisRef.current?.getBoundingClientRect();
+    let targetTrackId: string | null = null;
+    if (axisBounds) {
+      const row = Math.floor(
+        (event.clientY - axisBounds.top - RULER_HEIGHT) / LANE_HEIGHT,
+      );
+      const targetTrack = tracks[row];
+      const primaryItem = items.find(
+        (candidate) => candidate.id === active.primaryItemId,
+      );
+      if (targetTrack && primaryItem && targetTrack.kind === primaryItem.kind) {
+        targetTrackId = targetTrack.id;
+      }
+    }
+    const movingSceneIds = new Set(
+      dragItems
+        .filter((candidate) => candidate.kind === "video")
+        .map((candidate) => candidate.scene_id),
+    );
+    if (movingSceneIds.size > 0) {
+      const bounds = timeAxisRef.current?.getBoundingClientRect();
+      if (bounds) {
+        const seconds =
+          (Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)) /
+            bounds.width) *
+          duration;
+        const remaining = content.scenes.filter(
+          (scene) => !movingSceneIds.has(scene.id),
+        );
+        const candidate = remaining.findIndex((scene) => {
+          const index = content.scenes.findIndex(
+            (current) => current.id === scene.id,
+          );
+          return (
+            seconds <
+            sceneOffset(content.scenes, index) +
+              sceneTimelineDuration(content.scenes, index) / 2
+          );
+        });
+        dropIndex = candidate < 0 ? remaining.length : candidate;
+        setDropSceneId(remaining[dropIndex]?.id ?? "timeline-end");
+      }
+    }
+    itemDragRef.current = {
+      ...active,
+      deltaSeconds,
+      targetTrackId,
+      dropIndex,
+      moved: true,
+    };
+    setDraggedItemIds(active.itemIds);
+    setDragTransform({
+      deltaSeconds,
+      targetTrackId,
+      primaryTrackId: item.track_id,
+    });
+    setDragPreview({
+      items: dragItems,
+      x: event.clientX,
+      y: event.clientY,
+      overProducer,
+    });
+  };
+
+  const finishItemDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    item: EditorTimelineItem,
+  ) => {
+    const active = itemDragRef.current;
+    if (
+      !active ||
+      active.pointerId !== event.pointerId ||
+      active.primaryItemId !== item.id
+    ) {
+      return;
+    }
+    itemDragRef.current = null;
+    setDragPreview(null);
+    setDraggedItemIds([]);
+    setDragTransform(null);
+    setDropSceneId(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (!active.moved) {
+      onSelectItem(item.id, false);
+      onSeek(item.start_seconds);
+      return;
+    }
+    suppressClickRef.current = item.id;
+    const dropTarget = document.elementFromPoint(event.clientX, event.clientY);
+    const dragItems = items.filter((candidate) =>
+      active.itemIds.includes(candidate.id),
+    );
+    if (dropTarget?.closest('[data-testid="producer-composer"]')) {
+      onAttachItemsToProducer(dragItems);
+      return;
+    }
+    const plan = buildTimelineMovePlan(content, {
+      itemIds: active.itemIds,
+      primaryItemId: active.primaryItemId,
+      deltaSeconds: active.deltaSeconds,
+      targetTrackId: active.targetTrackId,
+      dropIndex: active.dropIndex,
+    });
+    if (plan.operations.length === 0) return;
+    const summary =
+      dragItems.length === 1
+        ? `Move ${dragItems[0]!.label}`
+        : `Move ${dragItems.length} timeline items`;
+    if (plan.sceneScope === "all") {
+      onDirectEdit(
+        content.scenes.map((scene) => scene.id),
+        plan.operations,
+        summary,
+      );
+    } else {
+      onDirectItemEdit(active.itemIds, plan.operations, summary);
+    }
+  };
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-surface">
@@ -173,7 +632,7 @@ export const Timeline = ({
           type="button"
           onClick={onSelectAll}
           className="ml-1 min-w-0 truncate text-left text-[12px] font-medium hover:text-action"
-          title="Select the whole cut"
+          title="Select every timeline item"
         >
           {content.headline}
         </button>
@@ -181,9 +640,9 @@ export const Timeline = ({
           {formatTime(duration)} · {VIDEO_FPS} fps
         </span>
         <span className="ml-3 text-[9px] text-ink-tertiary">
-          {selectedSceneIds.length === content.scenes.length
+          {selectedItemIds.length === items.length
             ? "Full cut"
-            : `${selectedSceneIds.length} selected`}
+            : `${selectedItemIds.length} selected`}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
           <ZoomOut size={12} className="shrink-0 text-ink-caption" />
@@ -209,7 +668,7 @@ export const Timeline = ({
           <span className="mx-1 h-4 w-px bg-line-subtle" />
           <IconButton
             Icon={Undo2}
-            label="Undo last timeline edit"
+            label="Undo timeline edit"
             size="sm"
             disabled={!canUndo || editing}
             onClick={onUndo}
@@ -224,18 +683,18 @@ export const Timeline = ({
           <span className="mx-1 h-4 w-px bg-line-subtle" />
           <IconButton
             Icon={Split}
-            label="Cut at playhead"
+            label="Cut video at playhead"
             size="sm"
             disabled={!playheadScene || previewing || editing}
             onClick={() => playheadScene && onCutAtPlayhead(playheadScene.id)}
           />
           <IconButton
             Icon={Plus}
-            label="Add a scene with AI"
+            label="Ask AI to add a scene"
             size="sm"
             onClick={() =>
               onIntent(
-                "Add one scene after the attached selection. Match this production's visual system and create its visual, voice, and captions as one scene bundle. Show me the plan before creating media.",
+                "Add one scene after the current selection. Match this production and show me the plan before creating media.",
               )
             }
           />
@@ -246,602 +705,483 @@ export const Timeline = ({
         <div
           className="relative min-h-full"
           style={{
-            minHeight: trackHeight + 60,
-            width: `calc(${zoom * 100}% + 180px)`,
+            height: "100%",
+            minHeight: workspaceHeight,
+            width: `calc(${zoom * 100}% + ${RAIL_WIDTH}px)`,
           }}
         >
-          <AudioTrackRail
-            audioTracks={audioTracks}
-            height={trackHeight + 28}
-            onChangeTrack={(sceneIds, track, summary) =>
-              onDirectEdit(
-                sceneIds,
-                [{ type: "upsert_audio_track", track }],
+          <TrackRail
+            tracks={tracks}
+            selectedTrackIds={selectedTrackIds}
+            onAddTrack={addTrack}
+            onAttachTracks={onAttachTracksToProducer}
+            onDeleteTrack={deleteTrack}
+            onRenameTrack={(track, name) => {
+              if (track.kind === "video") {
+                const source = effectiveVideoTracks(content).find(
+                  (candidate) => candidate.id === track.id,
+                );
+                if (!source) return;
+                onDirectTrackEdit(
+                  ["visual", track.id],
+                  [
+                    {
+                      type: "upsert_video_track",
+                      track: { ...source, name },
+                    },
+                  ],
+                  `Rename ${track.name} to ${name}`,
+                );
+                return;
+              }
+              if (track.kind === "caption") {
+                const source = effectiveCaptionTracks(content).find(
+                  (candidate) => candidate.id === track.id,
+                );
+                if (!source) return;
+                onDirectTrackEdit(
+                  ["caption", track.id],
+                  [
+                    {
+                      type: "upsert_caption_track",
+                      track: { ...source, name },
+                    },
+                  ],
+                  `Rename ${track.name} to ${name}`,
+                );
+                return;
+              }
+              const source = audioTracks.find(
+                (candidate) => candidate.id === track.id,
+              );
+              if (!source) return;
+              onDirectTrackEdit(
+                ["voice", track.id],
+                [
+                  {
+                    type: "upsert_audio_track",
+                    track: { ...source, name },
+                  },
+                ],
+                `Rename ${track.name} to ${name}`,
+              );
+            }}
+            onReorderTracks={(trackIds) =>
+              onDirectTrackEdit(
+                trackIds,
+                [{ type: "reorder_tracks", track_ids: trackIds }],
+                "Reorder tracks",
+              )
+            }
+            onSelectTrack={onSelectTrack}
+            onChangeAudioTrack={(track, patch, summary) => {
+              const source = audioTracks.find(
+                (candidate) => candidate.id === track.id,
+              );
+              if (!source) return;
+              onDirectTrackEdit(
+                ["voice", track.id],
+                [
+                  {
+                    type: "upsert_audio_track",
+                    track: { ...source, ...patch },
+                  },
+                ],
                 summary,
-              )
-            }
-            onRequestTrack={() =>
-              onIntent(
-                "Add an audio track. Ask me whether it is voice, music, or effects, then show the proposed track before generating media.",
-              )
-            }
-            scenes={content.scenes}
+              );
+            }}
           />
-          <div className="absolute left-[156px] right-0 top-0">
-            <button
-              type="button"
-              aria-label="Seek timeline"
-              className="relative mx-3 block h-7 border-b border-line-subtle"
-              style={{ width: "calc(100% - 24px)" }}
-              onClick={(event) => {
-                const bounds = event.currentTarget.getBoundingClientRect();
-                onSeek(
-                  ((event.clientX - bounds.left) / bounds.width) * duration,
-                );
-              }}
-            >
-              {ruler.ticks.map((seconds, index) => (
-                <span
-                  key={`${seconds}-${index}`}
-                  className={cx(
-                    "pointer-events-none absolute inset-y-0 border-l border-line-subtle pt-2 font-mono text-[8px] text-ink-caption",
-                    index === 0
-                      ? "translate-x-0"
-                      : index === ruler.ticks.length - 1
-                        ? "-translate-x-full"
-                        : "translate-x-0",
-                  )}
-                  style={{ left: `${(seconds / duration) * 100}%` }}
-                >
-                  <span className="ml-1 whitespace-nowrap">
-                    {formatRulerTime(seconds, ruler.stepSeconds)}
-                  </span>
-                </span>
-              ))}
-            </button>
 
+          <div
+            ref={canvasRef}
+            data-testid="timeline-workspace"
+            className="absolute bottom-0 right-0 top-0 cursor-crosshair overflow-hidden"
+            style={{ left: RAIL_WIDTH }}
+            onPointerDown={beginMarquee}
+            onPointerMove={moveMarquee}
+            onPointerUp={finishMarquee}
+            onPointerCancel={() => updateMarquee(null)}
+          >
             <div
-              ref={trackRef}
-              data-testid="timeline-track"
-              className="relative mx-3 cursor-crosshair border-b border-line-subtle bg-surface"
-              style={{ width: "calc(100% - 24px)", height: trackHeight }}
-              onPointerDown={(event) => {
-                if (event.button !== 0) return;
-                const target = event.target as HTMLElement;
-                if (target.closest("[data-trim-handle]")) {
-                  return;
-                }
-                const bounds = event.currentTarget.getBoundingClientRect();
-                const startX = Math.max(
-                  0,
-                  Math.min(bounds.width, event.clientX - bounds.left),
-                );
-                event.currentTarget.setPointerCapture(event.pointerId);
-                updateMarquee({
-                  pointerId: event.pointerId,
-                  startX,
-                  currentX: startX,
-                  originSceneId:
-                    target.closest<HTMLElement>("[data-scene-clip]")?.dataset
-                      .sceneId ?? null,
-                  additive: event.shiftKey || event.metaKey || event.ctrlKey,
-                });
-              }}
-              onPointerMove={(event) => {
-                const active = marqueeRef.current;
-                if (!active || active.pointerId !== event.pointerId) return;
-                const bounds = event.currentTarget.getBoundingClientRect();
-                updateMarquee({
-                  ...active,
-                  currentX: Math.max(
-                    0,
-                    Math.min(bounds.width, event.clientX - bounds.left),
-                  ),
-                });
-              }}
-              onPointerUp={(event) => {
-                const active = marqueeRef.current;
-                if (!active || active.pointerId !== event.pointerId) return;
-                const bounds = event.currentTarget.getBoundingClientRect();
-                const endX = Math.max(
-                  0,
-                  Math.min(bounds.width, event.clientX - bounds.left),
-                );
-                const left = Math.min(active.startX, endX);
-                const right = Math.max(active.startX, endX);
-                updateMarquee(null);
-                event.currentTarget.releasePointerCapture(event.pointerId);
-                if (right - left < 4) {
-                  if (!active.originSceneId) return;
-                  const sceneIndex = content.scenes.findIndex(
-                    (scene) => scene.id === active.originSceneId,
-                  );
-                  const scene = content.scenes[sceneIndex];
-                  if (!scene) return;
-                  onSelect(scene, active.additive);
-                  onSeek(sceneOffset(content.scenes, sceneIndex));
-                  return;
-                }
-                const selected = content.scenes.flatMap((scene, index) => {
-                  const sceneLeft =
-                    (sceneOffset(content.scenes, index) / duration) *
-                    bounds.width;
-                  const sceneRight =
-                    sceneLeft +
-                    (scene.duration_seconds / duration) * bounds.width;
-                  return sceneRight >= left && sceneLeft <= right
-                    ? [scene.id]
-                    : [];
-                });
-                const selectedGaps = content.scenes.flatMap((scene, index) => {
-                  const gap = scene.gap_after_seconds ?? 0;
-                  if (gap <= 0) return [];
-                  const gapLeft =
-                    ((sceneOffset(content.scenes, index) +
-                      scene.duration_seconds) /
-                      duration) *
-                    bounds.width;
-                  const gapRight = gapLeft + (gap / duration) * bounds.width;
-                  return gapRight >= left && gapLeft <= right ? [scene.id] : [];
-                });
-                if (selected.length > 0 || selectedGaps.length > 0) {
-                  onSelectMany(
-                    active.additive
-                      ? Array.from(new Set([...selectedSceneIds, ...selected]))
-                      : selected,
-                    active.additive
-                      ? Array.from(
-                          new Set([
-                            ...selectedGapAfterSceneIds,
-                            ...selectedGaps,
-                          ]),
-                        )
-                      : selectedGaps,
-                  );
-                }
-              }}
-              onPointerCancel={() => updateMarquee(null)}
+              ref={timeAxisRef}
+              data-testid="timeline-time-axis"
+              className="absolute inset-x-3 top-0 overflow-visible"
+              style={{ height: RULER_HEIGHT + lanesHeight }}
             >
-              {content.scenes.map((scene, index) => {
-                const left =
-                  (sceneOffset(content.scenes, index) / duration) * 100;
-                const displayedDuration =
-                  trim?.sceneId === scene.id
-                    ? trim.duration
-                    : scene.duration_seconds;
-                const width = (displayedDuration / duration) * 100;
-                const selected = selectedSceneIds.includes(scene.id);
-                const proposed = previewSceneIds.includes(scene.id);
-                const currentGap = scene.gap_after_seconds ?? 0;
-                const sourceMaximum = scene.source_clip
-                  ? (scene.source_clip.source_duration_seconds -
-                      scene.source_clip.in_seconds) /
-                    scene.playback_rate
-                  : scene.duration_seconds;
-                const maximumDuration = Math.max(
-                  scene.duration_seconds,
-                  Math.min(sourceMaximum, scene.duration_seconds + currentGap),
-                );
-                const audioClips = audioTracks.map((track) => ({
-                  track,
-                  clips: track.clips.filter(
-                    (clip) => clip.scene_id === scene.id,
-                  ),
-                }));
-                const hasCaptions = audioClips.some(({ clips }) =>
-                  clips.some((clip) => clip.captions_artifact_id),
-                );
-                return (
-                  <div
-                    key={scene.id}
-                    data-scene-clip
-                    data-scene-id={scene.id}
-                    role="button"
-                    tabIndex={0}
-                    aria-pressed={selected}
-                    title={scene.title}
-                    onPointerDown={(event) => {
-                      if (
-                        event.button !== 0 ||
-                        previewing ||
-                        editing ||
-                        event.shiftKey ||
-                        event.metaKey ||
-                        event.ctrlKey
-                      ) {
-                        return;
-                      }
-                      event.preventDefault();
-                      event.stopPropagation();
-                      event.currentTarget.setPointerCapture(event.pointerId);
-                      clipDragRef.current = {
-                        pointerId: event.pointerId,
-                        sceneId: scene.id,
-                        startX: event.clientX,
-                        dropIndex: index,
-                        moved: false,
-                      };
-                    }}
-                    onPointerMove={(event) => {
-                      const active = clipDragRef.current;
-                      if (
-                        !active ||
-                        active.pointerId !== event.pointerId ||
-                        active.sceneId !== scene.id
-                      ) {
-                        return;
-                      }
-                      const moved =
-                        active.moved ||
-                        Math.abs(event.clientX - active.startX) >= 5;
-                      if (!moved) return;
-                      const bounds = trackRef.current?.getBoundingClientRect();
-                      if (!bounds) return;
-                      const seconds =
-                        (Math.max(
-                          0,
-                          Math.min(bounds.width, event.clientX - bounds.left),
-                        ) /
-                          bounds.width) *
-                        duration;
-                      const remaining = content.scenes.filter(
-                        (item) => item.id !== scene.id,
-                      );
-                      const dropIndex = remaining.findIndex((item) => {
-                        const itemIndex = content.scenes.findIndex(
-                          (candidate) => candidate.id === item.id,
-                        );
-                        return (
-                          seconds <
-                          sceneOffset(content.scenes, itemIndex) +
-                            sceneTimelineDuration(content.scenes, itemIndex) / 2
-                        );
-                      });
-                      const resolvedIndex =
-                        dropIndex < 0 ? remaining.length : dropIndex;
-                      clipDragRef.current = {
-                        ...active,
-                        dropIndex: resolvedIndex,
-                        moved: true,
-                      };
-                      const hoverTarget = document.elementFromPoint(
-                        event.clientX,
-                        event.clientY,
-                      );
-                      setDragPreview({
-                        sceneId: scene.id,
-                        x: event.clientX,
-                        y: event.clientY,
-                        overProducer: Boolean(
-                          hoverTarget?.closest(
-                            '[data-testid="producer-composer"]',
-                          ),
-                        ),
-                      });
-                      setDraggedSceneId(scene.id);
-                      setDropSceneId(
-                        remaining[resolvedIndex]?.id ?? "timeline-end",
-                      );
-                    }}
-                    onPointerUp={(event) => {
-                      const active = clipDragRef.current;
-                      if (
-                        !active ||
-                        active.pointerId !== event.pointerId ||
-                        active.sceneId !== scene.id
-                      ) {
-                        return;
-                      }
-                      clipDragRef.current = null;
-                      setDragPreview(null);
-                      if (
-                        event.currentTarget.hasPointerCapture(event.pointerId)
-                      ) {
-                        event.currentTarget.releasePointerCapture(
-                          event.pointerId,
-                        );
-                      }
-                      if (!active.moved) {
-                        onSelect(scene, false);
-                        onSeek(sceneOffset(content.scenes, index));
-                        return;
-                      }
-                      const dropTarget = document.elementFromPoint(
-                        event.clientX,
-                        event.clientY,
-                      );
-                      if (
-                        dropTarget?.closest('[data-testid="producer-composer"]')
-                      ) {
-                        setDraggedSceneId(null);
-                        setDropSceneId(null);
-                        onAttachSceneToProducer(scene.id);
-                        return;
-                      }
-                      const order = content.scenes
-                        .filter((item) => item.id !== scene.id)
-                        .map((item) => item.id);
-                      order.splice(active.dropIndex, 0, scene.id);
-                      setDraggedSceneId(null);
-                      setDropSceneId(null);
-                      if (
-                        order.every(
-                          (sceneId, sceneIndex) =>
-                            sceneId === content.scenes[sceneIndex]?.id,
-                        )
-                      ) {
-                        return;
-                      }
-                      onDirectEdit(
-                        content.scenes.map((item) => item.id),
-                        [{ type: "reorder_scenes", scene_ids: order }],
-                        `Move “${scene.title}” in the timeline`,
-                      );
-                    }}
-                    onPointerCancel={() => {
-                      clipDragRef.current = null;
-                      setDragPreview(null);
-                      setDraggedSceneId(null);
-                      setDropSceneId(null);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Enter" && event.key !== " ") return;
-                      event.preventDefault();
-                      onSelect(
-                        scene,
-                        event.shiftKey || event.metaKey || event.ctrlKey,
-                      );
-                      onSeek(sceneOffset(content.scenes, index));
-                    }}
+              <button
+                type="button"
+                aria-label="Seek timeline"
+                className="absolute inset-x-0 top-0 block border-b border-line-subtle"
+                style={{ height: RULER_HEIGHT }}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.stopPropagation();
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  onScrubStart();
+                  onScrub(timeFromClientX(event.clientX));
+                }}
+                onPointerMove={(event) => {
+                  if (!event.currentTarget.hasPointerCapture(event.pointerId))
+                    return;
+                  onScrub(timeFromClientX(event.clientX));
+                }}
+                onPointerUp={(event) => {
+                  onScrubEnd(timeFromClientX(event.clientX));
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                  }
+                }}
+                onPointerCancel={() => onScrubEnd(currentTime)}
+              >
+                {ruler.ticks.map((seconds, index) => (
+                  <span
+                    key={`${seconds}-${index}`}
                     className={cx(
-                      "group absolute bottom-1 top-1 grid min-w-0 cursor-grab select-none gap-px active:cursor-grabbing focus-visible:outline-none focus-visible:[&>span]:ring-1 focus-visible:[&>span]:ring-inset focus-visible:[&>span]:ring-action",
-                      draggedSceneId === scene.id && "opacity-40",
-                      dropSceneId === scene.id &&
-                        "before:absolute before:inset-y-0 before:left-0 before:z-20 before:w-0.5 before:bg-action",
-                      dropSceneId === "timeline-end" &&
-                        index === content.scenes.length - 1 &&
-                        "after:absolute after:inset-y-0 after:right-0 after:z-20 after:w-0.5 after:bg-action",
+                      "pointer-events-none absolute inset-y-0 border-l border-line-subtle pt-2 font-mono text-[8px] text-ink-caption",
+                      index === ruler.ticks.length - 1 && "-translate-x-full",
                     )}
-                    style={{
-                      left: `${left}%`,
-                      width: `${width}%`,
-                      gridTemplateRows: `repeat(${laneCount}, minmax(0, 1fr))`,
-                    }}
+                    style={{ left: `${(seconds / duration) * 100}%` }}
                   >
-                    <span
+                    <span className="ml-1 whitespace-nowrap">
+                      {formatRulerTime(seconds, ruler.stepSeconds)}
+                    </span>
+                  </span>
+                ))}
+              </button>
+
+              <div
+                data-testid="timeline-track"
+                className="absolute inset-x-0 border-b border-line-subtle bg-surface"
+                style={{ top: RULER_HEIGHT, height: lanesHeight }}
+              >
+                {tracks.map((track, index) => (
+                  <div
+                    key={track.id}
+                    className="pointer-events-none absolute inset-x-0 border-b border-line-subtle"
+                    style={{ top: index * LANE_HEIGHT, height: LANE_HEIGHT }}
+                  />
+                ))}
+
+                {content.scenes.map((scene, index) => {
+                  const displayedDuration =
+                    trim?.itemId === videoItemId(scene.id)
+                      ? trim.duration
+                      : scene.duration_seconds;
+                  const gap =
+                    (scene.gap_after_seconds ?? 0) +
+                    (trim?.itemId === videoItemId(scene.id)
+                      ? scene.duration_seconds - trim.duration
+                      : 0);
+                  if (gap <= 0) return null;
+                  const left =
+                    ((sceneOffset(content.scenes, index) + displayedDuration) /
+                      duration) *
+                    100;
+                  return (
+                    <button
+                      type="button"
+                      key={`${scene.id}-gap`}
+                      data-timeline-gap={scene.id}
+                      aria-pressed={selectedGapAfterSceneIds.includes(scene.id)}
+                      aria-label={`Select ${formatTime(gap)} gap after ${scene.title}`}
+                      title="Select this empty range"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelectGap(
+                          scene.id,
+                          event.shiftKey || event.metaKey || event.ctrlKey,
+                        );
+                      }}
                       className={cx(
-                        "flex min-w-0 items-center gap-1.5 overflow-hidden border-y border-r bg-track-video px-2 text-[9px] text-ink transition-colors duration-100",
-                        index === 0 && "border-l",
-                        selected
-                          ? "border-line ring-1 ring-inset ring-action"
-                          : "border-line group-hover:border-line-strong",
-                        proposed && "preview-hatch border-warning/50",
+                        "preview-hatch absolute bottom-0 top-0 z-[1] grid place-items-center border-x text-[8px] font-medium text-warning focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-warning",
+                        selectedGapAfterSceneIds.includes(scene.id)
+                          ? "border-warning bg-warning/15 ring-1 ring-inset ring-warning"
+                          : "border-warning/40 hover:bg-warning/10",
                       )}
+                      style={{
+                        left: `${left}%`,
+                        width: `${(gap / duration) * 100}%`,
+                      }}
                     >
-                      <span
-                        title="Drag the scene to reorder it"
-                        className="grid size-4 shrink-0 place-items-center rounded-sm text-track-video-strong"
-                      >
-                        <Layers3 size={10} className="pointer-events-none" />
+                      <span className="truncate px-1">
+                        {formatTime(gap)} gap
                       </span>
-                      <span className="truncate font-medium">
-                        {scene.title}
+                    </button>
+                  );
+                })}
+
+                {items.map((item) => {
+                  const scene = content.scenes.find(
+                    (candidate) => candidate.id === item.scene_id,
+                  );
+                  if (!scene) return null;
+                  const sceneIndex = content.scenes.findIndex(
+                    (candidate) => candidate.id === scene.id,
+                  );
+                  const displayedEnd =
+                    trim?.itemId === item.id
+                      ? item.start_seconds + trim.duration
+                      : item.end_seconds;
+                  const width =
+                    ((displayedEnd - item.start_seconds) / duration) * 100;
+                  const selected = selectedItemIds.includes(item.id);
+                  const proposed = previewSceneIds.includes(item.scene_id);
+                  const row = laneIndex.get(item.track_id) ?? 0;
+                  const Icon = itemIcon(item.kind);
+                  const maximumDuration = maximumTimelineItemDuration(
+                    content,
+                    item,
+                  );
+                  const isDropTarget =
+                    item.kind === "video" && dropSceneId === item.scene_id;
+                  const atTimelineEnd =
+                    item.kind === "video" &&
+                    dropSceneId === "timeline-end" &&
+                    sceneIndex === content.scenes.length - 1;
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      data-timeline-item-id={item.id}
+                      aria-pressed={selected}
+                      aria-label={`${item.kind}: ${item.label}`}
+                      title={item.label}
+                      onPointerDown={(event) => startItemDrag(event, item)}
+                      onPointerMove={(event) => moveItemDrag(event, item)}
+                      onPointerUp={(event) => finishItemDrag(event, item)}
+                      onPointerCancel={() => {
+                        itemDragRef.current = null;
+                        setDragPreview(null);
+                        setDraggedItemIds([]);
+                        setDragTransform(null);
+                        setDropSceneId(null);
+                      }}
+                      onClick={(event) => {
+                        if (suppressClickRef.current === item.id) {
+                          suppressClickRef.current = null;
+                          return;
+                        }
+                        onSelectItem(
+                          item.id,
+                          event.shiftKey || event.metaKey || event.ctrlKey,
+                        );
+                      }}
+                      className={cx(
+                        "group absolute z-10 flex min-w-0 items-center gap-1.5 overflow-hidden border px-2 text-left transition-colors duration-100 focus-visible:outline-none",
+                        item.kind === "video" && "bg-track-video text-ink",
+                        item.kind === "audio" &&
+                          "bg-track-voice text-ink-secondary",
+                        item.kind === "caption" &&
+                          "bg-track-caption text-ink-secondary",
+                        selected
+                          ? "border-action ring-1 ring-inset ring-action"
+                          : "border-line hover:border-line-strong",
+                        proposed && "preview-hatch border-warning/50",
+                        draggedItemIds.includes(item.id) && "opacity-40",
+                        isDropTarget &&
+                          "before:absolute before:inset-y-0 before:left-0 before:z-20 before:w-0.5 before:bg-action",
+                        atTimelineEnd &&
+                          "after:absolute after:inset-y-0 after:right-0 after:z-20 after:w-0.5 after:bg-action",
+                      )}
+                      style={{
+                        left: `${(item.start_seconds / duration) * 100}%`,
+                        top: row * LANE_HEIGHT + 2,
+                        width: `${width}%`,
+                        height: LANE_HEIGHT - 4,
+                        transform:
+                          dragTransform && draggedItemIds.includes(item.id)
+                            ? `translate(${(dragTransform.deltaSeconds / duration) * trackWidth}px, ${(() => {
+                                const primaryIndex =
+                                  laneIndex.get(dragTransform.primaryTrackId) ??
+                                  0;
+                                const targetIndex = dragTransform.targetTrackId
+                                  ? (laneIndex.get(
+                                      dragTransform.targetTrackId,
+                                    ) ?? primaryIndex)
+                                  : primaryIndex;
+                                const candidate =
+                                  tracks[row + (targetIndex - primaryIndex)];
+                                return candidate?.kind === item.kind
+                                  ? (targetIndex - primaryIndex) * LANE_HEIGHT
+                                  : 0;
+                              })()}px)`
+                            : undefined,
+                      }}
+                    >
+                      <Icon
+                        size={10}
+                        className={cx(
+                          "shrink-0",
+                          item.kind === "video" && "text-track-video-strong",
+                          item.kind === "audio" && "text-track-voice-strong",
+                          item.kind === "caption" &&
+                            "text-track-caption-strong",
+                        )}
+                      />
+                      <span className="truncate text-[9px] font-medium">
+                        {item.label}
                       </span>
                       <span className="ml-auto shrink-0 font-mono text-[7px] text-ink-caption">
-                        {formatTime(displayedDuration)}
-                        {scene.playback_rate !== 1
-                          ? ` · ${scene.playback_rate.toFixed(2)}×`
-                          : ""}
+                        {formatTime(displayedEnd - item.start_seconds)}
                       </span>
-                    </span>
-                    {audioClips.map(({ clips, track }) => (
-                      <span
-                        key={track.id}
-                        className={cx(
-                          "flex min-w-0 items-center gap-1.5 overflow-hidden border-y border-r px-2 text-[8px] text-ink-secondary transition-colors duration-100",
-                          index === 0 && "border-l",
-                          clips.some((clip) => clip.artifact_id)
-                            ? "bg-track-voice"
-                            : "bg-surface-sunken",
-                          track.muted && "opacity-45",
-                          selected
-                            ? "border-line ring-1 ring-inset ring-action"
-                            : "border-line group-hover:border-line-strong",
-                          proposed && "preview-hatch border-warning/50",
-                        )}
-                        title={`${track.name}: ${clips.map((clip) => clip.script ?? clip.label).join(" · ") || "No clip"}`}
-                      >
-                        <Mic2
-                          size={9}
-                          className="shrink-0 text-track-voice-strong"
-                        />
-                        <span className="truncate">
-                          {clips
-                            .map((clip) => clip.script ?? clip.label)
-                            .join(" · ") || "No clip"}
-                        </span>
-                      </span>
-                    ))}
-                    <span
-                      className={cx(
-                        "flex min-w-0 items-center gap-1.5 overflow-hidden border-y border-r px-2 text-[8px] text-ink-secondary transition-colors duration-100",
-                        index === 0 && "border-l",
-                        scene.captions_artifact_id || hasCaptions
-                          ? "bg-track-caption"
-                          : "bg-surface-sunken",
-                        selected
-                          ? "border-line ring-1 ring-inset ring-action"
-                          : "border-line group-hover:border-line-strong",
-                        proposed && "preview-hatch border-warning/50",
-                      )}
-                    >
-                      <Captions
-                        size={9}
-                        className="shrink-0 text-track-caption-strong"
-                      />
-                      <span className="truncate">{scene.narration}</span>
-                    </span>
-                    {selected && !previewing && !editing ? (
-                      <button
-                        type="button"
-                        data-trim-handle
-                        aria-label={`Trim ${scene.title}`}
-                        title="Drag to trim the end"
-                        className="absolute inset-y-1 right-0 z-20 w-1.5 cursor-ew-resize rounded-full bg-action opacity-70 transition-opacity hover:opacity-100 focus:opacity-100"
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          const startX = event.clientX;
-                          const initial = scene.duration_seconds;
-                          const trackWidth =
-                            trackRef.current?.getBoundingClientRect().width;
-                          if (!trackWidth) return;
-                          const move = (pointer: PointerEvent) => {
-                            const rawSeconds =
-                              initial +
-                              ((pointer.clientX - startX) / trackWidth) *
-                                duration;
-                            const seconds = snapToFrame(rawSeconds);
-                            setTrim({
-                              sceneId: scene.id,
-                              duration: Math.max(
-                                MIN_SCENE_DURATION_SECONDS,
-                                Math.min(maximumDuration, seconds),
-                              ),
+                      {selected && !previewing && !editing ? (
+                        <span
+                          role="slider"
+                          tabIndex={0}
+                          data-trim-handle
+                          aria-label={`Trim ${item.label}`}
+                          title="Drag to trim the end"
+                          className="absolute inset-y-0 right-0 z-20 w-1.5 cursor-ew-resize bg-action/70 hover:bg-action"
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const startX = event.clientX;
+                            const initial =
+                              item.end_seconds - item.start_seconds;
+                            const minimumDuration =
+                              item.kind === "video"
+                                ? MIN_SCENE_DURATION_SECONDS
+                                : 1 / VIDEO_FPS;
+                            const width =
+                              timeAxisRef.current?.getBoundingClientRect()
+                                .width;
+                            if (!width) return;
+                            const resolveDuration = (clientX: number) =>
+                              Math.max(
+                                minimumDuration,
+                                Math.min(
+                                  maximumDuration,
+                                  snapToFrame(
+                                    initial +
+                                      ((clientX - startX) / width) * duration,
+                                  ),
+                                ),
+                              );
+                            const move = (pointer: PointerEvent) =>
+                              setTrim({
+                                itemId: item.id,
+                                duration: resolveDuration(pointer.clientX),
+                              });
+                            const up = (pointer: PointerEvent) => {
+                              const next = resolveDuration(pointer.clientX);
+                              setTrim(null);
+                              window.removeEventListener("pointermove", move);
+                              window.removeEventListener("pointerup", up);
+                              if (next === initial) return;
+                              const plan = buildTimelineTrimPlan(
+                                content,
+                                item,
+                                next,
+                              );
+                              if (!plan) return;
+                              const summary = `Trim ${item.label} to ${formatTime(next)}`;
+                              if (plan.sceneScope === "all") {
+                                onDirectEdit(
+                                  [scene.id],
+                                  plan.operations,
+                                  summary,
+                                );
+                              } else {
+                                onDirectItemEdit(
+                                  [item.id],
+                                  plan.operations,
+                                  summary,
+                                );
+                              }
+                            };
+                            window.addEventListener("pointermove", move);
+                            window.addEventListener("pointerup", up, {
+                              once: true,
                             });
-                          };
-                          const up = (pointer: PointerEvent) => {
-                            const rawSeconds =
-                              initial +
-                              ((pointer.clientX - startX) / trackWidth) *
-                                duration;
-                            const seconds = snapToFrame(rawSeconds);
-                            const next = Math.max(
-                              MIN_SCENE_DURATION_SECONDS,
-                              Math.min(maximumDuration, seconds),
-                            );
-                            setTrim(null);
-                            window.removeEventListener("pointermove", move);
-                            window.removeEventListener("pointerup", up);
-                            if (next === initial) return;
-                            const nextGap = Math.max(
-                              0,
-                              currentGap + initial - next,
-                            );
-                            const sourceClip = scene.source_clip
-                              ? {
-                                  ...scene.source_clip,
-                                  out_seconds:
-                                    scene.source_clip.in_seconds +
-                                    next * scene.playback_rate,
-                                }
-                              : undefined;
-                            onDirectEdit(
-                              [scene.id],
-                              [
-                                {
-                                  type: "update_scene",
-                                  scene_id: scene.id,
-                                  duration_seconds: next,
-                                  gap_after_seconds: nextGap,
-                                  ...(sourceClip
-                                    ? { source_clip: sourceClip }
-                                    : {}),
-                                },
-                              ],
-                              `Trim “${scene.title}” to ${formatTime(next)}`,
-                            );
-                          };
-                          window.addEventListener("pointermove", move);
-                          window.addEventListener("pointerup", up, {
-                            once: true,
-                          });
-                        }}
-                      />
-                    ) : null}
-                  </div>
-                );
-              })}
-              {content.scenes.map((scene, index) => {
-                const displayedDuration =
-                  trim?.sceneId === scene.id
-                    ? trim.duration
-                    : scene.duration_seconds;
-                const gap =
-                  (scene.gap_after_seconds ?? 0) +
-                  (trim?.sceneId === scene.id
-                    ? scene.duration_seconds - trim.duration
-                    : 0);
-                if (gap <= 0) return null;
-                const left =
-                  ((sceneOffset(content.scenes, index) + displayedDuration) /
-                    duration) *
-                  100;
-                return (
-                  <button
-                    type="button"
-                    key={`${scene.id}-gap`}
-                    aria-pressed={selectedGapAfterSceneIds.includes(scene.id)}
-                    aria-label={`Select ${formatTime(gap)} gap after ${scene.title}`}
-                    title="Select this gap and ask AI what should fill it"
-                    onPointerDown={(event) => {
-                      event.stopPropagation();
-                    }}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onSelectGap(
-                        scene.id,
-                        event.shiftKey || event.metaKey || event.ctrlKey,
-                      );
-                    }}
-                    className={cx(
-                      "preview-hatch absolute bottom-1 top-1 z-10 grid place-items-center border-x text-[8px] font-medium text-warning hover:bg-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-warning",
-                      selectedGapAfterSceneIds.includes(scene.id)
-                        ? "border-warning bg-warning/15 ring-1 ring-inset ring-warning"
-                        : "border-warning/40",
-                    )}
-                    style={{
-                      left: `${left}%`,
-                      width: `${(gap / duration) * 100}%`,
-                    }}
-                  >
-                    <span className="truncate px-1">{formatTime(gap)} gap</span>
-                  </button>
-                );
-              })}
-              {marquee ? (
-                <div
-                  className="pointer-events-none absolute inset-y-1 z-30 rounded-sm border border-action bg-action/10"
-                  style={{
-                    left: Math.min(marquee.startX, marquee.currentX),
-                    width: Math.abs(marquee.currentX - marquee.startX),
-                  }}
-                />
-              ) : null}
-              <div
-                className="pointer-events-none absolute -top-7 bottom-0 z-20 w-px bg-action"
-                style={{ left: `${playhead}%` }}
-              >
-                <span className="absolute -left-[4px] top-0 size-[9px] rotate-45 rounded-[1px] bg-action" />
+                          }}
+                        />
+                      ) : null}
+                    </button>
+                  );
+                })}
               </div>
+
+              <button
+                type="button"
+                aria-label={`Timeline playhead at ${formatTime(currentTime)}`}
+                title="Drag to scrub the timeline"
+                className="absolute bottom-0 top-0 z-[60] w-3 -translate-x-1/2 cursor-ew-resize touch-none focus-visible:outline-none"
+                style={{ left: `${playhead}%` }}
+                onPointerDown={beginPlayheadDrag}
+                onPointerMove={(event) => {
+                  if (!event.currentTarget.hasPointerCapture(event.pointerId))
+                    return;
+                  onScrub(timeFromClientX(event.clientX));
+                }}
+                onPointerUp={(event) => {
+                  onScrubEnd(timeFromClientX(event.clientX));
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                  }
+                }}
+                onPointerCancel={(event) => {
+                  onScrubEnd(currentTime);
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                  }
+                }}
+              >
+                <span
+                  className="pointer-events-none absolute bottom-0 left-1/2 w-px -translate-x-1/2 bg-action"
+                  style={{ top: RULER_HEIGHT }}
+                />
+                <span
+                  className="pointer-events-none absolute left-1/2 size-3 -translate-x-1/2 rotate-45 rounded-[1px] bg-action ring-2 ring-surface-sunken"
+                  style={{ top: RULER_HEIGHT - 6 }}
+                />
+              </button>
             </div>
 
-            <div className="flex h-8 items-center justify-between px-4 text-[9px] text-ink-caption">
-              <span>
-                {previewing
-                  ? "Preview · approve or reject on the right"
-                  : "Drag to select · Shift-click to add"}
-              </span>
-              <span>Scene selection keeps every lane aligned</span>
+            {marquee ? (
+              <div
+                className="pointer-events-none absolute z-40 border border-action bg-action/10"
+                style={{
+                  left: Math.min(marquee.startX, marquee.currentX),
+                  top: Math.min(marquee.startY, marquee.currentY),
+                  width: Math.abs(marquee.currentX - marquee.startX),
+                  height: Math.abs(marquee.currentY - marquee.startY),
+                }}
+              />
+            ) : null}
+
+            <div
+              className="absolute inset-x-0 text-[9px] text-ink-caption"
+              style={{ top: RULER_HEIGHT + lanesHeight }}
+            >
+              <div className="flex h-8 items-center justify-between px-4">
+                <span>
+                  {previewing
+                    ? "Preview is waiting on the right"
+                    : "Drag anywhere empty to select · Shift-click to add"}
+                </span>
+                <span>Video, audio, and captions select independently</span>
+              </div>
             </div>
           </div>
+
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0 top-0 z-[70] w-px bg-line-strong"
+            style={{ left: RAIL_WIDTH - 1 }}
+          />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-0 left-0 top-0 z-[70] w-px bg-line-strong"
+          />
         </div>
       </div>
+
       {dragPreview
         ? createPortal(
             <div
               className={cx(
-                "pointer-events-none fixed z-[100] flex h-9 max-w-[260px] select-none items-center gap-2 border bg-surface-raised px-3 text-[12px] font-medium text-ink shadow-float transition-[border-color,background-color,transform] duration-100 ease-product",
+                "pointer-events-none fixed z-[100] flex h-9 max-w-[260px] select-none items-center gap-2 border bg-surface-raised px-3 text-[12px] font-medium text-ink shadow-float",
                 dragPreview.overProducer
                   ? "border-action bg-action-soft"
                   : "border-line-strong",
@@ -849,15 +1189,25 @@ export const Timeline = ({
               style={{
                 left: dragPreview.x + 14,
                 top: dragPreview.y + 14,
-                transform: dragPreview.overProducer
-                  ? "translateY(-2px)"
-                  : undefined,
               }}
             >
-              <Layers3 size={13} className="shrink-0 text-action" />
+              <span className="flex shrink-0 items-center -space-x-0.5">
+                {dragPreview.items.slice(0, 3).map((item) => {
+                  const Icon = itemIcon(item.kind);
+                  return (
+                    <span
+                      key={item.id}
+                      className="grid size-5 place-items-center bg-surface-raised text-action"
+                    >
+                      <Icon size={12} />
+                    </span>
+                  );
+                })}
+              </span>
               <span className="truncate">
-                {content.scenes.find(({ id }) => id === dragPreview.sceneId)
-                  ?.title ?? "Scene"}
+                {dragPreview.items.length === 1
+                  ? dragPreview.items[0]!.label
+                  : `${dragPreview.items.length} timeline items`}
               </span>
               {dragPreview.overProducer ? (
                 <span className="shrink-0 font-mono text-[8px] uppercase tracking-[0.08em] text-action">

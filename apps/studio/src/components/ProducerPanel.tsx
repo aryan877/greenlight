@@ -2,10 +2,10 @@ import type {
   Artifact,
   ContentPackage,
   EditorSelection,
+  EditorTimelineTrack,
 } from "@greenlight/contracts";
 import {
   ArrowUp,
-  Bot,
   Captions,
   Check,
   CircleDot,
@@ -28,6 +28,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { greenlightApi, type VoiceOption } from "../api/greenlight.js";
 import { useVoiceCapabilities, useVoiceSample } from "../api/queries.js";
+import { GreenlightMark } from "../brand-icons.js";
 import type {
   PendingToolApproval,
   PendingQuestion,
@@ -35,21 +36,54 @@ import type {
   StudioReviewDocument,
 } from "../api/trueforge.js";
 import { MEDIA_ACCEPT, MEDIA_ARTIFACT_MIME } from "../editor/media-transfer.js";
-import {
-  attachProducerSceneReference,
-  type ProducerDraftIntent,
-  type ProducerSceneReference,
-} from "../editor/producer-draft.js";
+import { timelineItems } from "../editor/model.js";
+import type { ProducerDraftIntent } from "../editor/producer-draft.js";
 import { cx } from "./controls.js";
 
-const eventIcon: Record<StudioAgentEvent["kind"], typeof Bot> = {
+const eventIcon: Partial<
+  Record<StudioAgentEvent["kind"], typeof SlidersHorizontal>
+> = {
   reasoning: Sparkles,
   tool: SlidersHorizontal,
   artifact: Film,
   approval: CircleDot,
-  message: Bot,
-  instruction: MousePointer2,
 };
+
+const AgentMark = () => (
+  <span className="mt-1 grid size-5 shrink-0 place-items-center text-action">
+    <GreenlightMark size={16} strokeWidth={1.9} />
+  </span>
+);
+
+const quickIntents = [
+  {
+    label: "Cut at a word",
+    prompt: "Cut this when the speaker says ",
+  },
+  {
+    label: "Tighten pacing",
+    prompt:
+      "Tighten the pacing in this selection and show me the proposed cuts.",
+  },
+  {
+    label: "Add B-roll",
+    prompt:
+      "Add relevant B-roll to this selection without changing the narration.",
+  },
+  {
+    label: "Fix captions",
+    prompt: "Correct and retime the captions in this selection.",
+  },
+  {
+    label: "Dub this",
+    prompt: "Dub this selection. Ask me to choose and audition a voice first.",
+  },
+  {
+    label: "Prepare release",
+    prompt:
+      "Prepare the YouTube title, description, thumbnail, and unlisted release for review.",
+  },
+] as const;
 
 const QuestionCard = ({
   pending,
@@ -64,56 +98,59 @@ const QuestionCard = ({
 }) => {
   const [answer, setAnswer] = useState("");
   return (
-    <div className="mx-3 mb-2 rounded-xl border border-action/25 bg-action-soft p-3">
-      <p className="text-[14px] font-medium leading-6 text-ink">
-        {pending.question}
-      </p>
-      {pending.options.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {pending.options.map((option) => (
-            <button
-              key={option}
-              type="button"
-              disabled={busy}
-              onClick={() => onAnswer(option)}
-              className="rounded-md border border-action/20 bg-surface px-3 py-2 text-left text-[12px] leading-4 text-ink-secondary hover:border-action hover:text-ink disabled:opacity-40"
-            >
-              {option}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <form
-        className="mt-2 grid grid-cols-[auto_minmax(0,1fr)_auto] gap-1.5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const value = answer.trim();
-          if (value && !busy) onAnswer(value);
-        }}
-      >
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onCancel}
-          className="rounded-md border border-line bg-surface px-3 text-[12px] font-medium text-ink-secondary hover:border-ink-caption hover:text-ink disabled:opacity-40"
+    <div className="mx-3 my-4 grid grid-cols-[20px_minmax(0,1fr)] gap-3">
+      <AgentMark />
+      <section className="overflow-hidden border border-action/25 bg-surface-raised">
+        <p className="border-l-2 border-action px-4 pb-3 pt-3.5 text-[14px] font-medium leading-6 text-ink">
+          {pending.question}
+        </p>
+        {pending.options.length > 0 ? (
+          <div className="grid gap-px border-y border-line-subtle bg-line-subtle">
+            {pending.options.map((option) => (
+              <button
+                key={option}
+                type="button"
+                disabled={busy}
+                onClick={() => onAnswer(option)}
+                className="bg-surface px-4 py-3 text-left text-[13px] leading-5 text-ink-secondary transition-colors hover:bg-action-soft hover:text-ink disabled:opacity-40"
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <form
+          className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-2 p-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const value = answer.trim();
+            if (value && !busy) onAnswer(value);
+          }}
         >
-          Cancel
-        </button>
-        <input
-          value={answer}
-          onChange={(event) => setAnswer(event.target.value)}
-          placeholder="Or answer in your own words"
-          className="min-w-0 flex-1 rounded-md border border-line bg-surface px-3 py-2 text-[12px] leading-4 text-ink outline-none focus:border-action"
-        />
-        <button
-          type="submit"
-          disabled={!answer.trim() || busy}
-          aria-label="Answer AI Producer"
-          className="grid size-7 place-items-center rounded-md bg-ink text-white disabled:opacity-30"
-        >
-          <ArrowUp size={13} strokeWidth={2.2} />
-        </button>
-      </form>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancel}
+            className="border border-line bg-surface px-3 text-[12px] font-medium text-ink-secondary hover:border-line-strong hover:text-ink disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <input
+            value={answer}
+            onChange={(event) => setAnswer(event.target.value)}
+            placeholder="Write your own answer"
+            className="min-w-0 flex-1 border border-line bg-surface px-3 py-2 text-[13px] leading-5 text-ink outline-none focus:border-action"
+          />
+          <button
+            type="submit"
+            disabled={!answer.trim() || busy}
+            aria-label="Answer Greenlight"
+            className="grid size-9 place-items-center bg-control text-control-ink disabled:opacity-30"
+          >
+            <ArrowUp size={14} strokeWidth={2.2} />
+          </button>
+        </form>
+      </section>
     </div>
   );
 };
@@ -228,8 +265,8 @@ const ApprovalCard = ({
   const [refining, setRefining] = useState(false);
   const [reason, setReason] = useState("");
   return (
-    <div className="mx-3 mb-2 overflow-hidden rounded-xl border border-warning/25 bg-warning-soft">
-      <div className="border-l-[3px] border-warning p-3">
+    <div className="mx-3 my-4 overflow-hidden border border-warning/25 bg-warning-soft">
+      <div className="border-l-2 border-warning p-4">
         <div className="flex items-center gap-2 text-[12px] font-medium text-warning">
           Needs your approval
         </div>
@@ -261,7 +298,7 @@ const ApprovalCard = ({
                 type="button"
                 disabled={!reason.trim() || busy}
                 onClick={() => onDecision("deny", reason.trim())}
-                className="h-8 rounded-md bg-ink px-3 text-[11px] font-medium text-white disabled:opacity-30"
+                className="h-8 bg-control px-3 text-[11px] font-medium text-control-ink disabled:opacity-30"
               >
                 Refine
               </button>
@@ -273,7 +310,7 @@ const ApprovalCard = ({
               type="button"
               disabled={busy}
               onClick={() => onDecision("allow")}
-              className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-ink text-[12px] font-medium text-white hover:bg-ink-secondary disabled:opacity-40"
+              className="flex h-9 flex-1 items-center justify-center gap-1.5 bg-control text-[12px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-40"
             >
               <Check size={13} /> {copy.action}
             </button>
@@ -281,7 +318,7 @@ const ApprovalCard = ({
               type="button"
               disabled={busy}
               onClick={() => setRefining(true)}
-              className="h-9 rounded-lg border border-line bg-surface px-3 text-[11px] text-ink-secondary hover:bg-hover disabled:opacity-40"
+              className="h-9 border border-line bg-surface px-3 text-[11px] text-ink-secondary hover:bg-hover disabled:opacity-40"
             >
               Refine
             </button>
@@ -364,11 +401,13 @@ const ReviewDocument = ({
 const VoicePickerCard = ({
   projectId,
   sampleScript,
+  prompt,
   onChoose,
   onCancel,
 }: {
   projectId: string;
   sampleScript: string;
+  prompt: string;
   onChoose: (voice: VoiceOption) => void;
   onCancel: () => void;
 }) => {
@@ -428,9 +467,7 @@ const VoicePickerCard = ({
           <h3 className="text-[14px] font-medium leading-5 text-ink">
             Choose a voice
           </h3>
-          <p className="text-[12px] leading-5 text-ink-tertiary">
-            Hear this scene in a Gemini voice before using it.
-          </p>
+          <p className="text-[12px] leading-5 text-ink-tertiary">{prompt}</p>
         </div>
         <button
           type="button"
@@ -530,7 +567,7 @@ const VoicePickerCard = ({
           type="button"
           disabled={!selected}
           onClick={() => selected && onChoose(selected)}
-          className="h-8 rounded-md bg-ink px-3 text-[12px] font-medium text-white disabled:opacity-30"
+          className="h-8 bg-control px-3 text-[12px] font-medium text-control-ink disabled:opacity-30"
         >
           Use {selected?.id ?? "voice"}
         </button>
@@ -551,6 +588,7 @@ export const ProducerPanel = ({
   pendingApprovals,
   pendingQuestions,
   selectedGapAfterSceneIds,
+  selectedTracks,
   isSending,
   isApproving,
   isAnswering,
@@ -559,7 +597,8 @@ export const ProducerPanel = ({
   onApproval,
   onAnswerQuestion,
   onCancelQuestion,
-  onRemoveScene,
+  onRemoveItem,
+  onRemoveTrack,
   onRemoveArtifact,
   onAttachArtifact,
   onImportFiles,
@@ -576,6 +615,7 @@ export const ProducerPanel = ({
   pendingApprovals: PendingToolApproval[];
   pendingQuestions: PendingQuestion[];
   selectedGapAfterSceneIds: string[];
+  selectedTracks: EditorTimelineTrack[];
   isSending: boolean;
   isApproving: boolean;
   isAnswering: boolean;
@@ -588,34 +628,30 @@ export const ProducerPanel = ({
   ) => void;
   onAnswerQuestion: (pending: PendingQuestion, answer: string) => void;
   onCancelQuestion: (pending: PendingQuestion) => void;
-  onRemoveScene: (sceneId: string) => void;
+  onRemoveItem: (itemId: string) => void;
+  onRemoveTrack: (trackId: string) => void;
   onRemoveArtifact: (artifactId: string) => void;
   onAttachArtifact: (artifactId: string) => void;
   onImportFiles: (files: File[]) => Promise<string[]>;
   importing: boolean;
 }) => {
   const [instruction, setInstruction] = useState("");
-  const [sceneReferences, setSceneReferences] = useState<
-    ProducerSceneReference[]
-  >([]);
   const [dragActive, setDragActive] = useState(false);
-  const [voicePickerOpen, setVoicePickerOpen] = useState(false);
   const [openDocument, setOpenDocument] = useState<StudioReviewDocument | null>(
     null,
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!draftIntent) return;
-    if (draftIntent.mode === "replace") {
-      setInstruction(draftIntent.text);
-      return;
-    }
-    setSceneReferences((current) =>
-      attachProducerSceneReference(current, draftIntent),
-    );
+    setInstruction(draftIntent.text);
   }, [draftIntent]);
   const conversationPaused =
     pendingQuestions.length > 0 || pendingApprovals.length > 0;
+  const selectedItems = content
+    ? timelineItems(content).filter((item) =>
+        selection?.item_ids.includes(item.id),
+      )
+    : [];
   const sampleScript =
     selection?.scene_ids
       .map((sceneId) =>
@@ -624,21 +660,23 @@ export const ProducerPanel = ({
       .find(Boolean)
       ?.slice(0, 220) ??
     "Every edit stays intentional, reversible, and ready to share.";
+  const isVoiceQuestion = (pending: PendingQuestion) =>
+    /\b(?:voice|narrat|dub|speaker)\b/i.test(pending.question);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="scroll-stable min-h-0 flex-1 overflow-y-auto px-3 py-2">
+      <div className="scroll-stable min-h-0 flex-1 overflow-y-auto px-3 py-3">
         {events.length === 0 ? (
           <div className="h-full" />
         ) : (
-          <div className="space-y-1">
+          <div className="mx-auto w-full max-w-[680px] space-y-3">
             {events.map((event) => {
               if (event.kind === "instruction") {
                 return (
-                  <div key={event.id} className="flex justify-end py-1">
+                  <div key={event.id} className="flex justify-end py-0.5">
                     <div
                       className={cx(
-                        "max-w-[88%] rounded-xl rounded-br-sm bg-ink px-3 py-2 text-white",
+                        "max-w-[86%] rounded-[14px] rounded-br-[4px] bg-message-user px-3.5 py-2.5 text-message-user-ink",
                         event.delivery === "failed" &&
                           "border border-warning/30 bg-warning-soft text-ink",
                       )}
@@ -669,27 +707,39 @@ export const ProducerPanel = ({
               const eventArtifact = event.artifactId
                 ? artifacts.find((artifact) => artifact.id === event.artifactId)
                 : null;
+              if (event.kind === "message") {
+                return (
+                  <div
+                    key={event.id}
+                    className="grid grid-cols-[20px_minmax(0,1fr)] gap-3 py-1"
+                  >
+                    <AgentMark />
+                    <p className="whitespace-pre-wrap text-[14px] leading-6 text-ink">
+                      {event.label}
+                    </p>
+                  </div>
+                );
+              }
               return (
                 <div
                   key={event.id}
-                  className="flex w-full gap-2.5 rounded-lg px-2 py-2.5 text-left"
+                  className="ml-8 flex w-[calc(100%-2rem)] gap-2.5 border-l border-line px-3 py-2 text-left"
                 >
                   <span
                     className={cx(
-                      "grid size-6 shrink-0 place-items-center rounded-full bg-surface-sunken text-ink-tertiary",
-                      event.kind === "artifact" && "bg-action-soft text-action",
-                      event.kind === "approval" &&
-                        "bg-warning-soft text-warning",
+                      "mt-0.5 grid size-5 shrink-0 place-items-center text-ink-tertiary",
+                      event.kind === "artifact" && "text-action",
+                      event.kind === "approval" && "text-warning",
                     )}
                   >
                     {event.document ? (
                       <FileText size={12} />
-                    ) : (
+                    ) : Icon ? (
                       <Icon size={12} />
-                    )}
+                    ) : null}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <strong className="block text-[12px] font-medium leading-5 text-ink">
+                    <strong className="block text-[12px] font-medium leading-5 text-ink-secondary">
                       {event.label}
                     </strong>
                     {event.detail ? (
@@ -723,22 +773,31 @@ export const ProducerPanel = ({
           </div>
         )}
         {activity ? (
-          <div className="flex items-center gap-2.5 px-2 py-2.5 text-[12px] text-ink-secondary">
-            <span className="grid size-6 shrink-0 place-items-center rounded-full bg-action-soft text-action">
-              <LoaderCircle size={12} className="animate-spin" />
-            </span>
-            <span>{activity}</span>
+          <div className="mx-auto grid w-full max-w-[680px] grid-cols-[20px_minmax(0,1fr)] gap-3 py-2 text-[13px]">
+            <AgentMark />
+            <span className="agent-thinking pt-0.5">{activity}</span>
           </div>
         ) : null}
-        {pendingQuestions.map((pending) => (
-          <QuestionCard
-            key={pending.toolCallId}
-            pending={pending}
-            busy={isAnswering}
-            onAnswer={(answer) => onAnswerQuestion(pending, answer)}
-            onCancel={() => onCancelQuestion(pending)}
-          />
-        ))}
+        {pendingQuestions.map((pending) =>
+          isVoiceQuestion(pending) && projectId ? (
+            <VoicePickerCard
+              key={pending.toolCallId}
+              projectId={projectId}
+              sampleScript={sampleScript}
+              prompt={pending.question}
+              onCancel={() => onCancelQuestion(pending)}
+              onChoose={(voice) => onAnswerQuestion(pending, voice.id)}
+            />
+          ) : (
+            <QuestionCard
+              key={pending.toolCallId}
+              pending={pending}
+              busy={isAnswering}
+              onAnswer={(answer) => onAnswerQuestion(pending, answer)}
+              onCancel={() => onCancelQuestion(pending)}
+            />
+          ),
+        )}
 
         {pendingApprovals.map((pending) => (
           <ApprovalCard
@@ -749,29 +808,12 @@ export const ProducerPanel = ({
             onDecision={(status, reason) => onApproval(pending, status, reason)}
           />
         ))}
-
-        {voicePickerOpen && !conversationPaused && projectId ? (
-          <VoicePickerCard
-            projectId={projectId}
-            sampleScript={sampleScript}
-            onCancel={() => setVoicePickerOpen(false)}
-            onChoose={(voice) => {
-              setInstruction((current) => {
-                const choice = `Use the ${voice.id} voice (${voice.character.toLowerCase()}) for the selected narration or dub track. Generate scene-sized clips and preview the track change before applying it.`;
-                return current.trim()
-                  ? `${current.trim()}\n\n${choice}`
-                  : choice;
-              });
-              setVoicePickerOpen(false);
-            }}
-          />
-        ) : null}
       </div>
 
       <form
         data-testid="producer-composer"
         className={cx(
-          "m-3 rounded-[20px] border bg-surface-raised shadow-[0_6px_24px_rgb(17_24_39/0.09)] transition-colors",
+          "m-3 rounded-[18px] border bg-surface-raised shadow-float transition-colors",
           dragActive ? "border-action bg-action-soft/30" : "border-line",
         )}
         onDragEnter={(event) => {
@@ -806,43 +848,69 @@ export const ProducerPanel = ({
           if (!next || isSending || conversationPaused) return;
           onSend(next);
           setInstruction("");
-          setSceneReferences([]);
         }}
       >
         {selection && content ? (
           <div className="flex flex-wrap gap-1.5 border-b border-line-subtle px-3 pb-2 pt-2.5">
             <span className="flex h-6 shrink-0 items-center gap-1 text-[9px] text-ink-caption">
               <MousePointer2 size={11} className="text-action" />
-              {selection.scene_ids.length}
+              {selectedItems.length + selectedTracks.length}
             </span>
-            {selection.scene_ids.slice(0, 3).map((sceneId) => {
-              const scene = content.scenes.find(
-                (candidate) => candidate.id === sceneId,
-              );
+            {selectedItems.slice(0, 3).map((item) => {
+              const ItemIcon =
+                item.kind === "audio"
+                  ? Mic2
+                  : item.kind === "caption"
+                    ? Captions
+                    : Layers3;
               return (
                 <span
-                  key={sceneId}
+                  key={item.id}
                   className="flex h-6 min-w-0 max-w-[190px] items-center gap-1.5 rounded-md bg-action-soft px-2 text-[9px] text-ink-secondary"
                 >
-                  <span className="truncate">{scene?.title ?? sceneId}</span>
-                  {selection.scene_ids.length > 1 ? (
-                    <button
-                      type="button"
-                      aria-label={`Detach ${scene?.title ?? "scene"}`}
-                      onClick={() => onRemoveScene(sceneId)}
-                      className="shrink-0 text-ink-caption hover:text-ink"
-                    >
-                      <X size={10} />
-                    </button>
-                  ) : null}
+                  <ItemIcon size={10} className="shrink-0 text-action" />
+                  <span className="truncate">{item.label}</span>
+                  <button
+                    type="button"
+                    aria-label={`Detach ${item.label}`}
+                    onClick={() => onRemoveItem(item.id)}
+                    className="shrink-0 text-ink-caption hover:text-ink"
+                  >
+                    <X size={10} />
+                  </button>
                 </span>
               );
             })}
-            {selection.scene_ids.length > 3 ? (
+            {selectedItems.length > 3 ? (
               <span className="flex h-6 shrink-0 items-center rounded-md bg-action-soft px-2 font-mono text-[8px] text-ink-secondary">
-                +{selection.scene_ids.length - 3}
+                +{selectedItems.length - 3}
               </span>
             ) : null}
+            {selectedTracks.map((track) => {
+              const TrackIcon =
+                track.kind === "audio"
+                  ? Mic2
+                  : track.kind === "caption"
+                    ? Captions
+                    : Layers3;
+              return (
+                <span
+                  key={track.id}
+                  className="flex h-6 min-w-0 max-w-[190px] items-center gap-1.5 rounded-md bg-action-soft px-2 text-[9px] text-ink-secondary"
+                >
+                  <TrackIcon size={10} className="shrink-0 text-action" />
+                  <span className="truncate">{track.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`Detach ${track.name} track`}
+                    onClick={() => onRemoveTrack(track.id)}
+                    className="shrink-0 text-ink-caption hover:text-ink"
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              );
+            })}
             {selectedGapAfterSceneIds.slice(0, 2).map((sceneId) => {
               const scene = content.scenes.find(
                 (candidate) => candidate.id === sceneId,
@@ -910,31 +978,34 @@ export const ProducerPanel = ({
             ) : null}
           </div>
         ) : null}
-        <div className="flex min-h-[88px] flex-wrap content-start items-start gap-1.5 px-3 pt-3">
-          {sceneReferences.map((reference) => (
-            <span
-              key={reference.sceneId}
-              data-testid="producer-scene-reference"
-              className="flex h-7 max-w-full shrink-0 items-center gap-1.5 rounded-md border border-action/20 bg-action-soft px-2 text-[12px] font-medium text-ink-secondary"
-            >
-              <Layers3 size={12} className="shrink-0 text-action" />
-              <span className="max-w-[220px] truncate">{reference.title}</span>
+        {!conversationPaused ? (
+          <div className="no-scrollbar flex gap-1.5 overflow-x-auto border-b border-line-subtle px-3 py-2">
+            {selectedGapAfterSceneIds.length > 0 ? (
               <button
                 type="button"
-                aria-label={`Remove ${reference.title} from the instruction`}
-                onClick={() => {
-                  setSceneReferences((current) =>
-                    current.filter(
-                      ({ sceneId }) => sceneId !== reference.sceneId,
-                    ),
-                  );
-                }}
-                className="-mr-1 grid size-5 shrink-0 place-items-center rounded-sm text-ink-caption transition-colors duration-100 hover:bg-surface hover:text-ink"
+                onClick={() =>
+                  setInstruction(
+                    "Fill the selected gap with the best available material and show me the plan first.",
+                  )
+                }
+                className="shrink-0 border border-warning/25 bg-warning-soft px-2.5 py-1.5 text-[10px] font-medium text-ink-secondary hover:border-warning hover:text-ink"
               >
-                <X size={11} />
+                Fill this gap
               </button>
-            </span>
-          ))}
+            ) : null}
+            {quickIntents.map((intent) => (
+              <button
+                key={intent.label}
+                type="button"
+                onClick={() => setInstruction(intent.prompt)}
+                className="shrink-0 border border-line bg-surface px-2.5 py-1.5 text-[10px] font-medium text-ink-secondary hover:border-action hover:text-ink"
+              >
+                {intent.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="flex min-h-[88px] flex-wrap content-start items-start gap-1.5 px-3 pt-3">
           <textarea
             value={instruction}
             onChange={(event) => setInstruction(event.target.value)}
@@ -943,11 +1014,9 @@ export const ProducerPanel = ({
                 ? "Answer the question above…"
                 : pendingApprovals.length > 0
                   ? "Review the change above…"
-                  : sceneReferences.length > 0
-                    ? "What should change?"
-                    : selection
-                      ? "Edit this selection…"
-                      : "Direct the production…"
+                  : selection
+                    ? "Edit this selection…"
+                    : "Direct the production…"
             }
             disabled={conversationPaused}
             rows={3}
@@ -969,18 +1038,6 @@ export const ProducerPanel = ({
           />
           <button
             type="button"
-            aria-label="Choose a Gemini voice"
-            disabled={conversationPaused || !projectId}
-            onClick={() => setVoicePickerOpen((open) => !open)}
-            className={cx(
-              "grid size-8 place-items-center rounded-full text-ink-tertiary hover:bg-hover hover:text-ink disabled:opacity-30",
-              voicePickerOpen && "bg-action-soft text-action",
-            )}
-          >
-            <Mic2 size={14} />
-          </button>
-          <button
-            type="button"
             aria-label="Attach media"
             disabled={importing}
             onClick={() => fileInputRef.current?.click()}
@@ -992,7 +1049,7 @@ export const ProducerPanel = ({
             type="submit"
             aria-label="Send instruction"
             disabled={!instruction.trim() || isSending || conversationPaused}
-            className="ml-auto grid size-8 place-items-center rounded-full bg-ink text-white transition-colors hover:bg-ink-secondary disabled:cursor-not-allowed disabled:opacity-30"
+            className="ml-auto grid size-8 place-items-center rounded-full bg-control text-control-ink transition-colors hover:bg-control-hover disabled:cursor-not-allowed disabled:opacity-30"
           >
             <ArrowUp size={15} strokeWidth={2.2} />
           </button>

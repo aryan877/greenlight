@@ -78,7 +78,7 @@ export const SceneCanvas = ({
           visuals.length > 0 && "pr-[50%]",
         )}
       >
-        <h1 className="max-w-[880px] text-[clamp(24px,4.6vw,68px)] font-semibold leading-[0.98] tracking-[-0.05em] text-ink">
+        <h1 className="max-w-[880px] text-[clamp(24px,4.6vw,68px)] font-semibold leading-[0.98] tracking-[-0.05em] text-[#101815]">
           {scene.title}
         </h1>
       </div>
@@ -212,7 +212,6 @@ export const ProgramMonitor = ({
         <IconButton
           Icon={media.muted ? VolumeX : Volume2}
           label={media.muted ? "Unmute" : "Mute"}
-          disabled={!video}
           onClick={media.toggleMute}
         />
         <input
@@ -225,9 +224,8 @@ export const ProgramMonitor = ({
           style={
             { "--range-progress": `${media.volume * 100}%` } as CSSProperties
           }
-          disabled={!video}
           onChange={(event) => media.updateVolume(Number(event.target.value))}
-          className="precision-range w-20 disabled:opacity-30"
+          className="precision-range w-20"
         />
       </div>
     </section>

@@ -1,14 +1,22 @@
 import {
+  audioClipDurationSeconds,
+  audioTimelineItemId,
+  captionTimelineItemId,
   effectiveAudioTracks,
+  effectiveCaptionTracks,
+  effectiveVideoTracks,
   MIN_SCENE_DURATION_SECONDS,
   productionDurationSeconds,
   scenePresentationDurationSeconds,
   sceneStartSeconds,
+  videoTimelineItemId,
   VIDEO_FPS,
   type Artifact,
   type ContentPackage,
   type EditorPatchOperation,
   type EditorSelection,
+  type EditorTimelineItem,
+  type EditorTimelineTrack,
   type EditorTimelineContext,
   type Scene,
 } from "@greenlight/contracts";
@@ -18,6 +26,132 @@ export const sceneOffset = (scenes: Scene[], index: number) =>
 
 export const totalDuration = (content: ContentPackage) =>
   productionDurationSeconds(content.scenes);
+
+export const videoItemId = videoTimelineItemId;
+export const captionItemId = captionTimelineItemId;
+export const audioItemId = audioTimelineItemId;
+
+export const timelineItems = (
+  content: ContentPackage,
+): EditorTimelineItem[] => {
+  const videoItems = content.scenes.map((scene, index) => {
+    const start = snapToFrame(sceneOffset(content.scenes, index));
+    return {
+      id: videoItemId(scene.id),
+      kind: "video" as const,
+      track_id: scene.video_track_id ?? "track_video",
+      scene_id: scene.id,
+      label: scene.title,
+      start_seconds: start,
+      end_seconds: snapToFrame(start + scene.duration_seconds),
+      artifact_ids: scene.visual.artifact_ids,
+    };
+  });
+
+  const audioItems = effectiveAudioTracks(content).flatMap((track) =>
+    track.clips.flatMap((clip) => {
+      const sceneIndex = content.scenes.findIndex(
+        (scene) => scene.id === clip.scene_id,
+      );
+      const scene = content.scenes[sceneIndex];
+      if (!scene) return [];
+      const sceneStart = sceneOffset(content.scenes, sceneIndex);
+      const start = snapToFrame(
+        clip.timeline_start_seconds ?? sceneStart + clip.start_offset_seconds,
+      );
+      const sourceDuration = audioClipDurationSeconds(clip, scene);
+      const end = snapToFrame(
+        Math.min(
+          totalDuration(content),
+          start + Math.max(1 / VIDEO_FPS, sourceDuration),
+        ),
+      );
+      return [
+        {
+          id: audioItemId(clip.id),
+          kind: "audio" as const,
+          track_id: track.id,
+          scene_id: scene.id,
+          label: clip.label,
+          start_seconds: start,
+          end_seconds: end,
+          artifact_ids: [clip.artifact_id, clip.transcript_artifact_id].filter(
+            (id): id is string => Boolean(id),
+          ),
+        },
+      ];
+    }),
+  );
+
+  const captionItems = content.scenes.map((scene, index) => {
+    const start = snapToFrame(
+      scene.caption_timeline_start_seconds ??
+        sceneOffset(content.scenes, index),
+    );
+    return {
+      id: captionItemId(scene.id),
+      kind: "caption" as const,
+      track_id: scene.caption_track_id ?? "track_captions",
+      scene_id: scene.id,
+      label: scene.narration,
+      start_seconds: start,
+      end_seconds: snapToFrame(
+        start + (scene.caption_duration_seconds ?? scene.duration_seconds),
+      ),
+      artifact_ids: scene.captions_artifact_id
+        ? [scene.captions_artifact_id]
+        : [],
+    };
+  });
+
+  return [...videoItems, ...audioItems, ...captionItems];
+};
+
+export const timelineTracks = (
+  content: ContentPackage,
+): EditorTimelineTrack[] => {
+  const tracks: EditorTimelineTrack[] = [
+    ...effectiveVideoTracks(content).map((track) => ({
+      ...track,
+      role: null,
+      muted: false,
+      solo: false,
+      export_enabled: true,
+      gain: 1,
+    })),
+    ...effectiveAudioTracks(content).map((track, index, audioTracks) => ({
+      id: track.id,
+      kind: "audio" as const,
+      name: track.name,
+      protected:
+        track.id === "track_narration" ||
+        (track.role === "narration" &&
+          audioTracks.findIndex(
+            (candidate) => candidate.role === "narration",
+          ) === index),
+      role: track.role,
+      muted: track.muted,
+      solo: track.solo,
+      export_enabled: track.export_enabled,
+      gain: track.gain,
+    })),
+    ...effectiveCaptionTracks(content).map((track) => ({
+      ...track,
+      role: null,
+      muted: false,
+      solo: false,
+      export_enabled: true,
+      gain: 1,
+    })),
+  ];
+  if (!content.track_order) return tracks;
+  const order = new Map(
+    content.track_order.map((trackId, index) => [trackId, index]),
+  );
+  return tracks.toSorted(
+    (left, right) => order.get(left.id)! - order.get(right.id)!,
+  );
+};
 
 export const createTimelineContext = (input: {
   projectId: string;
@@ -30,6 +164,8 @@ export const createTimelineContext = (input: {
   headline: input.content.headline,
   duration_seconds: snapToFrame(totalDuration(input.content)),
   playhead_seconds: snapToFrame(Math.max(0, input.playheadSeconds)),
+  tracks: timelineTracks(input.content),
+  items: timelineItems(input.content),
   scenes: input.content.scenes.map((scene, index) => {
     const start = snapToFrame(sceneOffset(input.content.scenes, index));
     return {
@@ -172,33 +308,39 @@ export const createSelection = (input: {
   projectId: string;
   contentArtifactId: string;
   content: ContentPackage;
-  sceneIds: string[];
+  itemIds?: string[];
+  sceneIds?: string[];
+  trackIds?: string[];
   gapAfterSceneIds?: string[];
   playheadSeconds?: number;
   sourceLedgerArtifact: Artifact | null;
   extraArtifactIds?: string[];
 }): EditorSelection => {
+  const allItems = timelineItems(input.content);
+  const requestedItemIds = new Set(input.itemIds ?? []);
+  const requestedSceneIds = new Set(input.sceneIds ?? []);
+  const selectedItems = allItems.filter((item) =>
+    requestedItemIds.size > 0
+      ? requestedItemIds.has(item.id)
+      : requestedSceneIds.has(item.scene_id),
+  );
+  const selectedSceneIds = new Set([
+    ...requestedSceneIds,
+    ...selectedItems.map((item) => item.scene_id),
+  ]);
   const selected = input.content.scenes
     .map((scene, index) => ({ scene, index }))
-    .filter(({ scene }) => input.sceneIds.includes(scene.id));
-  if (selected.length === 0) throw new Error("scene_not_found");
+    .filter(({ scene }) => selectedSceneIds.has(scene.id));
+  const requestedTrackIds = new Set(input.trackIds ?? []);
+  if (selected.length === 0 && requestedTrackIds.size === 0) {
+    throw new Error("scene_or_track_not_found");
+  }
 
-  const first = selected[0]!;
-  const last = selected.at(-1)!;
+  const first = selected[0];
+  const last = selected.at(-1);
   const artifactIds = [
     ...new Set([
-      ...selected.flatMap(({ scene }) => sceneArtifacts(scene)),
-      ...effectiveAudioTracks(input.content).flatMap((track) =>
-        track.clips.flatMap((clip) =>
-          input.sceneIds.includes(clip.scene_id)
-            ? [
-                clip.artifact_id,
-                clip.transcript_artifact_id,
-                clip.captions_artifact_id,
-              ].filter((id): id is string => Boolean(id))
-            : [],
-        ),
-      ),
+      ...selectedItems.flatMap((item) => item.artifact_ids),
       ...(input.extraArtifactIds ?? []),
     ]),
   ];
@@ -213,29 +355,52 @@ export const createSelection = (input: {
   return {
     project_id: input.projectId,
     base_content_package_artifact_id: input.contentArtifactId,
+    item_ids: selectedItems.map((item) => item.id),
     scene_ids: selected.map(({ scene }) => scene.id),
     track_ids: [
-      "visual",
-      "voice",
-      "caption",
-      "transcript",
+      ...new Set(selectedItems.map((item) => item.track_id)),
+      ...requestedTrackIds,
+      ...(selectedItems.some((item) => item.kind === "video")
+        ? (["visual"] as const)
+        : []),
+      ...(selectedItems.some((item) => item.kind === "caption")
+        ? (["caption"] as const)
+        : []),
+      ...(selectedItems.some((item) => item.kind === "audio")
+        ? (["voice"] as const)
+        : []),
+      ...(selectedItems.some(
+        (item) => item.kind === "audio" && item.artifact_ids.length > 0,
+      )
+        ? (["transcript"] as const)
+        : []),
       "release",
       ...[...selectedGapIds].map((sceneId) => `gap_after_${sceneId}`),
-      ...effectiveAudioTracks(input.content).map((track) => track.id),
     ],
     artifact_ids: artifactIds,
     playhead_seconds:
       input.playheadSeconds === undefined
         ? null
         : snapToFrame(Math.max(0, input.playheadSeconds)),
-    time_range_seconds: {
-      start: sceneOffset(input.content.scenes, first.index),
-      end:
-        sceneOffset(input.content.scenes, last.index) +
-        last.scene.duration_seconds +
-        (selectedGapIds.has(last.scene.id)
-          ? (last.scene.gap_after_seconds ?? 0)
-          : 0),
-    },
+    time_range_seconds:
+      first && last
+        ? {
+            start:
+              selectedItems.length > 0
+                ? Math.min(...selectedItems.map((item) => item.start_seconds))
+                : sceneOffset(input.content.scenes, first.index),
+            end: Math.max(
+              selectedItems.length > 0
+                ? Math.max(...selectedItems.map((item) => item.end_seconds))
+                : sceneOffset(input.content.scenes, last.index) +
+                    last.scene.duration_seconds,
+              sceneOffset(input.content.scenes, last.index) +
+                last.scene.duration_seconds +
+                (selectedGapIds.has(last.scene.id)
+                  ? (last.scene.gap_after_seconds ?? 0)
+                  : 0),
+            ),
+          }
+        : null,
   };
 };

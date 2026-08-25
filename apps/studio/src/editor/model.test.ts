@@ -5,6 +5,8 @@ import {
   changeSceneSpeed,
   createSelection,
   createTimelineContext,
+  timelineItems,
+  timelineTracks,
   formatRulerTime,
   sceneOffset,
   sceneTimelineDuration,
@@ -83,7 +85,7 @@ describe("editor selection", () => {
     );
   });
 
-  it("keeps any-size ordered scene bundles and their typed artifacts", () => {
+  it("projects scene requests into exact independent timeline items", () => {
     const sceneIds = content.scenes.slice(3, 18).map((scene) => scene.id);
     const selection = createSelection({
       projectId: content.project_id,
@@ -96,13 +98,16 @@ describe("editor selection", () => {
 
     expect(selection.scene_ids).toEqual(sceneIds);
     expect(selection.scene_ids).toHaveLength(15);
+    expect(selection.item_ids).toHaveLength(45);
     expect(selection.track_ids).toEqual([
+      "track_video",
+      "track_narration",
+      "track_captions",
       "visual",
-      "voice",
       "caption",
+      "voice",
       "transcript",
       "release",
-      "track_primary_voice",
     ]);
     expect(selection.artifact_ids).toContain("transcript_004");
     expect(selection.artifact_ids).toContain(sourceLedger.id);
@@ -110,6 +115,124 @@ describe("editor selection", () => {
     expect(selection.time_range_seconds).not.toBeNull();
     expect(selection.time_range_seconds!.start).toBe(6);
     expect(selection.time_range_seconds!.end).toBe(36);
+  });
+
+  it("keeps one selected audio clip independent from video and captions", () => {
+    const audioItem = timelineItems(content).find(
+      (item) => item.kind === "audio",
+    );
+    expect(audioItem).toBeDefined();
+    const selection = createSelection({
+      projectId: content.project_id,
+      contentArtifactId: "artifact_content",
+      content,
+      itemIds: [audioItem!.id],
+      sourceLedgerArtifact: sourceLedger,
+    });
+
+    expect(selection.item_ids).toEqual([audioItem!.id]);
+    expect(selection.scene_ids).toEqual([audioItem!.scene_id]);
+    expect(selection.track_ids).toContain("track_narration");
+    expect(selection.track_ids).toContain("voice");
+    expect(selection.track_ids).not.toContain("visual");
+    expect(selection.track_ids).not.toContain("caption");
+  });
+
+  it("keeps one selected caption clip independent from video and audio", () => {
+    const captionItem = timelineItems(content).find(
+      (item) => item.kind === "caption",
+    );
+    expect(captionItem).toBeDefined();
+    const selection = createSelection({
+      projectId: content.project_id,
+      contentArtifactId: "artifact_content",
+      content,
+      itemIds: [captionItem!.id],
+      sourceLedgerArtifact: sourceLedger,
+    });
+
+    expect(selection.item_ids).toEqual([captionItem!.id]);
+    expect(selection.scene_ids).toEqual([captionItem!.scene_id]);
+    expect(selection.track_ids).toContain("track_captions");
+    expect(selection.track_ids).toContain("caption");
+    expect(selection.track_ids).not.toContain("visual");
+    expect(selection.track_ids).not.toContain("voice");
+  });
+
+  it("can give Producer one exact track without inventing a scene selection", () => {
+    const selection = createSelection({
+      projectId: content.project_id,
+      contentArtifactId: "artifact_content",
+      content,
+      trackIds: ["track_narration"],
+      sourceLedgerArtifact: null,
+    });
+
+    expect(selection.item_ids).toEqual([]);
+    expect(selection.scene_ids).toEqual([]);
+    expect(selection.track_ids).toEqual(["track_narration", "release"]);
+    expect(selection.time_range_seconds).toBeNull();
+  });
+
+  it("uses the persisted track order instead of rebuilding lane order", () => {
+    const reordered = {
+      ...content,
+      track_order: ["track_captions", "track_narration", "track_video"],
+    } satisfies ContentPackage;
+
+    expect(timelineTracks(reordered).map((track) => track.id)).toEqual([
+      "track_captions",
+      "track_narration",
+      "track_video",
+    ]);
+  });
+
+  it("projects persisted audio and caption placements independently", () => {
+    const placed = structuredClone(content);
+    placed.scenes[1]!.caption_timeline_start_seconds = 7;
+    placed.scenes[1]!.caption_duration_seconds = 1;
+    placed.audio_tracks = [
+      {
+        id: "track_narration",
+        name: "Narration",
+        role: "narration",
+        locale: "en",
+        voice_label: null,
+        muted: false,
+        solo: false,
+        export_enabled: true,
+        gain: 1,
+        clips: [
+          {
+            id: "clip_scene_001",
+            scene_id: placed.scenes[1]!.id,
+            label: "Moved narration",
+            artifact_id: null,
+            script: "One editable narration line.",
+            transcript_artifact_id: null,
+            captions_artifact_id: null,
+            start_offset_seconds: 0,
+            timeline_start_seconds: 8,
+            source_in_seconds: 0,
+            source_out_seconds: 2,
+            duration_seconds: 1,
+            playback_rate: 1,
+            status: "draft",
+          },
+        ],
+      },
+    ];
+
+    const projected = timelineItems(placed);
+    expect(
+      projected.find((item) => item.id === "caption_scene_001"),
+    ).toMatchObject({ start_seconds: 7, end_seconds: 8 });
+    expect(
+      projected.find((item) => item.id === "audio_clip_scene_001"),
+    ).toMatchObject({ start_seconds: 8, end_seconds: 9 });
+    expect(
+      projected.find((item) => item.id === "video_scene_001"),
+    ).toMatchObject({ start_seconds: 2, end_seconds: 4 });
   });
 
   it("gives Producer the complete cut while selection stays independent", () => {

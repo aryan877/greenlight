@@ -4,7 +4,7 @@
 
 Most video agents end at a generated file. Greenlight keeps going, but keeps the creator in control.
 
-You edit on a normal timeline. The AI Producer sees the complete current cut, can focus the exact scenes it means, and can operate the same editing system when asked. It researches through TrueForge, delegates independent questions to subagents, builds editable scene bundles, renders with Remotion, and stages the result on YouTube as unlisted. Public or scheduled release pauses for your approval.
+You edit on a normal timeline. Video, audio, captions, gaps, and tracks remain independently selectable. The AI Producer sees the complete current cut, can focus the exact items it means, and can operate the same editing commands when asked. It researches through TrueForge, delegates independent questions to subagents, renders with Remotion, and stages the result on YouTube as unlisted. Public or scheduled release pauses for your approval.
 
 ```text
 Topic
@@ -21,7 +21,7 @@ Topic
 1. Ask for a short video about a topic.
 2. The AI Producer searches the current web with Exa and can send separate questions to TrueForge subagents.
 3. Research becomes a claim-level evidence ledger, script, and editable storyboard.
-4. Every scene arrives on a real timeline with its visual, voice, timed transcript, captions, source range, and duration kept together.
+4. Video, voice, captions, and source ranges arrive as editable timeline items. Select them independently or marquee the aligned set when you want them together.
 5. Trim, split, reorder, change speed, mute tracks, edit metadata, or undo directly. These normal editor actions happen immediately without calling the model.
 6. Ask the AI Producer for a change. It focuses the intended range, previews the real result in Program and Timeline, and uses TrueForge approval before a consequential tool runs.
 7. Render the exact revision, run deterministic checks, and upload it as unlisted.
@@ -52,9 +52,9 @@ Exa comes from TrueForge's connector catalog and needs no API key. It stays defe
 - Square, borderless 16:9 Program monitor with playback, seek, volume, mute, and fullscreen
 - Resizable and collapsible media, timeline, and AI panels
 - Frame-aligned timeline with continuous zoom, adaptive ruler ticks, marquee selection, gaps, and one playhead
-- Scene bundles with separate video, named audio, and caption lanes
+- Independent video, named audio, and caption clips on persistent, reorderable tracks
 - Immediate drag reorder, trim, split, speed, mute, solo, export inclusion, undo, and redo
-- Any-size multi-selection with scene and gap context that can be dragged into the AI composer
+- Any-size multi-selection with exact clip, track, and gap context that can be dragged into the AI composer
 - Signature-checked local media import with real preview, size, duration, dimensions, and codec details
 - AI focus that can highlight the scenes or gap it believes the creator means before acting
 - One typed patch and revision system shared by direct edits and AI proposals

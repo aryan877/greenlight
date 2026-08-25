@@ -1,4 +1,5 @@
 import type { ImgHTMLAttributes, SVGProps } from "react";
+import { Aperture, type LucideProps } from "lucide-react";
 import { siGoogle, siGooglegemini, siYoutube } from "simple-icons";
 
 import remotionMark from "./assets/remotion-mark.svg";
@@ -31,6 +32,10 @@ export const GoogleIcon = (props: SVGProps<SVGSVGElement>) => (
 
 export const GeminiIcon = (props: SVGProps<SVGSVGElement>) => (
   <BrandIcon icon={siGooglegemini} {...props} />
+);
+
+export const GreenlightMark = (props: LucideProps) => (
+  <Aperture aria-label="Greenlight" role="img" {...props} />
 );
 
 export const TrueForgeIcon = (props: ImgHTMLAttributes<HTMLImageElement>) => (

@@ -79,7 +79,7 @@ export const ProjectSwitcher = ({
                   setCreateOpen(true);
                   setError(null);
                 }}
-                className="ml-auto flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[11px] font-medium text-white hover:bg-ink-secondary"
+                className="ml-auto flex h-8 items-center gap-1.5 rounded-md bg-control px-3 text-[11px] font-medium text-control-ink hover:bg-control-hover"
               >
                 <Plus size={13} /> New project
               </button>
@@ -220,7 +220,7 @@ export const ProjectSwitcher = ({
               <button
                 type="submit"
                 disabled={topic.trim().length < 8 || creating}
-                className="h-9 rounded-md bg-ink px-4 text-[11px] font-medium text-white hover:bg-ink-secondary disabled:opacity-30"
+                className="h-9 rounded-md bg-control px-4 text-[11px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-45"
               >
                 {creating ? "Creating…" : "Create project"}
               </button>

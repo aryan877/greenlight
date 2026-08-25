@@ -374,7 +374,7 @@ export const ReleasePanel = ({
             !content.release.thumbnail_artifact_id
           }
           onClick={onPrepare}
-          className="flex h-10 w-full items-center justify-center gap-2 bg-ink text-[11px] font-medium text-white hover:bg-ink-secondary disabled:opacity-35"
+          className="flex h-10 w-full items-center justify-center gap-2 bg-control text-[11px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-45"
         >
           {busy ? (
             <LoaderCircle size={13} className="animate-spin" />

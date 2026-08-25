@@ -19,6 +19,8 @@ describe("Producer event projection", () => {
         headline: "One cut",
         duration_seconds: 4,
         playhead_seconds: 1,
+        tracks: [],
+        items: [],
         scenes: [
           {
             id: "scene_one",
@@ -41,6 +43,7 @@ describe("Producer event projection", () => {
       selection: {
         project_id: "project_greenlight",
         base_content_package_artifact_id: "artifact_content",
+        item_ids: [],
         scene_ids: ["scene_one"],
         track_ids: ["visual", "voice", "caption", "transcript"],
         artifact_ids: [],
@@ -229,12 +232,14 @@ describe("Producer event projection", () => {
           "Yes — I can see the current cut: scene_open_hook at 4.000s (frames 0–120).",
         ),
       )[0]?.label,
-    ).toBe("Yes — I can see the current cut.");
+    ).toBe("Yes. I can see the current cut.");
     expect(
-      describeEvent(
-        message("The patch was cancelled. No changes were made."),
-      )[0]?.label,
-    ).toBe("Change cancelled.");
+      describeEvent(message("The patch was cancelled. No changes were made.")),
+    ).toEqual([]);
+    expect(describeEvent(message("Stopped, no changes."))).toEqual([]);
+    expect(
+      describeEvent(message("Cancelled again, no change was made.")),
+    ).toEqual([]);
   });
 
   it("ignores malformed tool references instead of breaking the feed", async () => {

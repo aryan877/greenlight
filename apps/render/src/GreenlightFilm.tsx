@@ -1,11 +1,12 @@
 import type { CSSProperties, ReactNode } from "react";
 
 import {
+  audioClipDurationSeconds,
   audibleAudioTracks,
+  effectiveAudioTracks,
   sceneStartSeconds,
   type AudioTrack,
   type AudioTrackClip,
-  type CaptionCue,
   type ContentPackage,
   type Scene,
 } from "@greenlight/contracts";
@@ -31,6 +32,46 @@ export const FPS = renderSpec.format.fps;
 const AUDIO_EDGE_FADE_FRAMES = 2;
 
 const { color, layout, timing, type } = renderSpec;
+
+export const audioClipRenderPlacement = (
+  content: ContentPackage,
+  clip: AudioTrackClip,
+) => {
+  const sceneIndex = content.scenes.findIndex(
+    (scene) => scene.id === clip.scene_id,
+  );
+  const scene = content.scenes[sceneIndex];
+  if (!scene || sceneIndex < 0) return null;
+  return {
+    from: Math.round(
+      (clip.timeline_start_seconds ??
+        sceneStartSeconds(content.scenes, sceneIndex) +
+          clip.start_offset_seconds) * FPS,
+    ),
+    durationInFrames: Math.max(
+      1,
+      Math.round(audioClipDurationSeconds(clip, scene) * FPS),
+    ),
+    scene,
+  };
+};
+
+export const captionClipRenderPlacement = (
+  content: ContentPackage,
+  scene: Scene,
+  sceneIndex: number,
+) => ({
+  from: Math.round(
+    (scene.caption_timeline_start_seconds ??
+      sceneStartSeconds(content.scenes, sceneIndex)) * FPS,
+  ),
+  durationInFrames: Math.max(
+    1,
+    Math.round(
+      (scene.caption_duration_seconds ?? scene.duration_seconds) * FPS,
+    ),
+  ),
+});
 
 const enterProgress = (frame: number, fps: number): number =>
   interpolate(frame, [0, timing.enterSeconds * fps], [0.35, 1], {
@@ -269,11 +310,9 @@ const treatments = {
 
 const EditorialScene = ({
   assetFiles,
-  captionTrack,
   scene,
 }: {
   assetFiles: Record<string, string>;
-  captionTrack: CaptionCue[] | null;
   scene: Scene;
 }) => {
   const Treatment = treatments[scene.visual.treatment];
@@ -295,9 +334,6 @@ const EditorialScene = ({
       >
         <Treatment assetFiles={assetFiles} scene={scene} />
       </AbsoluteFill>
-      {captionTrack ? (
-        <TimedCaptions cues={captionTrack} playbackRate={scene.playback_rate} />
-      ) : null}
     </AbsoluteFill>
   );
 };
@@ -356,34 +392,20 @@ const ProductionAudio = ({
   <>
     {audibleAudioTracks(content).flatMap((track) =>
       track.clips.flatMap((clip) => {
-        const sceneIndex = content.scenes.findIndex(
-          (scene) => scene.id === clip.scene_id,
-        );
         const file = clip.artifact_id ? assetFiles[clip.artifact_id] : null;
-        const scene = content.scenes[sceneIndex];
-        if (!file || !scene || sceneIndex < 0) return [];
-        const from = Math.round(
-          (sceneStartSeconds(content.scenes, sceneIndex) +
-            clip.start_offset_seconds) *
-            FPS,
-        );
-        const durationInFrames = Math.max(
-          1,
-          Math.round(
-            (scene.duration_seconds - clip.start_offset_seconds) * FPS,
-          ),
-        );
+        const placement = audioClipRenderPlacement(content, clip);
+        if (!file || !placement) return [];
         return [
           <Sequence
             key={`${track.id}:${clip.id}`}
-            from={from}
-            durationInFrames={durationInFrames}
+            from={placement.from}
+            durationInFrames={placement.durationInFrames}
           >
             <TrackAudioClip
               clip={clip}
-              durationInFrames={durationInFrames}
+              durationInFrames={placement.durationInFrames}
               file={file}
-              scenePlaybackRate={scene.playback_rate}
+              scenePlaybackRate={placement.scene.playback_rate}
               track={track}
             />
           </Sequence>,
@@ -392,6 +414,39 @@ const ProductionAudio = ({
     )}
   </>
 );
+
+const ProductionCaptions = ({
+  captionTracks,
+  content,
+}: Pick<RenderProject, "captionTracks" | "content">) => {
+  const audioTracks = effectiveAudioTracks(content);
+  return (
+    <>
+      {content.scenes.flatMap((scene, index) => {
+        const captionArtifactId =
+          audioTracks
+            .flatMap((track) => track.clips)
+            .find(
+              (clip) => clip.scene_id === scene.id && clip.captions_artifact_id,
+            )?.captions_artifact_id ?? scene.captions_artifact_id;
+        const cues = captionArtifactId
+          ? (captionTracks[captionArtifactId] ?? null)
+          : null;
+        if (!cues) return [];
+        const placement = captionClipRenderPlacement(content, scene, index);
+        return [
+          <Sequence
+            key={`captions:${scene.id}`}
+            from={placement.from}
+            durationInFrames={placement.durationInFrames}
+          >
+            <TimedCaptions cues={cues} playbackRate={scene.playback_rate} />
+          </Sequence>,
+        ];
+      })}
+    </>
+  );
+};
 
 export const getDurationInFrames = (content: ContentPackage): number =>
   content.scenes.reduce(
@@ -407,29 +462,15 @@ export const GreenlightFilm = ({
   captionTracks,
   content,
 }: RenderProject) => {
-  const audioTracks = audibleAudioTracks(content);
   const timeline: ReactNode[] = [];
   content.scenes.forEach((scene, index) => {
-    const captionArtifactId =
-      audioTracks
-        .flatMap((track) => track.clips)
-        .find((clip) => clip.scene_id === scene.id && clip.captions_artifact_id)
-        ?.captions_artifact_id ?? scene.captions_artifact_id;
     timeline.push(
       <Series.Sequence
         key={scene.id}
         durationInFrames={Math.round(scene.duration_seconds * FPS)}
         premountFor={FPS}
       >
-        <EditorialScene
-          assetFiles={assetFiles}
-          captionTrack={
-            captionArtifactId
-              ? (captionTracks[captionArtifactId] ?? null)
-              : null
-          }
-          scene={scene}
-        />
+        <EditorialScene assetFiles={assetFiles} scene={scene} />
       </Series.Sequence>,
     );
     if ((scene.gap_after_seconds ?? 0) > 0) {
@@ -447,6 +488,7 @@ export const GreenlightFilm = ({
     <AbsoluteFill style={{ background: color.paper }}>
       <Series>{timeline}</Series>
       <ProductionAudio assetFiles={assetFiles} content={content} />
+      <ProductionCaptions captionTracks={captionTracks} content={content} />
     </AbsoluteFill>
   );
 };

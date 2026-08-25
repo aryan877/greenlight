@@ -260,7 +260,7 @@ const MediaViewer = ({
                   "flex h-9 items-center justify-center gap-2 rounded-md text-[11px] font-medium",
                   attached
                     ? "border border-action/25 bg-action-soft text-action"
-                    : "bg-ink text-white hover:bg-ink-secondary",
+                    : "bg-control text-control-ink hover:bg-control-hover",
                 )}
               >
                 {attached ? <Check size={13} /> : <Plus size={13} />}
@@ -343,7 +343,7 @@ export const MediaBrowser = ({
             type="button"
             disabled={importing}
             onClick={() => fileInputRef.current?.click()}
-            className="flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[11px] font-medium text-white hover:bg-ink-secondary disabled:opacity-40"
+            className="flex h-8 items-center gap-1.5 rounded-md bg-control px-3 text-[11px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-45"
           >
             <Plus size={13} /> {importing ? "Adding…" : "Add media"}
           </button>

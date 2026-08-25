@@ -28,6 +28,11 @@
   --color-error-soft: #fff0f0;
   --color-info: #4078c9;
   --color-info-soft: #edf4ff;
+  --color-control: #15181c;
+  --color-control-hover: #30353b;
+  --color-control-ink: #ffffff;
+  --color-message-user: #171b1f;
+  --color-message-user-ink: #f8faf9;
 
   --color-track-video: #e9f2ee;
   --color-track-video-strong: #4e927b;
@@ -42,6 +47,50 @@
   --shadow-monitor: 0 2px 12px rgb(17 24 39 / 0.09);
 
   --ease-product: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --color-surface: #151917;
+  --color-surface-raised: #1a1f1c;
+  --color-surface-sunken: #101310;
+  --color-sidebar: #121613;
+  --color-canvas: #0d100e;
+  --color-ink: #eef3f0;
+  --color-ink-secondary: #c5cdc9;
+  --color-ink-tertiary: #a1aaa5;
+  --color-ink-caption: #858f89;
+  --color-line-subtle: rgb(235 244 239 / 0.065);
+  --color-line: rgb(235 244 239 / 0.11);
+  --color-line-strong: rgb(235 244 239 / 0.18);
+  --color-hover: rgb(235 244 239 / 0.06);
+  --color-active: rgb(235 244 239 / 0.1);
+  --color-action: #5ac0a4;
+  --color-action-hover: #75d1b8;
+  --color-action-soft: #18372f;
+  --color-warning: #e4a34d;
+  --color-warning-soft: #352718;
+  --color-error: #f07878;
+  --color-error-soft: #382020;
+  --color-info: #78a9ef;
+  --color-info-soft: #1b2a40;
+  --color-control: #edf3f0;
+  --color-control-hover: #d9e2dd;
+  --color-control-ink: #111512;
+  --color-message-user: #e8efeb;
+  --color-message-user-ink: #151917;
+
+  --color-track-video: #173129;
+  --color-track-video-strong: #65b49a;
+  --color-track-voice: #29233a;
+  --color-track-voice-strong: #a38ad0;
+  --color-track-caption: #332e1d;
+  --color-track-caption-strong: #c4a34a;
+  --color-track-music: #352524;
+  --color-track-music-strong: #c48686;
+
+  --shadow-float: 0 16px 48px rgb(0 0 0 / 0.38);
+  --shadow-monitor: 0 4px 18px rgb(0 0 0 / 0.28);
 }
 
 @layer base {
@@ -61,6 +110,10 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  html:not([data-theme="dark"]) {
+    color-scheme: light;
+  }
+
   button,
   textarea,
   select,
@@ -75,7 +128,7 @@
   }
 
   * {
-    scrollbar-color: rgb(17 24 39 / 0.16) transparent;
+    scrollbar-color: var(--color-line-strong) transparent;
     scrollbar-width: thin;
   }
 
@@ -87,13 +140,48 @@
   *::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
     border-radius: 999px;
-    background: rgb(17 24 39 / 0.16);
+    background: var(--color-line-strong);
     background-clip: padding-box;
   }
 }
 
 @utility scroll-stable {
   scrollbar-gutter: stable;
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.agent-thinking {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--color-ink-tertiary) 20%,
+    var(--color-ink) 48%,
+    var(--color-ink-tertiary) 76%
+  );
+  background-clip: text;
+  background-size: 220% 100%;
+  animation: agent-thinking 1.8s linear infinite;
+}
+
+@keyframes agent-thinking {
+  to {
+    background-position: -220% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-thinking {
+    animation: none;
+    color: var(--color-ink-secondary);
+    background: none;
+  }
 }
 
 .monitor-viewport {

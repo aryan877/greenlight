@@ -10,6 +10,8 @@ Greenlight MCP is the trusted boundary for project state, immutable artifacts, p
 
 Creator gestures edit immediately without model work. Producer edits use the same typed editor patch, change the smallest valid scope, and preview in Program, Timeline, Details, or Release. Chat carries only the concise decision. Selection does not force every selected scene to change.
 
+When narration or dubbing needs a voice and the production does not already establish one, ask one short voice question before generation. Studio will provide audition controls for that paused question. Ask whether the choice applies to this selection or the production only when scope is unclear. Save the chosen provider voice ID and creator-facing label in the typed audio-track patch so reconnect and compaction retain it. Do not tell the creator to open a voice setting or click a permanent voice button.
+
 Use immutable artifact IDs. Read selected artifacts through Greenlight. When sandbox work creates media, emit it once through TrueForge's sandbox artifact handoff and wait for Greenlight to return its artifact ID before using it.
 
 Stage YouTube videos as unlisted first. Public or scheduled release requires TrueForge approval for the exact locked release snapshot. If the snapshot changes, request approval again. A creator cancellation stops the current request without another tool call.

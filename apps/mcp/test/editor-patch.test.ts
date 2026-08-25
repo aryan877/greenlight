@@ -1,5 +1,7 @@
 import {
+  audioTimelineItemId,
   applyEditorPatch,
+  captionTimelineItemId,
   sceneStartSeconds,
   type ContentPackage,
   type EditorPatchInput,
@@ -57,6 +59,7 @@ const patch = (
   selection: {
     project_id: base.project_id,
     base_content_package_artifact_id: "artifact_base001",
+    item_ids: [],
     scene_ids: ["scene_002"],
     track_ids: ["visual", "voice", "caption", "transcript"],
     artifact_ids: [],
@@ -76,6 +79,7 @@ describe("applyEditorPatch", () => {
       selection: {
         project_id: base.project_id,
         base_content_package_artifact_id: "artifact_base001",
+        item_ids: [],
         scene_ids: [],
         track_ids: ["release"],
         artifact_ids: [],
@@ -164,8 +168,8 @@ describe("applyEditorPatch", () => {
     const withAudio = structuredClone(base);
     withAudio.audio_tracks = [
       {
-        id: "track_primary_voice",
-        name: "Primary voice",
+        id: "track_narration",
+        name: "Narration",
         role: "narration",
         locale: "en",
         voice_label: "Kore",
@@ -394,10 +398,274 @@ describe("applyEditorPatch", () => {
     );
 
     expect(revised.audio_tracks?.map((track) => track.id)).toEqual([
-      "track_primary_voice",
+      "track_narration",
       "track_hindi_dub",
     ]);
     expect(revised.audio_tracks?.[0]?.clips).toHaveLength(3);
     expect(revised.audio_tracks?.[1]?.clips[0]?.scene_id).toBe("scene_002");
+  });
+
+  it("adds and removes empty creator tracks without touching the starter tracks", () => {
+    const withTracks = applyEditorPatch(
+      base,
+      patch([
+        {
+          type: "upsert_video_track",
+          track: {
+            id: "track_video_broll",
+            name: "B-roll",
+            kind: "video",
+            protected: false,
+          },
+        },
+        {
+          type: "upsert_caption_track",
+          track: {
+            id: "track_captions_hindi",
+            name: "Hindi captions",
+            kind: "caption",
+            protected: false,
+          },
+        },
+      ]),
+    );
+
+    expect(withTracks.video_tracks?.map((track) => track.id)).toEqual([
+      "track_video",
+      "track_video_broll",
+    ]);
+    expect(withTracks.caption_tracks?.map((track) => track.id)).toEqual([
+      "track_captions",
+      "track_captions_hindi",
+    ]);
+
+    const withoutTracks = applyEditorPatch(
+      withTracks,
+      patch([
+        { type: "remove_video_track", track_id: "track_video_broll" },
+        {
+          type: "remove_caption_track",
+          track_id: "track_captions_hindi",
+        },
+      ]),
+    );
+    expect(withoutTracks.video_tracks?.map((track) => track.id)).toEqual([
+      "track_video",
+    ]);
+    expect(withoutTracks.caption_tracks?.map((track) => track.id)).toEqual([
+      "track_captions",
+    ]);
+  });
+
+  it("never removes the starter narration track", () => {
+    expect(() =>
+      applyEditorPatch(
+        base,
+        patch([{ type: "remove_audio_track", track_id: "track_narration" }]),
+      ),
+    ).toThrow("protected_track");
+  });
+
+  it("persists one exact lane order for direct and Producer edits", () => {
+    const reordered = applyEditorPatch(base, {
+      selection: {
+        project_id: base.project_id,
+        base_content_package_artifact_id: "artifact_base001",
+        item_ids: [],
+        scene_ids: [],
+        track_ids: ["track_video", "track_narration", "track_captions"],
+        artifact_ids: [],
+        playhead_seconds: 0,
+        time_range_seconds: null,
+      },
+      instruction_summary: "Move captions above narration",
+      operations: [
+        {
+          type: "reorder_tracks",
+          track_ids: ["track_video", "track_captions", "track_narration"],
+        },
+      ],
+    });
+
+    expect(reordered.track_order).toEqual([
+      "track_video",
+      "track_captions",
+      "track_narration",
+    ]);
+  });
+
+  it("moves one exact audio clip without changing its immutable source range", () => {
+    const withAudio = structuredClone(base);
+    withAudio.audio_tracks = [
+      {
+        id: "track_narration",
+        name: "Narration",
+        role: "narration",
+        locale: "en",
+        voice_label: null,
+        muted: false,
+        solo: false,
+        export_enabled: true,
+        gain: 1,
+        clips: [
+          {
+            id: "clip_scene_002",
+            scene_id: "scene_002",
+            label: "Second narration",
+            artifact_id: null,
+            script: "Second has enough narration to be useful.",
+            transcript_artifact_id: null,
+            captions_artifact_id: null,
+            start_offset_seconds: 0,
+            source_in_seconds: 0,
+            source_out_seconds: 10,
+            playback_rate: 1,
+            status: "draft",
+          },
+        ],
+      },
+      {
+        id: "track_music",
+        name: "Music",
+        role: "music",
+        locale: null,
+        voice_label: null,
+        muted: false,
+        solo: false,
+        export_enabled: true,
+        gain: 1,
+        clips: [],
+      },
+    ];
+    const itemId = audioTimelineItemId("clip_scene_002");
+    const revised = applyEditorPatch(withAudio, {
+      selection: {
+        project_id: base.project_id,
+        base_content_package_artifact_id: "artifact_base001",
+        item_ids: [itemId],
+        scene_ids: ["scene_002"],
+        track_ids: ["voice", "track_narration"],
+        artifact_ids: [],
+        playhead_seconds: 10,
+        time_range_seconds: { start: 10, end: 20 },
+      },
+      instruction_summary: "Move one narration clip to Music",
+      operations: [
+        {
+          type: "update_audio_clip",
+          item_id: itemId,
+          clip_id: "clip_scene_002",
+          target_track_id: "track_music",
+          timeline_start_seconds: 12,
+        },
+      ],
+    });
+
+    expect(revised.audio_tracks?.[0]?.clips).toEqual([]);
+    expect(revised.audio_tracks?.[1]?.clips[0]).toMatchObject({
+      id: "clip_scene_002",
+      timeline_start_seconds: 12,
+      source_in_seconds: 0,
+      source_out_seconds: 10,
+    });
+  });
+
+  it("trims audio non-destructively and rejects a mismatched item ID", () => {
+    const withAudio = structuredClone(base);
+    withAudio.audio_tracks = [
+      {
+        id: "track_narration",
+        name: "Narration",
+        role: "narration",
+        locale: "en",
+        voice_label: null,
+        muted: false,
+        solo: false,
+        export_enabled: true,
+        gain: 1,
+        clips: [
+          {
+            id: "clip_scene_002",
+            scene_id: "scene_002",
+            label: "Second narration",
+            artifact_id: null,
+            script: "Second has enough narration to be useful.",
+            transcript_artifact_id: null,
+            captions_artifact_id: null,
+            start_offset_seconds: 0,
+            source_in_seconds: 2,
+            source_out_seconds: 12,
+            playback_rate: 1,
+            status: "draft",
+          },
+        ],
+      },
+    ];
+    const itemId = audioTimelineItemId("clip_scene_002");
+    const request = {
+      selection: {
+        project_id: base.project_id,
+        base_content_package_artifact_id: "artifact_base001",
+        item_ids: [itemId],
+        scene_ids: ["scene_002"],
+        track_ids: ["voice", "track_narration"],
+        artifact_ids: [],
+        playhead_seconds: 10,
+        time_range_seconds: { start: 10, end: 20 },
+      },
+      instruction_summary: "Trim narration without touching its source",
+      operations: [
+        {
+          type: "update_audio_clip" as const,
+          item_id: itemId,
+          clip_id: "clip_scene_002",
+          duration_seconds: 4,
+        },
+      ],
+    };
+    const revised = applyEditorPatch(withAudio, request);
+    expect(revised.audio_tracks?.[0]?.clips[0]).toMatchObject({
+      duration_seconds: 4,
+      source_in_seconds: 2,
+      source_out_seconds: 12,
+    });
+
+    request.operations[0]!.item_id = captionTimelineItemId("scene_002");
+    request.selection.item_ids = [captionTimelineItemId("scene_002")];
+    expect(() => applyEditorPatch(withAudio, request)).toThrow(
+      "audio_item_clip_mismatch",
+    );
+  });
+
+  it("moves and trims one exact caption clip", () => {
+    const itemId = captionTimelineItemId("scene_002");
+    const revised = applyEditorPatch(base, {
+      selection: {
+        project_id: base.project_id,
+        base_content_package_artifact_id: "artifact_base001",
+        item_ids: [itemId],
+        scene_ids: ["scene_002"],
+        track_ids: ["caption", "track_captions"],
+        artifact_ids: [],
+        playhead_seconds: 10,
+        time_range_seconds: { start: 10, end: 20 },
+      },
+      instruction_summary: "Move and trim one caption clip",
+      operations: [
+        {
+          type: "update_caption_clip",
+          item_id: itemId,
+          scene_id: "scene_002",
+          timeline_start_seconds: 14,
+          duration_seconds: 4,
+        },
+      ],
+    });
+
+    expect(revised.scenes[1]).toMatchObject({
+      caption_timeline_start_seconds: 14,
+      caption_duration_seconds: 4,
+    });
+    expect(revised.scenes[1]!.duration_seconds).toBe(10);
   });
 });

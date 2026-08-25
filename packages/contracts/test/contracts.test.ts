@@ -5,6 +5,7 @@ import {
   captionTrackSchema,
   contentPackageSchema,
   editorPatchInputSchema,
+  editorTimelineItemSchema,
   effectiveAudioTracks,
   evidenceLedgerSchema,
   productionDurationSeconds,
@@ -100,6 +101,21 @@ describe("Greenlight contracts", () => {
     expect(parsed.success).toBe(false);
   });
 
+  it("rejects timeline IDs that disagree with their typed item kind", () => {
+    const parsed = editorTimelineItemSchema.safeParse({
+      id: "video_scene_001",
+      kind: "caption",
+      track_id: "track_captions",
+      scene_id: "scene_001",
+      label: "One caption",
+      start_seconds: 0,
+      end_seconds: 1,
+      artifact_ids: [],
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
   it("rejects edit timing between production frames", () => {
     const parsed = editorPatchInputSchema.safeParse({
       selection: {
@@ -125,7 +141,7 @@ describe("Greenlight contracts", () => {
       version: 1,
       project_id: "project_001",
       headline: "A cut with many precise beats",
-      dek: "Each short beat remains a complete editable scene bundle.",
+      dek: "Each short beat remains independently editable on the timeline.",
       scenes: Array.from({ length: 20 }, (_, index) => ({
         id: `scene_${String(index).padStart(3, "0")}`,
         kind: index === 0 ? "hook" : "explanation",
@@ -196,7 +212,7 @@ describe("Greenlight contracts", () => {
       },
     });
     const [primary] = effectiveAudioTracks(content);
-    expect(primary?.name).toBe("Primary voice");
+    expect(primary?.name).toBe("Narration");
     expect(primary?.clips).toHaveLength(3);
 
     const explicit = contentPackageSchema.parse({
@@ -231,5 +247,31 @@ describe("Greenlight contracts", () => {
     expect(audibleAudioTracks(explicit).map((track) => track.id)).toEqual([
       "track_hindi_dub",
     ]);
+  });
+
+  it("rejects ambiguous or incomplete lane ordering", () => {
+    const parsed = contentPackageSchema.safeParse({
+      version: 1,
+      project_id: "project_tracks",
+      headline: "Every lane has one stable place",
+      dek: "Track order contains every real editor lane exactly once.",
+      scenes: Array.from({ length: 3 }, (_, index) => ({
+        id: `scene_tracks_${index}`,
+        kind: index === 0 ? "hook" : "explanation",
+        title: `Track scene ${index + 1}`,
+        narration: "One independently editable narration clip.",
+        claim_ids: [],
+        duration_seconds: 10,
+        visual: { treatment: "type", accent: "signal" },
+      })),
+      track_order: ["track_video", "track_video", "track_captions"],
+      metadata: {
+        title: "Every lane has one stable place",
+        description: "A concise production.",
+        tags: ["editing"],
+      },
+    });
+
+    expect(parsed.success).toBe(false);
   });
 });
