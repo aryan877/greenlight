@@ -74,9 +74,22 @@ const request = async (path, init = {}) => {
 const gitSkillsAreAvailable = async () => {
   if (skillsMode === "true") return true;
   if (skillsMode === "false") return false;
-  const url = new URL(skillsRepoUrl);
-  const [owner, rawRepository] = url.pathname.split("/").filter(Boolean);
-  if (url.hostname !== "github.com" || !owner || !rawRepository) return false;
+  let url;
+  try {
+    url = new URL(skillsRepoUrl);
+  } catch {
+    return false;
+  }
+  const segments = url.pathname.split("/").filter(Boolean);
+  const [owner, rawRepository] = segments;
+  if (
+    url.hostname !== "github.com" ||
+    segments.length !== 2 ||
+    !owner ||
+    !rawRepository
+  ) {
+    return false;
+  }
   const repository = rawRepository.replace(/\.git$/, "");
   const response = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`,
