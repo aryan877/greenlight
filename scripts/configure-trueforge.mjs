@@ -14,7 +14,8 @@ const rootProviderBaseUrl = (
   process.env.GREENLIGHT_ROOT_BASE_URL ?? "https://openrouter.ai/api/v1"
 ).replace(/\/$/, "");
 const rootApiKey =
-  process.env.GREENLIGHT_ROOT_API_KEY ?? process.env.OPENROUTER_API_KEY;
+  process.env.GREENLIGHT_ROOT_API_KEY?.trim() ||
+  process.env.OPENROUTER_API_KEY?.trim();
 const mcpAuthToken = process.env.GREENLIGHT_MCP_AUTH_TOKEN;
 const upstreamModel =
   process.env.GREENLIGHT_ROOT_MODEL ?? "google/gemini-3.7-flash";
@@ -153,6 +154,7 @@ const resolveCompactionThreshold = async () => {
   try {
     const response = await fetch(`${rootProviderBaseUrl}/models`, {
       headers: { authorization: `Bearer ${rootApiKey}` },
+      signal: AbortSignal.timeout(5_000),
     });
     if (!response.ok) return fallback;
     const body = await response.json();
