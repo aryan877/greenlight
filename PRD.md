@@ -116,7 +116,7 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 
 - TrueForge runs the user-facing root Producer and owns turns, session durability, subagents, sandbox/Code Mode, MCP calls, and approval events.
 - Exa is configured from TrueForge's own MCP catalog without a separate API key and stays deferred until research needs it.
-- Four small Git-backed skills own editorial copy, evidence method, release packaging, and transcript-aware edit decisions. They stay procedural; project state and side effects remain typed MCP tools.
+- Four small Git-backed skills add editorial copy, evidence method, release packaging, and transcript-aware edit decisions when their configured HTTPS Git repository is publicly cloneable. Private development keeps the same core Producer, tools, and sandbox but defers these optional playbooks. Project state and side effects always remain typed MCP tools.
 - Context compaction is enabled at a conservative threshold derived from the configured root model's advertised context window.
 - The root Producer is the only agent that asks the user questions.
 - Subagents are bounded, cannot spawn nested agents, and return work to the root.

@@ -1,4 +1,8 @@
 import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const trueForgeUrl = (
   process.env.TRUEFORGE_API_URL ?? "http://localhost:8790"
@@ -7,7 +11,7 @@ const mcpUrl = process.env.GREENLIGHT_MCP_URL ?? "http://localhost:8941/mcp";
 const openRouterKey = process.env.OPENROUTER_API_KEY;
 const mcpAuthToken = process.env.GREENLIGHT_MCP_AUTH_TOKEN;
 const upstreamModel =
-  process.env.GREENLIGHT_ROOT_MODEL ?? "deepseek/deepseek-v4-flash-vision-exp";
+  process.env.GREENLIGHT_ROOT_MODEL ?? "google/gemini-3.7-flash";
 const skillsRepoUrl =
   process.env.GREENLIGHT_SKILLS_REPO_URL ??
   "https://github.com/aryan877/greenlight.git";
@@ -72,7 +76,6 @@ const request = async (path, init = {}) => {
 };
 
 const gitSkillsAreAvailable = async () => {
-  if (skillsMode === "true") return true;
   if (skillsMode === "false") return false;
   let url;
   try {
@@ -80,22 +83,43 @@ const gitSkillsAreAvailable = async () => {
   } catch {
     return false;
   }
-  const segments = url.pathname.split("/").filter(Boolean);
-  const [owner, rawRepository] = segments;
   if (
-    url.hostname !== "github.com" ||
-    segments.length !== 2 ||
-    !owner ||
-    !rawRepository
+    url.protocol !== "https:" ||
+    !url.hostname ||
+    url.username ||
+    url.password ||
+    !/^[A-Za-z0-9._/-]+$/.test(skillsRef) ||
+    skillsRef.startsWith("-") ||
+    skillsRef.includes("..")
   ) {
     return false;
   }
-  const repository = rawRepository.replace(/\.git$/, "");
-  const response = await fetch(
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`,
-    { headers: { accept: "application/vnd.github+json" } },
-  ).catch(() => null);
-  return response?.ok === true;
+  if (skillsMode === "true") return true;
+  try {
+    await execFileAsync(
+      "git",
+      [
+        "-c",
+        "credential.helper=",
+        "ls-remote",
+        "--exit-code",
+        skillsRepoUrl,
+        skillsRef,
+      ],
+      {
+        env: {
+          ...process.env,
+          GIT_ASKPASS: "true",
+          GIT_TERMINAL_PROMPT: "0",
+        },
+        timeout: 8_000,
+        windowsHide: true,
+      },
+    );
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const resolveCompactionThreshold = async () => {

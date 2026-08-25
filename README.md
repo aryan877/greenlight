@@ -47,7 +47,27 @@ Greenlight does not use TrueForge as a chat box around a separate workflow. True
 
 Exa comes from TrueForge's connector catalog and needs no API key. It stays deferred, so its tool schemas enter context only when research needs them.
 
-The local integration has also been exercised against a real Greenlight artifact, not a fixture: Code Mode reconstructed a 2,107,931-byte video through bounded MCP reads, matched its SHA-256, and measured 31.07 seconds, 1920×1080 H.264 at 30 fps with AAC audio. That turn made no project mutation and used no paid provider.
+The judged build defaults to `google/gemini-3.7-flash` through OpenRouter. It keeps the large multimodal context Greenlight needs and passed the complete TrueForge child-thread path. The experimental DeepSeek vision endpoint remains an opt-in override, not the demo default, because repeated child calls closed upstream during live testing.
+
+### Live harness proof
+
+- **Real tool:** a TrueForge subagent read the latest Greenlight production through the deferred MCP boundary and returned its exact title and four-scene count to the root agent.
+- **Sandboxed code:** Code Mode reconstructed a real 2,107,931-byte video through bounded MCP reads, matched its SHA-256, and measured 31.07 seconds, 1920×1080 H.264 at 30 fps with AAC audio.
+- **Human stop:** a live `apply_editor_patch` call emitted TrueForge's native approval event; a denial resumed the exact paused turn and completed without changing the production.
+- **Durable session:** Studio rebuilds the full conversation from TrueForge session events and resubscribes to a running turn after reconnect. Compaction changes the model's working context, not the creator-visible history.
+
+TrueFoundry AI Gateway and MCP Gateway are intentionally not in the judged path. The event material positions them as production infrastructure after an agent has real users and explicitly says neither is needed for the hackathon. Adding them would duplicate routing and governance without making the harness proof clearer.
+
+### Judging map
+
+| Criterion            | Greenlight's proof                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------- |
+| Potential impact     | A creator can take one sourced short video from idea to an unlisted YouTube review                  |
+| Originality          | A professional editor the agent can operate, with a human licence to broadcast                      |
+| Technical excellence | Typed contracts, immutable revisions, independent tracks, deterministic rendering, and verification |
+| Sponsor tools        | TrueForge owns the loop; Qodo reviews the private pull-request trail                                |
+| Control and safety   | Sandboxed media work plus exact edit, render, upload, publish, and schedule approvals               |
+| Presentation         | The demo ends on a finished video and the visible public-release approval                           |
 
 ## Editor capabilities
 
@@ -134,7 +154,7 @@ pnpm trueforge:configure
 
 Open [http://127.0.0.1:4173](http://127.0.0.1:4173).
 
-Greenlight imports its four custom skills from Git because that is TrueForge's skill boundary. The repository must be publicly cloneable before sandbox skill loading can work. `pnpm trueforge:configure` detects a private repository and leaves Git skills out of the live agent so Code Mode still works during private development. Make the repository public for the hackathon submission, then rerun the command to enable them. Never put a GitHub token in a skill URL.
+Greenlight imports four optional custom playbooks from Git because that is TrueForge's skill boundary. The configured HTTPS repository and ref must be publicly cloneable before sandbox skill loading can work. `pnpm trueforge:configure` checks this with non-interactive Git and leaves the playbooks out of the live agent during private development, while the core Producer, tools, approvals, subagents, and Code Mode remain available. Make the repository public for the hackathon submission, then rerun the command to enable them. Never put a Git token in a skill URL.
 
 The optional Remotion authoring view is:
 

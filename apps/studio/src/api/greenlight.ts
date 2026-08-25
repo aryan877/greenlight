@@ -63,6 +63,22 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return value as T;
 };
 
+const requestJsonArtifact = async <T>(artifactId: string): Promise<T> => {
+  const response = await fetch(
+    `/greenlight-api/artifacts/${encodeURIComponent(artifactId)}`,
+    { headers: { accept: "application/json" } },
+  );
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Greenlight API ${response.status}`);
+  }
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    throw new Error("Greenlight returned an invalid JSON artifact");
+  }
+};
+
 export const greenlightApi = {
   listProjects: () =>
     request<{ projects: ProjectSummary[] }>("/projects").then(
@@ -120,9 +136,9 @@ export const greenlightApi = {
       },
     ),
   getContentPackage: (artifactId: string) =>
-    request<ContentPackage>(
-      `/artifacts/${encodeURIComponent(artifactId)}`,
-    ).then((value) => contentPackageSchema.parse(value)),
+    requestJsonArtifact<ContentPackage>(artifactId).then((value) =>
+      contentPackageSchema.parse(value),
+    ),
   uploadAsset: async (projectId: string, file: File) => {
     const response = await request<{ artifact: Artifact }>(
       `/projects/${encodeURIComponent(projectId)}/assets`,
