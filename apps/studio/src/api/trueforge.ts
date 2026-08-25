@@ -4,6 +4,7 @@ import {
   type Artifact,
   type EditorFocusInput,
   type EditorSelection,
+  type EditorTimelineContext,
 } from "@greenlight/contracts";
 import {
   mergeEventDelta,
@@ -60,12 +61,59 @@ export const CREATOR_CANCELLED_QUESTION =
 type ProducerSendInput = {
   instruction: string;
   selection: EditorSelection | null;
+  timeline: EditorTimelineContext | null;
   clientEventId?: string;
+};
+
+export const createProducerUserMessage = (
+  projectId: string,
+  input: Pick<ProducerSendInput, "instruction" | "selection" | "timeline">,
+) => {
+  const timelineContext = input.timeline
+    ? `\n\nEDITOR_TIMELINE (complete current cut):\n${JSON.stringify(input.timeline)}`
+    : "";
+  const selectionContext = input.selection
+    ? `\n\nEDITOR_SELECTION (current emphasis):\n${JSON.stringify(input.selection)}`
+    : "";
+  return `PROJECT_ID: ${projectId}\n\n${input.instruction}${timelineContext}${selectionContext}`;
 };
 
 type WireEvent = Record<string, unknown> & {
   id?: string;
   type?: string;
+};
+
+type TurnDoneState = {
+  status?: string;
+  output?: unknown;
+  message?: unknown;
+  reason?: unknown;
+};
+
+const turnDoneState = (event: WireEvent): TurnDoneState | null =>
+  event.type === "turn.done" && event.state && typeof event.state === "object"
+    ? (event.state as TurnDoneState)
+    : null;
+
+export const terminalFailureMessage = (event: WireEvent): string | null => {
+  const state = turnDoneState(event);
+  if (state?.status === "error") {
+    return "Producer couldn’t finish that reply. Check the model connection and retry.";
+  }
+  if (state?.status === "cancelled") {
+    return "Producer stopped before answering. Retry when you’re ready.";
+  }
+  return null;
+};
+
+const requestFailureMessage = (error: Error) => {
+  if (/fetch|network|502|503|connect|proxy/i.test(error.message)) {
+    return "Producer is offline. Start TrueForge, then retry.";
+  }
+  return terminalFailureMessage({
+    type: "turn.done",
+    state: { status: "error" },
+  })!;
 };
 
 type RestorableTurn = {
@@ -355,20 +403,6 @@ const creatorFacingSentence = (value: string): string | null => {
     .replace(/\s+/g, " ")
     .trim();
   if (!content) return null;
-  if (
-    /(?:\bartifact[_-]?[a-z0-9]+|\bscene_[a-z0-9_-]+|frame math|frames? \d|gapafter|base_content_package|content_package_artifact|sha256|current revision)/i.test(
-      content,
-    )
-  ) {
-    return null;
-  }
-  if (
-    /^(got it|understood|okay|let me|i(?:'ll| will)|now i|first[, ]|to begin)/i.test(
-      content,
-    )
-  ) {
-    return null;
-  }
   if (/^(done|patch applied successfully)\.?$/i.test(content)) {
     return "Change applied.";
   }
@@ -379,13 +413,44 @@ const creatorFacingSentence = (value: string): string | null => {
   ) {
     return "Change cancelled.";
   }
-  const sentence = content.match(/^.*?[.!?](?:\s|$)/)?.[0] ?? content;
-  if (sentence.length > 180) return null;
-  return sentence.trim();
+  if (/^(?:yes|confirmed)\b.*\bcurrent cut\b/i.test(content)) {
+    return "Yes — I can see the current cut.";
+  }
+  if (/^frame math\b/i.test(content)) return null;
+  const sentences =
+    content
+      .match(/[^.!?]+[.!?](?:\s|$)|[^.!?]+$/g)
+      ?.map((sentence) => sentence.trim()) ?? [];
+  return (
+    sentences.find(
+      (sentence) =>
+        sentence.length <= 180 &&
+        !/(?:\bartifact[_-]?[a-z0-9]+|\bscene_[a-z0-9_-]+|frame math|frames? \d|gapafter|base_content_package|content_package_artifact|sha256|current revision)/i.test(
+          sentence,
+        ) &&
+        !/^(got it|understood|okay|let me|i(?:'ll| will)|now i|first[, ]|to begin)/i.test(
+          sentence,
+        ),
+    ) ?? null
+  );
 };
 
 export const describeEvent = (event: WireEvent): StudioAgentEvent[] => {
   const type = String(event.type ?? "agent.event");
+  if (type === "turn.done") {
+    const failure = terminalFailureMessage(event);
+    return failure
+      ? [
+          {
+            id: String(event.id ?? crypto.randomUUID()),
+            kind: "message",
+            label: failure,
+            detail: "",
+            sceneIds: [],
+          },
+        ]
+      : [];
+  }
   if (type === "model.message") {
     const output: StudioAgentEvent[] = [];
     const calls = toolCallsOf(event);
@@ -460,6 +525,17 @@ export const useProducerAgent = (
   const ingest = useCallback(
     (incoming: WireEvent, sourceTurnId: string | null) => {
       let event = incoming;
+      const terminal = turnDoneState(incoming);
+      if (terminal) {
+        setActivity(null);
+        if (
+          terminal.status === "done" &&
+          terminal.output &&
+          typeof terminal.output === "object"
+        ) {
+          event = terminal.output as WireEvent;
+        }
+      }
       if (incoming.type === "model.message.delta") {
         const base = incoming.id
           ? eventStore.current.get(incoming.id)
@@ -653,10 +729,14 @@ export const useProducerAgent = (
       let stream = initialStream;
       for (let handoff = 0; handoff < 4; handoff += 1) {
         let turnId: string | null = null;
+        let sawTerminalEvent = false;
         const references: SandboxArtifactReference[] = [];
         for await (const envelope of stream.withMetadata()) {
           if (activeProjectId.current !== streamProjectId) return;
           const incoming = envelope.data as unknown as WireEvent;
+          if (incoming.type === "turn.done") sawTerminalEvent = true;
+          const terminalFailure = terminalFailureMessage(incoming);
+          if (terminalFailure) throw new Error(terminalFailure);
           if (incoming.type === "turn.created") {
             turnId = String(incoming.turnId ?? incoming.turn_id ?? "") || null;
           }
@@ -668,6 +748,11 @@ export const useProducerAgent = (
           if (event.type === "model.message") {
             references.push(...parseSandboxArtifactReferences(event.content));
           }
+        }
+        if (!sawTerminalEvent) {
+          throw new Error(
+            "Producer connection ended before the reply was complete.",
+          );
         }
         if (!turnId || references.length === 0 || !sessionId.current) return;
         const imported = await importSandboxOutputs(
@@ -774,7 +859,7 @@ export const useProducerAgent = (
       }) as { content?: string } | undefined;
       const instruction = restoredInstruction?.content
         ?.replace(/^PROJECT_ID:[^\n]+\n\n/, "")
-        .split("\n\nEDITOR_SELECTION")[0]
+        .split(/\n\nEDITOR_(?:TIMELINE|SELECTION)/)[0]
         ?.trim();
       if (
         instruction &&
@@ -861,16 +946,13 @@ export const useProducerAgent = (
             // Keep using the live in-memory session.
           }
         }
-        const selectionContext = input.selection
-          ? `\n\nEDITOR_SELECTION (exact current Studio scope):\n${JSON.stringify(input.selection)}`
-          : "";
         const stream = await trueforge.sessions.createTurnStream(
           sessionId.current,
           {
             input: [
               {
                 type: "user.message",
-                content: `PROJECT_ID: ${projectId}\n\n${input.instruction}${selectionContext}`,
+                content: createProducerUserMessage(projectId, input),
               },
             ],
           },
@@ -900,13 +982,17 @@ export const useProducerAgent = (
         });
         return { eventId };
       },
-      onError: (_error, _input, context) => {
+      onError: (error, _input, context) => {
         setActivity(null);
         if (!context) return;
         setEvents((current) =>
           current.map((item) =>
             item.id === context.eventId
-              ? { ...item, delivery: "failed" as const }
+              ? {
+                  ...item,
+                  detail: requestFailureMessage(error),
+                  delivery: "failed" as const,
+                }
               : item,
           ),
         );

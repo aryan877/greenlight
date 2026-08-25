@@ -1,12 +1,15 @@
 import {
   effectiveAudioTracks,
+  MIN_SCENE_DURATION_SECONDS,
   productionDurationSeconds,
   scenePresentationDurationSeconds,
   sceneStartSeconds,
   VIDEO_FPS,
   type Artifact,
   type ContentPackage,
+  type EditorPatchOperation,
   type EditorSelection,
+  type EditorTimelineContext,
   type Scene,
 } from "@greenlight/contracts";
 
@@ -16,28 +19,36 @@ export const sceneOffset = (scenes: Scene[], index: number) =>
 export const totalDuration = (content: ContentPackage) =>
   productionDurationSeconds(content.scenes);
 
+export const createTimelineContext = (input: {
+  projectId: string;
+  contentArtifactId: string;
+  content: ContentPackage;
+  playheadSeconds: number;
+}): EditorTimelineContext => ({
+  project_id: input.projectId,
+  content_package_artifact_id: input.contentArtifactId,
+  headline: input.content.headline,
+  duration_seconds: snapToFrame(totalDuration(input.content)),
+  playhead_seconds: snapToFrame(Math.max(0, input.playheadSeconds)),
+  scenes: input.content.scenes.map((scene, index) => {
+    const start = snapToFrame(sceneOffset(input.content.scenes, index));
+    return {
+      id: scene.id,
+      title: scene.title,
+      start_seconds: start,
+      end_seconds: snapToFrame(start + scene.duration_seconds),
+      gap_after_seconds: snapToFrame(scene.gap_after_seconds ?? 0),
+      playback_rate: scene.playback_rate,
+    };
+  }),
+});
+
 export const sceneTimelineDuration = (scenes: Scene[], index: number) => {
   return scenePresentationDurationSeconds(scenes, index);
 };
 
 export const snapToFrame = (seconds: number) =>
   Math.round(seconds * VIDEO_FPS) / VIDEO_FPS;
-
-export const snapTimelineSeconds = (
-  seconds: number,
-  pixelsPerSecond: number,
-  candidates: number[] = [],
-) => {
-  const frameTime = snapToFrame(seconds);
-  const thresholdSeconds = 7 / Math.max(pixelsPerSecond, 1);
-  const meaningful = [Math.round(frameTime), ...candidates]
-    .map(snapToFrame)
-    .filter((candidate) => Math.abs(candidate - frameTime) <= thresholdSeconds)
-    .sort(
-      (left, right) => Math.abs(left - frameTime) - Math.abs(right - frameTime),
-    );
-  return meaningful[0] ?? frameTime;
-};
 
 const TIMELINE_TICK_FRAMES = [
   1, 2, 5, 10, 15, 30, 60, 90, 150, 300, 450, 900, 1800,
@@ -74,6 +85,82 @@ export const formatTime = (seconds: number) => {
   return `${minutes}:${rest.toFixed(1).padStart(4, "0")}`;
 };
 
+export const changeSceneSpeed = (
+  scene: Scene,
+  playbackRate: number,
+): Extract<EditorPatchOperation, { type: "update_scene" }> => {
+  const nextRate = Math.max(0.5, Math.min(3, playbackRate));
+  const sourceSeconds = scene.source_clip
+    ? scene.source_clip.out_seconds - scene.source_clip.in_seconds
+    : scene.duration_seconds * scene.playback_rate;
+  const duration = Math.max(
+    MIN_SCENE_DURATION_SECONDS,
+    snapToFrame(sourceSeconds / nextRate),
+  );
+
+  return {
+    type: "update_scene",
+    scene_id: scene.id,
+    playback_rate: nextRate,
+    duration_seconds: duration,
+    gap_after_seconds: scene.gap_after_seconds ?? 0,
+  };
+};
+
+export const splitSceneAtPlayhead = (input: {
+  content: ContentPackage;
+  sceneId: string;
+  playheadSeconds: number;
+  secondSceneId: string;
+}): Extract<EditorPatchOperation, { type: "split_scene" }> | null => {
+  const index = input.content.scenes.findIndex(
+    (scene) => scene.id === input.sceneId,
+  );
+  const scene = input.content.scenes[index];
+  if (!scene || input.secondSceneId === scene.id) return null;
+  const localTime = snapToFrame(
+    input.playheadSeconds - sceneOffset(input.content.scenes, index),
+  );
+  const secondDuration = snapToFrame(scene.duration_seconds - localTime);
+  if (
+    localTime < MIN_SCENE_DURATION_SECONDS ||
+    secondDuration < MIN_SCENE_DURATION_SECONDS
+  ) {
+    return null;
+  }
+  const sourceBoundary = scene.source_clip
+    ? scene.source_clip.in_seconds + localTime * scene.playback_rate
+    : null;
+  const first: Scene = {
+    ...scene,
+    duration_seconds: localTime,
+    gap_after_seconds: 0,
+    ...(scene.source_clip && sourceBoundary !== null
+      ? {
+          source_clip: {
+            ...scene.source_clip,
+            out_seconds: sourceBoundary,
+          },
+        }
+      : {}),
+  };
+  const second: Scene = {
+    ...scene,
+    id: input.secondSceneId,
+    duration_seconds: secondDuration,
+    gap_after_seconds: scene.gap_after_seconds ?? 0,
+    ...(scene.source_clip && sourceBoundary !== null
+      ? {
+          source_clip: {
+            ...scene.source_clip,
+            in_seconds: sourceBoundary,
+          },
+        }
+      : {}),
+  };
+  return { type: "split_scene", scene_id: scene.id, first, second };
+};
+
 const sceneArtifacts = (scene: Scene) => [
   ...scene.visual.artifact_ids,
   ...(scene.narration_artifact_id ? [scene.narration_artifact_id] : []),
@@ -87,6 +174,7 @@ export const createSelection = (input: {
   content: ContentPackage;
   sceneIds: string[];
   gapAfterSceneIds?: string[];
+  playheadSeconds?: number;
   sourceLedgerArtifact: Artifact | null;
   extraArtifactIds?: string[];
 }): EditorSelection => {
@@ -135,6 +223,10 @@ export const createSelection = (input: {
       ...effectiveAudioTracks(input.content).map((track) => track.id),
     ],
     artifact_ids: artifactIds,
+    playhead_seconds:
+      input.playheadSeconds === undefined
+        ? null
+        : snapToFrame(Math.max(0, input.playheadSeconds)),
     time_range_seconds: {
       start: sceneOffset(input.content.scenes, first.index),
       end:

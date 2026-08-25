@@ -9,6 +9,53 @@ afterAll(() => {
 });
 
 describe("Producer event projection", () => {
+  it("sends the whole cut and keeps the current selection as emphasis", async () => {
+    const { createProducerUserMessage } = await import("./trueforge.js");
+    const message = createProducerUserMessage("project_greenlight", {
+      instruction: "Move the next clip before the selected one.",
+      timeline: {
+        project_id: "project_greenlight",
+        content_package_artifact_id: "artifact_content",
+        headline: "One cut",
+        duration_seconds: 4,
+        playhead_seconds: 1,
+        scenes: [
+          {
+            id: "scene_one",
+            title: "First",
+            start_seconds: 0,
+            end_seconds: 2,
+            gap_after_seconds: 0,
+            playback_rate: 1,
+          },
+          {
+            id: "scene_two",
+            title: "Second",
+            start_seconds: 2,
+            end_seconds: 4,
+            gap_after_seconds: 0,
+            playback_rate: 1,
+          },
+        ],
+      },
+      selection: {
+        project_id: "project_greenlight",
+        base_content_package_artifact_id: "artifact_content",
+        scene_ids: ["scene_one"],
+        track_ids: ["visual", "voice", "caption", "transcript"],
+        artifact_ids: [],
+        playhead_seconds: 1,
+        time_range_seconds: { start: 0, end: 2 },
+      },
+    });
+
+    expect(message.indexOf("EDITOR_TIMELINE")).toBeLessThan(
+      message.indexOf("EDITOR_SELECTION"),
+    );
+    expect(message).toContain('"id":"scene_two"');
+    expect(message).toContain("EDITOR_SELECTION (current emphasis)");
+  });
+
   it("keeps creator cancellation explicit when resuming a paused question", async () => {
     const { CREATOR_CANCELLED_QUESTION } = await import("./trueforge.js");
 
@@ -130,7 +177,30 @@ describe("Producer event projection", () => {
     expect(describeEvent(read("get_artifact"))).toEqual([]);
   });
 
-  it("keeps runtime identifiers and frame arithmetic out of creator copy", async () => {
+  it("reads the authoritative TrueForge terminal status", async () => {
+    const { terminalFailureMessage } = await import("./trueforge.js");
+
+    expect(
+      terminalFailureMessage({
+        type: "turn.done",
+        state: { status: "done", output: { type: "model.message" } },
+      }),
+    ).toBeNull();
+    expect(
+      terminalFailureMessage({
+        type: "turn.done",
+        state: { status: "error", error: "provider_unavailable" },
+      }),
+    ).toContain("couldn’t finish");
+    expect(
+      terminalFailureMessage({
+        type: "turn.done",
+        state: { status: "cancelled" },
+      }),
+    ).toContain("stopped");
+  });
+
+  it("keeps runtime identifiers out without swallowing a valid reply", async () => {
     const { describeEvent } = await import("./trueforge.js");
     const message = (content: string) => ({
       id: crypto.randomUUID(),
@@ -141,10 +211,10 @@ describe("Producer event projection", () => {
     expect(
       describeEvent(
         message(
-          "Got it — scene_open_hook uses artifact_123 from the current revision.",
+          "Got it — scene_open_hook uses artifact_123 from the current revision. The selected clip is ready to review.",
         ),
-      ),
-    ).toEqual([]);
+      )[0]?.label,
+    ).toBe("The selected clip is ready to review.");
     expect(
       describeEvent(
         message("Frame math confirmed: frames 0–78, gapAfter 5.0 seconds."),
@@ -153,6 +223,13 @@ describe("Producer event projection", () => {
     expect(
       describeEvent(message("Patch applied successfully."))[0]?.label,
     ).toBe("Change applied.");
+    expect(
+      describeEvent(
+        message(
+          "Yes — I can see the current cut: scene_open_hook at 4.000s (frames 0–120).",
+        ),
+      )[0]?.label,
+    ).toBe("Yes — I can see the current cut.");
     expect(
       describeEvent(
         message("The patch was cancelled. No changes were made."),

@@ -75,6 +75,12 @@ CREATE TABLE IF NOT EXISTS artifacts (
   UNIQUE(project_id, kind, sha256)
 );
 
+CREATE TABLE IF NOT EXISTS project_content_heads (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id),
+  artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS operations (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id),
@@ -282,6 +288,40 @@ export class GreenlightStore {
       )
       .get(projectId, kind) as ArtifactRow | undefined;
     return row ? toArtifact(row) : null;
+  }
+
+  getCurrentContentArtifact(projectId: string): Artifact | null {
+    const row = this.db
+      .prepare(
+        `SELECT artifacts.* FROM project_content_heads
+         JOIN artifacts ON artifacts.id = project_content_heads.artifact_id
+         WHERE project_content_heads.project_id = ?`,
+      )
+      .get(projectId) as ArtifactRow | undefined;
+    return row
+      ? toArtifact(row)
+      : this.getLatestArtifact(projectId, "content_package");
+  }
+
+  setCurrentContentArtifact(projectId: string, artifactId: string): Artifact {
+    const artifact = this.getArtifact(artifactId);
+    if (
+      !artifact ||
+      artifact.project_id !== projectId ||
+      artifact.kind !== "content_package"
+    ) {
+      throw new Error("invalid_content_revision");
+    }
+    this.db
+      .prepare(
+        `INSERT INTO project_content_heads (project_id, artifact_id, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(project_id) DO UPDATE SET
+           artifact_id = excluded.artifact_id,
+           updated_at = excluded.updated_at`,
+      )
+      .run(projectId, artifactId, now());
+    return artifact;
   }
 
   beginOperation(input: {

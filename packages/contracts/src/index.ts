@@ -3,6 +3,8 @@ import { z } from "zod";
 export const VIDEO_FPS = 30;
 export const MIN_SCENE_DURATION_SECONDS = 0.5;
 const FRAME_EPSILON_SECONDS = 1e-6;
+const snapSecondsToFrame = (seconds: number) =>
+  Math.round(seconds * VIDEO_FPS) / VIDEO_FPS;
 
 const frameAlignedSecondsSchema = z
   .number()
@@ -378,6 +380,45 @@ const primaryAudioClip = (scene: Scene): AudioTrack["clips"][number] => ({
   status: scene.narration_artifact_id ? "generated" : "draft",
 });
 
+const splitAudioClip = (
+  clip: AudioTrack["clips"][number],
+  first: Scene,
+  second: Scene,
+  originalDuration: number,
+): AudioTrack["clips"] => {
+  const splitAt = first.duration_seconds;
+  const startsAt = clip.start_offset_seconds;
+  const sourceDuration =
+    clip.source_out_seconds === null
+      ? originalDuration - startsAt
+      : (clip.source_out_seconds - clip.source_in_seconds) / clip.playback_rate;
+  const endsAt = startsAt + sourceDuration;
+  const secondId = `${clip.id.slice(0, 58)}_${second.id.slice(-32)}`;
+  if (startsAt >= splitAt) {
+    return [
+      {
+        ...clip,
+        id: secondId,
+        scene_id: second.id,
+        start_offset_seconds: snapSecondsToFrame(startsAt - splitAt),
+      },
+    ];
+  }
+  if (endsAt <= splitAt + 1 / VIDEO_FPS) return [clip];
+  const boundary =
+    clip.source_in_seconds + (splitAt - startsAt) * clip.playback_rate;
+  return [
+    { ...clip, source_out_seconds: boundary },
+    {
+      ...clip,
+      id: secondId,
+      scene_id: second.id,
+      start_offset_seconds: 0,
+      source_in_seconds: boundary,
+    },
+  ];
+};
+
 const primaryAudioTrack = (content: { scenes: Scene[] }): AudioTrack => ({
   id: "track_primary_voice",
   name: "Primary voice",
@@ -674,6 +715,10 @@ export const editorSelectionSchema = z
     scene_ids: z.array(idSchema).default([]),
     track_ids: z.array(editorTrackIdSchema).default([]),
     artifact_ids: z.array(idSchema).default([]),
+    playhead_seconds: frameAlignedSecondsSchema
+      .nonnegative()
+      .nullable()
+      .default(null),
     time_range_seconds: z
       .object({
         start: z.number().nonnegative(),
@@ -694,6 +739,24 @@ export const editorSelectionSchema = z
       });
     }
   });
+
+export const editorTimelineContextSchema = z.object({
+  project_id: idSchema,
+  content_package_artifact_id: idSchema,
+  headline: z.string().trim().min(1).max(100),
+  duration_seconds: frameAlignedSecondsSchema.nonnegative(),
+  playhead_seconds: frameAlignedSecondsSchema.nonnegative(),
+  scenes: z.array(
+    z.object({
+      id: idSchema,
+      title: z.string().trim().min(1).max(90),
+      start_seconds: frameAlignedSecondsSchema.nonnegative(),
+      end_seconds: frameAlignedSecondsSchema.nonnegative(),
+      gap_after_seconds: frameAlignedSecondsSchema.nonnegative(),
+      playback_rate: z.number().min(0.5).max(3),
+    }),
+  ),
+});
 
 export const editorFocusInputSchema = z.object({
   selection: editorSelectionSchema,
@@ -824,6 +887,7 @@ export type EditorFocusInput = z.infer<typeof editorFocusInputSchema>;
 export type SearchOpenMojiInput = z.infer<typeof searchOpenMojiInputSchema>;
 export type AttachOpenMojiInput = z.infer<typeof attachOpenMojiInputSchema>;
 export type EditorPatchOperation = z.infer<typeof editorPatchOperationSchema>;
+export type EditorTimelineContext = z.infer<typeof editorTimelineContextSchema>;
 export type EditorPatchInput = z.infer<typeof editorPatchInputSchema>;
 
 const requireScene = (scenes: Scene[], sceneId: string): number => {
@@ -939,7 +1003,10 @@ export const applyEditorPatch = (
         const requestedGap =
           operation.gap_after_seconds ??
           (current.gap_after_seconds ?? 0) + durationRemoved;
-        if (requestedDuration > current.duration_seconds) {
+        const rateStretch =
+          operation.playback_rate !== undefined &&
+          operation.duration_seconds !== undefined;
+        if (requestedDuration > current.duration_seconds && !rateStretch) {
           const source = operation.source_clip ?? current.source_clip;
           if (!source) throw new Error("scene_extension_has_no_source");
           const availableDuration =
@@ -1055,23 +1122,20 @@ export const applyEditorPatch = (
           throw new Error("split_scene_must_preserve_duration");
         }
         next.scenes.splice(index, 1, operation.first, operation.second);
-        const primaryTrack = next.audio_tracks?.find(
-          (track) => track.id === "track_primary_voice",
-        );
-        const primaryClipIndex = primaryTrack?.clips.findIndex(
-          (clip) => clip.scene_id === operation.scene_id,
-        );
-        if (
-          primaryTrack &&
-          primaryClipIndex !== undefined &&
-          primaryClipIndex >= 0
-        ) {
-          primaryTrack.clips.splice(
-            primaryClipIndex,
-            1,
-            primaryAudioClip(operation.first),
-            primaryAudioClip(operation.second),
-          );
+        if (next.audio_tracks) {
+          next.audio_tracks = next.audio_tracks.map((track) => ({
+            ...track,
+            clips: track.clips.flatMap((clip) =>
+              clip.scene_id === operation.scene_id
+                ? splitAudioClip(
+                    clip,
+                    operation.first,
+                    operation.second,
+                    current.duration_seconds,
+                  )
+                : [clip],
+            ),
+          }));
         }
         break;
       }

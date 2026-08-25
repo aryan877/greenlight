@@ -91,3 +91,24 @@ export const useApplyEditorPatch = (projectId: string | null) => {
     },
   });
 };
+
+export const useRestoreContentRevision = (projectId: string | null) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { baseArtifactId: string; targetArtifactId: string }) =>
+      greenlightApi.restoreContentRevision(
+        projectId!,
+        input.targetArtifactId,
+        input.baseArtifactId,
+      ),
+    onSuccess: async () => {
+      if (!projectId) return;
+      await Promise.all([
+        client.invalidateQueries({
+          queryKey: greenlightKeys.project(projectId),
+        }),
+        client.invalidateQueries({ queryKey: greenlightKeys.projects() }),
+      ]);
+    },
+  });
+};

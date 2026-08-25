@@ -2,21 +2,21 @@
 
 Greenlight is a TrueForge-native production agent inside a real, scene-based video editor. It researches and verifies a short YouTube story, creates editable media, renders it with Remotion, stages it as unlisted, and stops for a human before anything becomes public.
 
-The editor is the product surface. Selecting one or many scene bundles or gaps gives the Producer exact typed context—scene IDs, time range, media artifacts, transcript, and sources. Every edit becomes a reversible preview first. Direct manipulation uses immediate Apply or Cancel controls; agent-proposed changes use TrueForge's native approval event. Both persist through the same validated patch service.
+The editor is the product surface. The Producer receives a compact map of the complete current cut on every turn; selected scenes, gaps, and imported media are the creator's current emphasis. Manual controls edit immediately and stay undoable. Producer-authored changes highlight their target in the real timeline and use TrueForge's native approval event. Both persist through the same validated patch service.
 
 ## What works
 
 - TrueForge root agent with typed MCP tools, sandbox, dynamic subagents, streamed turns, and resumable approvals
 - Immutable projects and artifacts in SQLite plus content-addressed local files
 - Scene-bundle selection with no arbitrary selection or scene-count cap
-- Click, Shift/Cmd, and marquee multi-select across scene bundles and real gaps; local drag reorder and end-trim previews; timeline zoom, playback, mute, volume, and resizable/collapsible panes
+- Click, Shift/Cmd, and marquee multi-select across scene bundles and real gaps; immediate local reorder, trim, speed, split, track controls, and undo/redo; timeline zoom, playback, mute, volume, and resizable/collapsible panes
 - Project history and new-project creation backed by the saved SQLite workspace, with managed paths and artifact counts
 - A creator-media bin with measured size, duration, dimensions and codecs; full image/audio/video viewers; signature-checked import; click/drag attachment; and direct file drop into Producer
-- Agent-driven Studio focus through `focus_editor_selection`
-- One shared Zod patch contract and reducer for Studio preview and MCP persistence
+- Agent-driven Studio focus through `focus_editor_selection`, plus readable scene references dragged directly into the composer
+- One shared Zod patch contract, reducer, and revision service for direct Studio edits and Producer proposals
 - Frame-aligned, edge-to-edge video, named audio, and caption lanes with explicit gaps, source handles, adaptive ruler ticks, and a continuous zoom range
 - Scene-sized primary narration, dub, music, and effects clips with track names, BCP-47 locales, gain, mute, solo, and export inclusion; Remotion mixes only the enabled tracks
-- One compact before/after media preview for trims, splits, speed changes, ranges, and other typed patches, with Apply, Refine, and Cancel
+- Producer proposals preview trims, splits, speed changes, ranges, captions, and gaps on Program and the real timeline; chat stays concise with Apply, Refine, and Cancel
 - OpenMoji search and attachment with licensed SVG provenance
 - Optional bounded Codex-subscription image generation; GPT Image API routes stay disabled
 - Per-scene multilingual voice through one production route—OpenRouter to Gemini TTS—with an in-chat voice audition card and complete model, voice, locale, and artifact provenance
@@ -97,7 +97,7 @@ The suite covers contracts, scoped patch safety, storage, voice conversion, tran
 - Generated narration is never given estimated word timing.
 - YouTube uploads are unlisted first.
 - TrueForge authenticates to the MCP service with a private header; the Studio never receives that credential.
-- Agent calls to `apply_editor_patch`, render, upload, publish, and schedule are TrueForge approval-gated. Direct timeline edits require an explicit local Apply and never invoke the model.
+- Agent calls to `apply_editor_patch`, render, upload, publish, and schedule are TrueForge approval-gated. Direct timeline edits commit immediately into local undo history and never invoke the model.
 - Publish and schedule atomically claim an unlisted release before contacting YouTube, preventing concurrent release attempts.
 - Public release rechecks the exact immutable snapshot and configured channel allowlist.
 - There is no delete-video tool.

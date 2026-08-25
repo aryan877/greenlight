@@ -19,8 +19,8 @@ Success means one 30–120 second production can move from brief to unlisted rev
 1. The timeline is primary; chat is the command surface beside it.
 2. A scene is one bundle: visual, narration, timed transcript, captions, timing, locale, and sources.
 3. Any number of scene bundles may be selected. Selection is typed context, never a file path.
-4. Agent and manual edits use one patch format, one preview, and one approval path.
-5. Preview is exact: Studio runs the same reducer the MCP tool will persist.
+4. Agent and manual edits use one patch format and one immutable revision model. Manual editor controls apply immediately and remain undoable; Producer-authored mutations preview before approval.
+5. Agent preview is exact: Studio runs the same reducer the MCP tool will persist.
 6. Word edits use measured transcript timing; generated timing is not guessed.
 7. Evidence precedes factual narration.
 8. Media provenance is immutable.
@@ -46,13 +46,16 @@ The visual language is a distinct light editorial system: Archivo plus IBM Plex 
 - Clicking the production title selects the whole cut.
 - The composer shows compact removable scene chips and a count for overflow; this never limits actual selection.
 - The serialized selection contains project, base revision, ordered scene IDs, bundled track IDs, artifact IDs, source ledger ID when relevant, and the exact time range.
+- Every Producer turn also carries a compact `EDITOR_TIMELINE` map of the complete current cut. `EDITOR_SELECTION` is the creator's current emphasis, not the agent's only context.
+- Dragging a scene into the composer appends a readable inline mention, preserves existing draft text, and attaches that scene's typed context.
 - The Producer may call `focus_editor_selection` to move Studio to the scenes it is discussing.
 - A creator may import supported local media. Greenlight copies it into the project workspace, shows it in the media browser, and adds the chosen artifact to Producer context without revealing a host path.
 
 ### Editing
 
 - Natural language may change one field, multiple fields, several scenes, or the full cut.
-- Drag reorder and end trim send exact instructions with typed selection to TrueForge.
+- Drag reorder, end trim, speed, split, track controls, scrubbing, and undo/redo run directly in Studio without invoking TrueForge.
+- The Producer may operate the same commands when asked; it first focuses its interpreted target in the real timeline and asks one concise question only when the target is ambiguous.
 - Split, remove, speed, localized track, visual, voice, caption, transcript, timing, and order changes are typed patch operations.
 - Scene and gap timing is validated against the 30-fps production grid.
 - Shortening preserves the removed frames as an explicit gap unless a separate structural edit resolves them.
@@ -65,7 +68,7 @@ When the Producer calls `apply_editor_patch`, TrueForge pauses the tool. Studio 
 
 - changed scenes are hatched;
 - changed visuals/text render on the canvas;
-- the compact approval card embeds the affected real video range, exact cut/trim marker, before/after structure, caption, and timing delta;
+- Program and the timeline show the affected real range, exact cut/trim marker, before/after structure, caption, and timing delta; chat never duplicates a mini editor;
 - timing preview constrains playback and speed preview changes the actual preview rate;
 - approval copy names the scenes and human fields, not protocol/tool jargon;
 - Apply resumes the exact TrueForge tool call;
@@ -82,7 +85,7 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 5. Attach license-compatible OpenMoji or explicitly selected generated/user media.
 6. Generate narration scene by scene.
 7. Transcribe narration for editable word timing and measured captions.
-8. Preview and approve scoped revisions.
+8. Preview and approve Producer-authored scoped revisions; creator gestures remain immediate and undoable.
 9. Render the exact immutable package with Remotion.
 10. Run deterministic duration, frame, audio, evidence, and metadata checks.
 11. Upload the verified artifact as unlisted with title, description, tags, disclosure, and thumbnail.

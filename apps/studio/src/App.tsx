@@ -1,7 +1,7 @@
 import {
   applyEditorPatch,
   editorPatchInputSchema,
-  type EditorPatchInput,
+  type ContentPackage,
   type EditorPatchOperation,
   type EditorFocusInput,
   type EditorSelection,
@@ -13,7 +13,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useProducerAgent } from "./api/trueforge.js";
 import {
@@ -22,6 +22,7 @@ import {
   useCreateProject,
   useProject,
   useProjects,
+  useRestoreContentRevision,
   useUploadAsset,
 } from "./api/queries.js";
 import {
@@ -37,9 +38,30 @@ import { ProgramMonitor } from "./components/ProgramMonitor.js";
 import { ProjectSwitcher } from "./components/ProjectSwitcher.js";
 import { MediaBrowser } from "./components/MediaBrowser.js";
 import { Timeline } from "./components/Timeline.js";
-import { createSelection, sceneOffset } from "./editor/model.js";
+import {
+  changeSceneSpeed,
+  createSelection,
+  createTimelineContext,
+  sceneOffset,
+  splitSceneAtPlayhead,
+  totalDuration,
+} from "./editor/model.js";
+import type { ProducerDraftIntent } from "./editor/producer-draft.js";
 import { useMediaController } from "./editor/use-media-controller.js";
 import { useWorkspaceLayout } from "./editor/use-workspace-layout.js";
+
+type DirectRevision = {
+  artifactId: string;
+  content: ContentPackage;
+};
+
+type HistoryEntry = {
+  beforeArtifactId: string;
+  beforeContent: ContentPackage;
+  afterArtifactId: string;
+  afterContent: ContentPackage;
+  summary: string;
+};
 
 export const App = () => {
   const projects = useProjects();
@@ -49,14 +71,20 @@ export const App = () => {
   const [selectedGapAfterSceneIds, setSelectedGapAfterSceneIds] = useState<
     string[]
   >([]);
-  const [manualPatch, setManualPatch] = useState<EditorPatchInput | null>(null);
+  const [directRevision, setDirectRevision] = useState<DirectRevision | null>(
+    null,
+  );
+  const undoStack = useRef<HistoryEntry[]>([]);
+  const redoStack = useRef<HistoryEntry[]>([]);
+  const lastDirectArtifactId = useRef<string | null>(null);
+  const previousContentArtifactId = useRef<string | null>(null);
+  const [historySize, setHistorySize] = useState({ undo: 0, redo: 0 });
   const [rightTab, setRightTab] = useState<"producer" | "details">("producer");
   const [attachedArtifactIds, setAttachedArtifactIds] = useState<string[]>([]);
   const [importError, setImportError] = useState<string | null>(null);
-  const [draftIntent, setDraftIntent] = useState<{
-    id: string;
-    text: string;
-  } | null>(null);
+  const [draftIntent, setDraftIntent] = useState<ProducerDraftIntent | null>(
+    null,
+  );
   const layout = useWorkspaceLayout();
   const media = useMediaController();
 
@@ -66,11 +94,18 @@ export const App = () => {
 
   const project = useProject(projectId);
   const uploadAsset = useUploadAsset(projectId);
-  const applyManualPatch = useApplyEditorPatch(projectId);
+  const applyDirectPatch = useApplyEditorPatch(projectId);
+  const restoreRevision = useRestoreContentRevision(projectId);
   const contentArtifact =
+    project.data?.artifacts.find(
+      (artifact) =>
+        artifact.id ===
+        project.data?.project.current_content_package_artifact_id,
+    ) ??
     project.data?.artifacts
       .filter((artifact) => artifact.kind === "content_package")
-      .at(-1) ?? null;
+      .at(-1) ??
+    null;
   const evidenceArtifact =
     project.data?.artifacts
       .filter((artifact) => artifact.kind === "evidence_ledger")
@@ -94,52 +129,94 @@ export const App = () => {
       )
       .at(-1) ?? null;
   const content = useContentPackage(contentArtifact?.id ?? null);
+  const editorArtifactId =
+    directRevision?.artifactId ?? contentArtifact?.id ?? null;
+  const editorContent = directRevision?.content ?? content.data ?? null;
+
+  const updateHistorySize = useCallback(() => {
+    setHistorySize({
+      undo: undoStack.current.length,
+      redo: redoStack.current.length,
+    });
+  }, []);
+
+  useEffect(() => {
+    const nextId = contentArtifact?.id ?? null;
+    const previousId = previousContentArtifactId.current;
+    previousContentArtifactId.current = nextId;
+    if (!nextId || nextId === previousId) return;
+    if (nextId !== lastDirectArtifactId.current && previousId) {
+      undoStack.current = [];
+      redoStack.current = [];
+      updateHistorySize();
+    }
+    if (directRevision?.artifactId === nextId && content.data) {
+      setDirectRevision(null);
+    }
+  }, [
+    content.data,
+    contentArtifact?.id,
+    directRevision?.artifactId,
+    updateHistorySize,
+  ]);
 
   useEffect(() => {
     if (
-      content.data?.scenes[0] &&
+      editorContent?.scenes[0] &&
       (selectedSceneIds.length === 0 ||
         selectedSceneIds.some(
           (sceneId) =>
-            !content.data.scenes.some((scene) => scene.id === sceneId),
+            !editorContent.scenes.some((scene) => scene.id === sceneId),
         ))
     ) {
-      setSelectedSceneIds([content.data.scenes[0].id]);
+      setSelectedSceneIds([editorContent.scenes[0].id]);
     }
-  }, [content.data, selectedSceneIds]);
+  }, [editorContent, selectedSceneIds]);
 
   const selectedScene =
-    content.data?.scenes.find(
+    editorContent?.scenes.find(
       (scene) => scene.id === selectedSceneIds.at(-1),
     ) ?? null;
 
   const selection = useMemo<EditorSelection | null>(() => {
     if (
       !projectId ||
-      !contentArtifact ||
-      !content.data ||
+      !editorArtifactId ||
+      !editorContent ||
       selectedSceneIds.length === 0
     ) {
       return null;
     }
     return createSelection({
       projectId,
-      contentArtifactId: contentArtifact.id,
-      content: content.data,
+      contentArtifactId: editorArtifactId,
+      content: editorContent,
       sceneIds: selectedSceneIds,
       gapAfterSceneIds: selectedGapAfterSceneIds,
+      playheadSeconds: media.currentTime,
       sourceLedgerArtifact: evidenceArtifact,
       extraArtifactIds: attachedArtifactIds,
     });
   }, [
-    content.data,
-    contentArtifact,
+    editorContent,
+    editorArtifactId,
     evidenceArtifact,
     projectId,
     selectedSceneIds,
     selectedGapAfterSceneIds,
     attachedArtifactIds,
+    media.currentTime,
   ]);
+
+  const timelineContext = useMemo(() => {
+    if (!projectId || !editorArtifactId || !editorContent) return null;
+    return createTimelineContext({
+      projectId,
+      contentArtifactId: editorArtifactId,
+      content: editorContent,
+      playheadSeconds: media.currentTime,
+    });
+  }, [editorArtifactId, editorContent, media.currentTime, projectId]);
 
   useEffect(() => {
     setAttachedArtifactIds([]);
@@ -150,25 +227,28 @@ export const App = () => {
     (focus: EditorFocusInput) => {
       if (
         focus.selection.project_id !== projectId ||
-        !content.data ||
+        !editorContent ||
         !focus.selection.scene_ids[0]
       ) {
         return;
       }
-      const sceneIndex = content.data.scenes.findIndex(
+      const sceneIndex = editorContent.scenes.findIndex(
         (scene) => scene.id === focus.selection.scene_ids[0],
       );
       if (sceneIndex < 0) return;
       const validSceneIds = focus.selection.scene_ids.filter((sceneId) =>
-        content.data.scenes.some((scene) => scene.id === sceneId),
+        editorContent.scenes.some((scene) => scene.id === sceneId),
       );
       if (validSceneIds.length === 0) return;
       setSelectedSceneIds(validSceneIds);
       setRightTab("producer");
       layout.setRightOpen(true);
-      media.seek(sceneOffset(content.data.scenes, sceneIndex));
+      media.seek(
+        focus.selection.playhead_seconds ??
+          sceneOffset(editorContent.scenes, sceneIndex),
+      );
     },
-    [content.data, layout, media, projectId],
+    [editorContent, layout, media, projectId],
   );
 
   const producer = useProducerAgent(projectId, focusFromAgent);
@@ -181,21 +261,31 @@ export const App = () => {
     const parsed = editorPatchInputSchema.safeParse(pending.arguments);
     return parsed.success ? parsed.data : null;
   }, [producer.pendingApprovals]);
-  const previewPatch = manualPatch ?? agentPreviewPatch;
+  const previewPatch = agentPreviewPatch;
 
   useEffect(() => {
-    setManualPatch(null);
     setSelectedGapAfterSceneIds([]);
-  }, [contentArtifact?.id, projectId]);
+    undoStack.current = [];
+    redoStack.current = [];
+    setHistorySize({ undo: 0, redo: 0 });
+    setDirectRevision(null);
+    lastDirectArtifactId.current = null;
+  }, [projectId]);
 
   const previewContent = useMemo(() => {
-    if (!content.data || !previewPatch) return null;
+    if (!editorContent || !previewPatch) return null;
+    if (
+      previewPatch.selection.base_content_package_artifact_id !==
+      editorArtifactId
+    ) {
+      return null;
+    }
     try {
-      return applyEditorPatch(content.data, previewPatch);
+      return applyEditorPatch(editorContent, previewPatch);
     } catch {
       return null;
     }
-  }, [content.data, previewPatch]);
+  }, [editorArtifactId, editorContent, previewPatch]);
 
   const previewSceneIds = useMemo(
     () =>
@@ -224,11 +314,29 @@ export const App = () => {
     [previewPatch],
   );
 
-  const visibleContent = previewContent ?? content.data ?? null;
-  const visibleScene =
-    visibleContent?.scenes.find(
-      (scene) => scene.id === selectedSceneIds.at(-1),
-    ) ?? selectedScene;
+  const visibleContent = previewContent ?? editorContent;
+  const programDuration = visibleContent ? totalDuration(visibleContent) : 0;
+  const visibleScene = useMemo(() => {
+    if (!visibleContent) return selectedScene;
+    const exact = visibleContent.scenes.find((scene, index) => {
+      const start = sceneOffset(visibleContent.scenes, index);
+      return (
+        media.currentTime >= start &&
+        media.currentTime < start + scene.duration_seconds
+      );
+    });
+    if (exact) return exact;
+    return (
+      [...visibleContent.scenes].reverse().find((scene) => {
+        const index = visibleContent.scenes.findIndex(
+          (candidate) => candidate.id === scene.id,
+        );
+        return sceneOffset(visibleContent.scenes, index) <= media.currentTime;
+      }) ??
+      visibleContent.scenes[0] ??
+      selectedScene
+    );
+  }, [media.currentTime, selectedScene, visibleContent]);
 
   useEffect(() => {
     if (!previewPatch?.selection.time_range_seconds) {
@@ -249,50 +357,195 @@ export const App = () => {
     (text: string) => {
       setRightTab("producer");
       layout.setRightOpen(true);
-      setDraftIntent({ id: crypto.randomUUID(), text });
+      setDraftIntent({ id: crypto.randomUUID(), text, mode: "replace" });
     },
     [layout],
   );
 
-  const previewEditorOperations = useCallback(
-    (
-      sceneIds: string[],
-      operations: EditorPatchOperation[],
-      instructionSummary: string,
-    ) => {
-      if (!projectId || !contentArtifact || !content.data) return;
-      const commandSelection = createSelection({
+  const persistDirectOperations = useCallback(
+    async (input: {
+      sceneIds: string[];
+      gapAfterSceneIds: string[];
+      operations: EditorPatchOperation[];
+      summary: string;
+      recordHistory: boolean;
+    }) => {
+      if (
+        !projectId ||
+        !editorArtifactId ||
+        !editorContent ||
+        applyDirectPatch.isPending ||
+        previewPatch
+      ) {
+        return false;
+      }
+      const selection = createSelection({
         projectId,
-        contentArtifactId: contentArtifact.id,
-        content: content.data,
-        sceneIds,
-        gapAfterSceneIds: selectedGapAfterSceneIds,
+        contentArtifactId: editorArtifactId,
+        content: editorContent,
+        sceneIds: input.sceneIds,
+        gapAfterSceneIds: input.gapAfterSceneIds,
+        playheadSeconds: media.currentTime,
         sourceLedgerArtifact: evidenceArtifact,
       });
-      setSelectedSceneIds(sceneIds);
-      setRightTab("producer");
-      layout.setRightOpen(true);
-      setManualPatch(
-        editorPatchInputSchema.parse({
-          instruction_summary: instructionSummary,
-          operations,
-          selection: commandSelection,
-        }),
-      );
+      const patch = editorPatchInputSchema.parse({
+        instruction_summary: input.summary,
+        operations: input.operations,
+        selection,
+      });
+      const revised = applyEditorPatch(editorContent, patch);
+      const previousRevision = directRevision;
+      setDirectRevision({ artifactId: editorArtifactId, content: revised });
+      try {
+        const result = await applyDirectPatch.mutateAsync(patch);
+        const nextArtifactId = result.content_package_artifact.id;
+        lastDirectArtifactId.current = nextArtifactId;
+        setDirectRevision({ artifactId: nextArtifactId, content: revised });
+        if (input.recordHistory) {
+          undoStack.current.push({
+            beforeArtifactId: editorArtifactId,
+            beforeContent: editorContent,
+            afterArtifactId: nextArtifactId,
+            afterContent: revised,
+            summary: input.summary,
+          });
+          redoStack.current = [];
+          updateHistorySize();
+        }
+        return true;
+      } catch {
+        setDirectRevision(previousRevision);
+        return false;
+      }
     },
     [
-      content.data,
-      contentArtifact,
+      applyDirectPatch,
+      directRevision,
+      editorArtifactId,
+      editorContent,
       evidenceArtifact,
-      layout,
+      media.currentTime,
+      previewPatch,
       projectId,
-      selectedGapAfterSceneIds,
+      updateHistorySize,
     ],
   );
 
+  const applyDirectOperations = useCallback(
+    (
+      sceneIds: string[],
+      operations: EditorPatchOperation[],
+      summary: string,
+    ) => {
+      void persistDirectOperations({
+        sceneIds,
+        gapAfterSceneIds: selectedGapAfterSceneIds,
+        operations,
+        summary,
+        recordHistory: true,
+      });
+    },
+    [persistDirectOperations, selectedGapAfterSceneIds],
+  );
+
+  const cutAtPlayhead = useCallback(
+    (sceneId: string) => {
+      if (!editorContent) return;
+      const operation = splitSceneAtPlayhead({
+        content: editorContent,
+        sceneId,
+        playheadSeconds: media.currentTime,
+        secondSceneId: `scene_cut_${crypto.randomUUID()}`,
+      });
+      if (!operation) return;
+      applyDirectOperations(
+        [sceneId],
+        [operation],
+        `Cut “${operation.first.title}” at the playhead`,
+      );
+    },
+    [applyDirectOperations, editorContent, media.currentTime],
+  );
+
+  const undo = useCallback(async () => {
+    const entry = undoStack.current.pop();
+    if (!entry || !editorArtifactId || restoreRevision.isPending) return;
+    updateHistorySize();
+    const previousRevision = directRevision;
+    setDirectRevision({
+      artifactId: editorArtifactId,
+      content: entry.beforeContent,
+    });
+    try {
+      const result = await restoreRevision.mutateAsync({
+        baseArtifactId: editorArtifactId,
+        targetArtifactId: entry.beforeArtifactId,
+      });
+      lastDirectArtifactId.current = result.content_package_artifact.id;
+      setDirectRevision({
+        artifactId: result.content_package_artifact.id,
+        content: entry.beforeContent,
+      });
+      redoStack.current.push(entry);
+    } catch {
+      setDirectRevision(previousRevision);
+      undoStack.current.push(entry);
+    }
+    updateHistorySize();
+  }, [directRevision, editorArtifactId, restoreRevision, updateHistorySize]);
+
+  const redo = useCallback(async () => {
+    const entry = redoStack.current.pop();
+    if (!entry || !editorArtifactId || restoreRevision.isPending) return;
+    updateHistorySize();
+    const previousRevision = directRevision;
+    setDirectRevision({
+      artifactId: editorArtifactId,
+      content: entry.afterContent,
+    });
+    try {
+      const result = await restoreRevision.mutateAsync({
+        baseArtifactId: editorArtifactId,
+        targetArtifactId: entry.afterArtifactId,
+      });
+      lastDirectArtifactId.current = result.content_package_artifact.id;
+      setDirectRevision({
+        artifactId: result.content_package_artifact.id,
+        content: entry.afterContent,
+      });
+      undoStack.current.push(entry);
+    } catch {
+      setDirectRevision(previousRevision);
+      redoStack.current.push(entry);
+    }
+    updateHistorySize();
+  }, [directRevision, editorArtifactId, restoreRevision, updateHistorySize]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.matches("input, textarea, [contenteditable='true']") ||
+        !(event.metaKey || event.ctrlKey)
+      ) {
+        return;
+      }
+      if (event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) void redo();
+        else void undo();
+      } else if (event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        void redo();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [redo, undo]);
+
   const selectScene = (sceneId: string, additive = false) => {
-    if (!content.data) return;
-    const index = content.data.scenes.findIndex(
+    if (!editorContent) return;
+    const index = editorContent.scenes.findIndex(
       (scene) => scene.id === sceneId,
     );
     if (index < 0) return;
@@ -302,19 +555,17 @@ export const App = () => {
         const next = current.filter((id) => id !== sceneId);
         return next.length > 0 ? next : [sceneId];
       }
-      return content
-        .data!.scenes.filter((scene) =>
-          [...current, sceneId].includes(scene.id),
-        )
+      return editorContent.scenes
+        .filter((scene) => [...current, sceneId].includes(scene.id))
         .map((scene) => scene.id);
     });
     if (!additive) setSelectedGapAfterSceneIds([]);
-    media.seek(sceneOffset(content.data.scenes, index));
+    media.seek(sceneOffset(editorContent.scenes, index));
   };
 
   const selectScenes = (sceneIds: string[]) => {
-    if (!content.data) return;
-    const ordered = content.data.scenes
+    if (!editorContent) return;
+    const ordered = editorContent.scenes
       .filter((scene) => sceneIds.includes(scene.id))
       .map((scene) => scene.id);
     if (ordered.length === 0) return;
@@ -322,25 +573,23 @@ export const App = () => {
     setSelectedGapAfterSceneIds((current) =>
       current.filter((sceneId) => ordered.includes(sceneId)),
     );
-    const first = content.data.scenes.findIndex(
+    const first = editorContent.scenes.findIndex(
       (scene) => scene.id === ordered[0],
     );
-    if (first >= 0) media.seek(sceneOffset(content.data.scenes, first));
+    if (first >= 0) media.seek(sceneOffset(editorContent.scenes, first));
   };
 
   const selectGap = (sceneId: string, additive = false) => {
-    if (!content.data) return;
-    const index = content.data.scenes.findIndex(
+    if (!editorContent) return;
+    const index = editorContent.scenes.findIndex(
       (scene) => scene.id === sceneId,
     );
-    const scene = content.data.scenes[index];
+    const scene = editorContent.scenes[index];
     if (!scene?.gap_after_seconds) return;
     setSelectedSceneIds((current) =>
       additive
-        ? content
-            .data!.scenes.filter((item) =>
-              [...current, sceneId].includes(item.id),
-            )
+        ? editorContent.scenes
+            .filter((item) => [...current, sceneId].includes(item.id))
             .map((item) => item.id)
         : [sceneId],
     );
@@ -352,7 +601,7 @@ export const App = () => {
         : [sceneId],
     );
     media.seek(
-      sceneOffset(content.data.scenes, index) + scene.duration_seconds,
+      sceneOffset(editorContent.scenes, index) + scene.duration_seconds,
     );
     setRightTab("producer");
     layout.setRightOpen(true);
@@ -487,6 +736,7 @@ export const App = () => {
             video={videoArtifact}
             poster={thumbnailArtifact}
             media={media}
+            duration={programDuration}
             previewing={Boolean(previewContent)}
             previewUsesCanvas={Boolean(
               previewPatch?.operations.some(
@@ -512,9 +762,9 @@ export const App = () => {
                 className="shrink-0 overflow-hidden"
                 style={{ height: layout.timelineHeight }}
               >
-                {content.data && selectedSceneIds.length > 0 ? (
+                {editorContent && selectedSceneIds.length > 0 ? (
                   <Timeline
-                    content={visibleContent ?? content.data}
+                    content={visibleContent ?? editorContent}
                     selectedSceneIds={selectedSceneIds}
                     selectedGapAfterSceneIds={selectedGapAfterSceneIds}
                     previewSceneIds={previewSceneIds}
@@ -532,14 +782,48 @@ export const App = () => {
                     }}
                     onSeek={media.seek}
                     onIntent={directProducer}
-                    onPreviewEdit={previewEditorOperations}
+                    onDirectEdit={applyDirectOperations}
+                    onCutAtPlayhead={cutAtPlayhead}
+                    onAttachSceneToProducer={(sceneId) => {
+                      const scene = editorContent.scenes.find(
+                        (candidate) => candidate.id === sceneId,
+                      );
+                      if (!scene) return;
+                      setSelectedSceneIds((current) =>
+                        editorContent.scenes
+                          .filter((candidate) =>
+                            [...current, sceneId].includes(candidate.id),
+                          )
+                          .map((candidate) => candidate.id),
+                      );
+                      media.seek(
+                        sceneOffset(
+                          editorContent.scenes,
+                          editorContent.scenes.findIndex(
+                            (candidate) => candidate.id === sceneId,
+                          ),
+                        ),
+                      );
+                      setRightTab("producer");
+                      layout.setRightOpen(true);
+                      setDraftIntent({
+                        id: crypto.randomUUID(),
+                        text: `@“${scene.title}”`,
+                        mode: "append",
+                      });
+                    }}
                     onSelectGap={selectGap}
                     onSelectAll={() =>
                       setSelectedSceneIds(
-                        content.data!.scenes.map((scene) => scene.id),
+                        editorContent.scenes.map((scene) => scene.id),
                       )
                     }
                     onCollapse={() => layout.setTimelineOpen(false)}
+                    canUndo={historySize.undo > 0}
+                    canRedo={historySize.redo > 0}
+                    editing={applyDirectPatch.isPending}
+                    onUndo={() => void undo()}
+                    onRedo={() => void redo()}
                   />
                 ) : null}
               </div>
@@ -591,7 +875,7 @@ export const App = () => {
                 >
                   <ProducerPanel
                     projectId={projectId}
-                    content={content.data ?? null}
+                    content={editorContent}
                     artifacts={project.data?.artifacts ?? []}
                     selection={selection}
                     contextArtifacts={(project.data?.artifacts ?? []).filter(
@@ -602,15 +886,16 @@ export const App = () => {
                     activity={producer.activity}
                     pendingApprovals={producer.pendingApprovals}
                     pendingQuestions={producer.pendingQuestions}
-                    manualPatch={manualPatch}
-                    manualPatchError={applyManualPatch.error}
-                    manualPatchSaving={applyManualPatch.isPending}
                     selectedGapAfterSceneIds={selectedGapAfterSceneIds}
                     isSending={producer.isSending}
                     isApproving={producer.isApproving}
                     isAnswering={producer.isAnswering}
                     onSend={(instruction) =>
-                      producer.send({ instruction, selection })
+                      producer.send({
+                        instruction,
+                        selection,
+                        timeline: timelineContext,
+                      })
                     }
                     onRetryInstruction={producer.retryInstruction}
                     onApproval={(pending, status, reason) =>
@@ -620,13 +905,6 @@ export const App = () => {
                       producer.answerQuestion({ pending, answer })
                     }
                     onCancelQuestion={producer.cancelQuestion}
-                    onApplyManualPatch={() => {
-                      if (!manualPatch) return;
-                      applyManualPatch.mutate(manualPatch, {
-                        onSuccess: () => setManualPatch(null),
-                      });
-                    }}
-                    onCancelManualPatch={() => setManualPatch(null)}
                     onRemoveScene={(sceneId) =>
                       setSelectedSceneIds((current) => {
                         const next = current.filter((id) => id !== sceneId);
@@ -650,6 +928,14 @@ export const App = () => {
                 >
                   <InspectorPanel
                     scene={visibleScene}
+                    editing={applyDirectPatch.isPending}
+                    onChangeSpeed={(scene, playbackRate) =>
+                      applyDirectOperations(
+                        [scene.id],
+                        [changeSceneSpeed(scene, playbackRate)],
+                        `Set “${scene.title}” to ${playbackRate.toFixed(2)}×`,
+                      )
+                    }
                     onEdit={(instruction) => directProducer(instruction)}
                   />
                 </div>

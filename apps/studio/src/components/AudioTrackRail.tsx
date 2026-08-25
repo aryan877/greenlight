@@ -1,9 +1,11 @@
 import type { AudioTrack, Scene } from "@greenlight/contracts";
 import {
   Captions,
-  Download,
+  Headphones,
   Layers3,
   Mic2,
+  PackageCheck,
+  PackageX,
   Plus,
   Volume2,
   VolumeX,
@@ -19,30 +21,31 @@ const affectedSceneIds = (track: AudioTrack, scenes: Scene[]) => {
 export const AudioTrackRail = ({
   audioTracks,
   height,
-  onEditorCommand,
+  onChangeTrack,
+  onRequestTrack,
   scenes,
 }: {
   audioTracks: AudioTrack[];
   height: number;
-  onEditorCommand: (sceneIds: string[], instruction: string) => void;
+  onChangeTrack: (
+    sceneIds: string[],
+    track: AudioTrack,
+    summary: string,
+  ) => void;
+  onRequestTrack: () => void;
   scenes: Scene[];
 }) => (
   <div
-    className="sticky left-0 top-0 z-40 w-36 border-r border-line-subtle bg-surface"
+    className="sticky left-3 top-0 z-40 w-36 border-x border-line-subtle bg-surface"
     style={{ height }}
   >
     <div className="flex h-7 items-center justify-between border-b border-line-subtle px-2.5 text-[9px] font-medium text-ink-tertiary">
       <span>Tracks</span>
       <IconButton
         Icon={Plus}
-        label="Add an audio track with Producer"
+        label="Add an audio track"
         size="sm"
-        onClick={() =>
-          onEditorCommand(
-            scenes.map((scene) => scene.id),
-            "Add one named audio track for this production. Ask which role, locale, and voice I want if they are not clear. Keep it as scene-sized clips aligned to the existing cut and show the track patch before generating media.",
-          )
-        }
+        onClick={onRequestTrack}
       />
     </div>
     <div className="flex h-8 items-center gap-2 border-b border-line-subtle px-2.5 text-[9px] font-medium">
@@ -71,9 +74,10 @@ export const AudioTrackRail = ({
               track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`
             }
             onClick={() =>
-              onEditorCommand(
+              onChangeTrack(
                 sceneIds,
-                `Set audio track ${track.id} (${track.name}) muted to ${String(!track.muted)}. Change only that track setting and show the preview before applying it.`,
+                { ...track, muted: !track.muted },
+                track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`,
               )
             }
           >
@@ -85,20 +89,19 @@ export const AudioTrackRail = ({
               "grid size-5 shrink-0 place-items-center text-[8px] font-semibold hover:bg-surface-sunken",
               track.solo && "bg-track-voice text-track-voice-strong",
             )}
-            title={
-              track.solo ? `Clear solo on ${track.name}` : `Solo ${track.name}`
-            }
+            title={track.solo ? `Hear every track` : `Hear only ${track.name}`}
             aria-label={
-              track.solo ? `Clear solo on ${track.name}` : `Solo ${track.name}`
+              track.solo ? `Hear every track` : `Hear only ${track.name}`
             }
             onClick={() =>
-              onEditorCommand(
+              onChangeTrack(
                 sceneIds,
-                `Set audio track ${track.id} (${track.name}) solo to ${String(!track.solo)}. Change only that track setting and show the preview before applying it.`,
+                { ...track, solo: !track.solo },
+                track.solo ? `Hear every track` : `Hear only ${track.name}`,
               )
             }
           >
-            S
+            <Headphones size={10} />
           </button>
           <button
             type="button"
@@ -117,13 +120,20 @@ export const AudioTrackRail = ({
                 : `Include ${track.name} in export`
             }
             onClick={() =>
-              onEditorCommand(
+              onChangeTrack(
                 sceneIds,
-                `Set audio track ${track.id} (${track.name}) export_enabled to ${String(!track.export_enabled)}. Change only that track setting and show the preview before applying it.`,
+                { ...track, export_enabled: !track.export_enabled },
+                track.export_enabled
+                  ? `Exclude ${track.name} from export`
+                  : `Include ${track.name} in export`,
               )
             }
           >
-            <Download size={10} />
+            {track.export_enabled ? (
+              <PackageCheck size={10} />
+            ) : (
+              <PackageX size={10} />
+            )}
           </button>
         </div>
       );

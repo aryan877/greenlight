@@ -1,10 +1,8 @@
 import type {
   Artifact,
   ContentPackage,
-  EditorPatchInput,
   EditorSelection,
 } from "@greenlight/contracts";
-import { editorPatchInputSchema } from "@greenlight/contracts";
 import {
   ArrowUp,
   Bot,
@@ -36,8 +34,11 @@ import type {
   StudioReviewDocument,
 } from "../api/trueforge.js";
 import { MEDIA_ACCEPT, MEDIA_ARTIFACT_MIME } from "../editor/media-transfer.js";
+import {
+  mergeProducerDraft,
+  type ProducerDraftIntent,
+} from "../editor/producer-draft.js";
 import { cx } from "./controls.js";
-import { EditPatchPreview } from "./EditPatchPreview.js";
 
 const eventIcon: Record<StudioAgentEvent["kind"], typeof Bot> = {
   reasoning: Sparkles,
@@ -205,21 +206,15 @@ const approvalCopy = (
 const ApprovalCard = ({
   pending,
   content,
-  artifacts,
   busy,
   onDecision,
 }: {
   pending: PendingToolApproval;
   content: ContentPackage | null;
-  artifacts: Artifact[];
   busy: boolean;
   onDecision: (status: "allow" | "deny", reason?: string) => void;
 }) => {
   const copy = approvalCopy(pending, content);
-  const editPatch =
-    pending.toolName === "apply_editor_patch"
-      ? editorPatchInputSchema.safeParse(pending.arguments)
-      : null;
   const [refining, setRefining] = useState(false);
   const [reason, setReason] = useState("");
   return (
@@ -234,13 +229,6 @@ const ApprovalCard = ({
         <p className="mt-1 text-[12px] leading-5 text-ink-tertiary">
           {copy.detail}
         </p>
-        {content && editPatch?.success ? (
-          <EditPatchPreview
-            artifacts={artifacts}
-            content={content}
-            patch={editPatch.data}
-          />
-        ) : null}
         {refining ? (
           <div className="mt-3">
             <textarea
@@ -302,67 +290,6 @@ const ApprovalCard = ({
   );
 };
 
-const ManualEditCard = ({
-  artifacts,
-  busy,
-  content,
-  error,
-  patch,
-  onApply,
-  onCancel,
-  onRefine,
-}: {
-  artifacts: Artifact[];
-  busy: boolean;
-  content: ContentPackage;
-  error: Error | null;
-  patch: EditorPatchInput;
-  onApply: () => void;
-  onCancel: () => void;
-  onRefine: () => void;
-}) => (
-  <div className="mb-2 overflow-hidden rounded-xl border border-action/25 bg-action-soft/40">
-    <div className="border-l-[3px] border-action p-3">
-      <p className="text-[12px] font-medium text-action">Preview</p>
-      <p className="mt-1 text-[14px] font-medium leading-5 text-ink">
-        {patch.instruction_summary}
-      </p>
-      <EditPatchPreview artifacts={artifacts} content={content} patch={patch} />
-      {error ? (
-        <p className="mt-2 text-[11px] text-warning">
-          This preview is out of date. Cancel it and try the edit again.
-        </p>
-      ) : null}
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onApply}
-          className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-ink text-[12px] font-medium text-white hover:bg-ink-secondary disabled:opacity-40"
-        >
-          <Check size={13} /> Apply
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onRefine}
-          className="h-9 rounded-lg border border-line bg-surface px-3 text-[11px] text-ink-secondary hover:bg-hover disabled:opacity-40"
-        >
-          Refine
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={onCancel}
-          className="h-9 px-2 text-[11px] text-ink-tertiary hover:text-ink disabled:opacity-40"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  </div>
-);
-
 const ReviewDocument = ({
   document,
   onClose,
@@ -423,67 +350,6 @@ const ReviewDocument = ({
     </article>
   </div>
 );
-
-const ComposerExamples = ({
-  sceneCount,
-  onChoose,
-}: {
-  sceneCount: number;
-  onChoose: (instruction: string) => void;
-}) => {
-  const examples: Array<readonly [string, string]> =
-    sceneCount > 1
-      ? [
-          [
-            "Tighten",
-            "Tighten the pacing across these scenes without changing their meaning. Show the exact timing patch first.",
-          ],
-          [
-            "Merge",
-            "Merge the contiguous scenes that belong together into one editable scene bundle. Preview the combined cut first.",
-          ],
-          [
-            "Re-caption",
-            "Regenerate and correct captions for these scenes from their measured transcripts. Preview every changed cue.",
-          ],
-          [
-            "Dub",
-            "Create a localized voice and caption track for these scenes. Ask me for the language only if it is missing.",
-          ],
-        ]
-      : [
-          [
-            "Trim",
-            "Trim this scene to its strongest ending. Preserve unused source handles, show the resulting gap, and preview the exact new end first.",
-          ],
-          [
-            "Split at word",
-            "Split this scene at the spoken word I specify. Resolve its measured timestamp and show the cut in the video preview first.",
-          ],
-          [
-            "Speed",
-            "Speed up this scene without clipping speech or captions. Preview the new duration and playback rate first.",
-          ],
-          [
-            "Re-caption",
-            "Correct this scene's captions from its measured transcript and preview the changed cues first.",
-          ],
-        ];
-  return (
-    <div className="flex gap-1 overflow-x-auto border-b border-line-subtle px-3 py-2">
-      {examples.map(([label, instruction]) => (
-        <button
-          key={label}
-          type="button"
-          onClick={() => onChoose(instruction)}
-          className="h-6 shrink-0 border border-line px-2 text-[9px] font-medium text-ink-tertiary hover:border-line-strong hover:bg-hover hover:text-ink"
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-};
 
 const VoicePickerCard = ({
   projectId,
@@ -674,9 +540,6 @@ export const ProducerPanel = ({
   activity,
   pendingApprovals,
   pendingQuestions,
-  manualPatch,
-  manualPatchError,
-  manualPatchSaving,
   selectedGapAfterSceneIds,
   isSending,
   isApproving,
@@ -686,8 +549,6 @@ export const ProducerPanel = ({
   onApproval,
   onAnswerQuestion,
   onCancelQuestion,
-  onApplyManualPatch,
-  onCancelManualPatch,
   onRemoveScene,
   onRemoveArtifact,
   onAttachArtifact,
@@ -699,14 +560,11 @@ export const ProducerPanel = ({
   artifacts: Artifact[];
   selection: EditorSelection | null;
   contextArtifacts: Artifact[];
-  draftIntent: { id: string; text: string } | null;
+  draftIntent: ProducerDraftIntent | null;
   events: StudioAgentEvent[];
   activity: string | null;
   pendingApprovals: PendingToolApproval[];
   pendingQuestions: PendingQuestion[];
-  manualPatch: EditorPatchInput | null;
-  manualPatchError: Error | null;
-  manualPatchSaving: boolean;
   selectedGapAfterSceneIds: string[];
   isSending: boolean;
   isApproving: boolean;
@@ -720,8 +578,6 @@ export const ProducerPanel = ({
   ) => void;
   onAnswerQuestion: (pending: PendingQuestion, answer: string) => void;
   onCancelQuestion: (pending: PendingQuestion) => void;
-  onApplyManualPatch: () => void;
-  onCancelManualPatch: () => void;
   onRemoveScene: (sceneId: string) => void;
   onRemoveArtifact: (artifactId: string) => void;
   onAttachArtifact: (artifactId: string) => void;
@@ -736,12 +592,11 @@ export const ProducerPanel = ({
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (draftIntent) setInstruction(draftIntent.text);
+    if (!draftIntent) return;
+    setInstruction((current) => mergeProducerDraft(current, draftIntent));
   }, [draftIntent]);
   const conversationPaused =
-    pendingQuestions.length > 0 ||
-    pendingApprovals.length > 0 ||
-    manualPatch !== null;
+    pendingQuestions.length > 0 || pendingApprovals.length > 0;
   const sampleScript =
     selection?.scene_ids
       .map((sceneId) =>
@@ -773,14 +628,19 @@ export const ProducerPanel = ({
                         {event.label}
                       </p>
                       {event.delivery === "failed" ? (
-                        <button
-                          type="button"
-                          onClick={() => onRetryInstruction(event.id)}
-                          disabled={isSending}
-                          className="mt-1.5 flex items-center gap-1 text-[10px] font-medium text-warning hover:underline disabled:opacity-40"
-                        >
-                          <RotateCcw size={9} /> Retry
-                        </button>
+                        <div className="mt-2 border-t border-warning/20 pt-2">
+                          <p className="text-[12px] leading-5 text-ink-secondary">
+                            {event.detail || "Producer couldn’t answer."}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => onRetryInstruction(event.id)}
+                            disabled={isSending}
+                            className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-warning hover:underline disabled:opacity-40"
+                          >
+                            <RotateCcw size={10} /> Retry
+                          </button>
+                        </div>
                       ) : null}
                     </div>
                   </div>
@@ -861,30 +721,11 @@ export const ProducerPanel = ({
           />
         ))}
 
-        {manualPatch && content ? (
-          <ManualEditCard
-            artifacts={artifacts}
-            busy={manualPatchSaving}
-            content={content}
-            error={manualPatchError}
-            patch={manualPatch}
-            onApply={onApplyManualPatch}
-            onCancel={onCancelManualPatch}
-            onRefine={() => {
-              setInstruction(
-                `Refine this preview: ${manualPatch.instruction_summary}`,
-              );
-              onCancelManualPatch();
-            }}
-          />
-        ) : null}
-
         {pendingApprovals.map((pending) => (
           <ApprovalCard
             key={pending.toolCallId}
             pending={pending}
             content={content}
-            artifacts={artifacts}
             busy={isApproving}
             onDecision={(status, reason) => onApproval(pending, status, reason)}
           />
@@ -1048,12 +889,6 @@ export const ProducerPanel = ({
               </span>
             ) : null}
           </div>
-        ) : null}
-        {selection && !conversationPaused ? (
-          <ComposerExamples
-            sceneCount={selection.scene_ids.length}
-            onChoose={setInstruction}
-          />
         ) : null}
         <textarea
           value={instruction}

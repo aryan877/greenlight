@@ -206,7 +206,12 @@ export const buildMcpServer = ({
     async ({ project_id }) => {
       const project = store.getProject(project_id);
       if (!project) throw new Error("project_not_found");
-      return result({ project, artifacts: store.listArtifacts(project_id) });
+      return result({
+        project,
+        current_content_package_artifact_id:
+          store.getCurrentContentArtifact(project_id)?.id ?? null,
+        artifacts: store.listArtifacts(project_id),
+      });
     },
   );
 
@@ -307,6 +312,7 @@ export const buildMcpServer = ({
           contract_version: 1,
         },
       });
+      store.setCurrentContentArtifact(contentPackage.project_id, artifact.id);
       return result({
         artifact,
         project: store.setProjectStage(contentPackage.project_id, "packaged"),

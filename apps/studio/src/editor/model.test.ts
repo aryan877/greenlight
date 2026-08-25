@@ -2,11 +2,13 @@ import type { Artifact, ContentPackage } from "@greenlight/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  changeSceneSpeed,
   createSelection,
+  createTimelineContext,
   formatRulerTime,
   sceneOffset,
   sceneTimelineDuration,
-  snapTimelineSeconds,
+  splitSceneAtPlayhead,
   timelineTicks,
   totalDuration,
 } from "./model.js";
@@ -104,6 +106,24 @@ describe("editor selection", () => {
     expect(selection.time_range_seconds!.end).toBe(36);
   });
 
+  it("gives Producer the complete cut while selection stays independent", () => {
+    const timeline = createTimelineContext({
+      projectId: content.project_id,
+      contentArtifactId: "artifact_content",
+      content,
+      playheadSeconds: 7.271,
+    });
+
+    expect(timeline.scenes).toHaveLength(content.scenes.length);
+    expect(timeline.playhead_seconds).toBe(7.266666666666667);
+    expect(timeline.scenes[3]).toMatchObject({
+      id: "scene_003",
+      start_seconds: 6,
+      end_seconds: 8,
+    });
+    expect(timeline.duration_seconds).toBe(40);
+  });
+
   it("records an explicitly selected gap in Producer context", () => {
     const withGap = structuredClone(content);
     withGap.scenes[0]!.gap_after_seconds = 3;
@@ -120,6 +140,30 @@ describe("editor selection", () => {
     expect(selection.time_range_seconds).toEqual({ start: 0, end: 5 });
   });
 
+  it("records the exact playhead and builds a frame-accurate direct cut", () => {
+    const selected = createSelection({
+      projectId: content.project_id,
+      contentArtifactId: "artifact_content",
+      content,
+      sceneIds: [content.scenes[1]!.id],
+      playheadSeconds: 2.37,
+      sourceLedgerArtifact: null,
+    });
+    expect(selected.playhead_seconds).toBe(2.3666666666666667);
+
+    const operation = splitSceneAtPlayhead({
+      content,
+      sceneId: content.scenes[1]!.id,
+      playheadSeconds: 3,
+      secondSceneId: "scene_cut_001",
+    });
+    expect(operation).not.toBeNull();
+    expect(operation?.first.duration_seconds).toBe(1);
+    expect(operation?.first.gap_after_seconds).toBe(0);
+    expect(operation?.second.duration_seconds).toBe(1);
+    expect(operation?.second.id).toBe("scene_cut_001");
+  });
+
   it("makes the ruler more granular as visible pixels increase", () => {
     const compact = timelineTicks(30, 600);
     const detailed = timelineTicks(30, 4800);
@@ -128,9 +172,30 @@ describe("editor selection", () => {
     expect(formatRulerTime(5.5, detailed.stepSeconds)).toContain("5.50");
   });
 
-  it("snaps trims to exact frames and nearby meaningful boundaries", () => {
-    expect(snapTimelineSeconds(3.011, 200)).toBe(3);
-    expect(snapTimelineSeconds(3.052, 20)).toBe(3);
-    expect(snapTimelineSeconds(3.2, 200)).toBeCloseTo(3.2, 5);
+  it("rate-stretches a scene without inventing a gap", () => {
+    const scene = content.scenes[0]!;
+    const operation = changeSceneSpeed(scene, 2);
+
+    expect(operation.playback_rate).toBe(2);
+    expect(operation.duration_seconds).toBe(1);
+    expect(operation.gap_after_seconds).toBe(0);
+  });
+
+  it("preserves a source-backed clip range while changing its speed", () => {
+    const scene = {
+      ...content.scenes[0]!,
+      duration_seconds: 4,
+      source_clip: {
+        artifact_id: "video_source_001",
+        in_seconds: 3,
+        out_seconds: 7,
+        source_duration_seconds: 20,
+      },
+    };
+    const operation = changeSceneSpeed(scene, 1.25);
+
+    expect(operation.duration_seconds).toBe(3.2);
+    expect(operation.playback_rate).toBe(1.25);
+    expect(operation).not.toHaveProperty("source_clip");
   });
 });

@@ -32,7 +32,10 @@ import {
 import { YouTubeUploader } from "./providers/youtube.js";
 import { ArtifactStore } from "./storage/artifacts.js";
 import { GreenlightStore } from "./storage/store.js";
-import { saveEditorPatch } from "./services/editor-patches.js";
+import {
+  restoreContentRevision,
+  saveEditorPatch,
+} from "./services/editor-patches.js";
 
 const config = loadConfig();
 mkdirSync(config.dataDir, { recursive: true });
@@ -95,6 +98,8 @@ app.get("/api/voice", (_request, response) => {
 const studioProject = (project: Project, artifactCount: number) => ({
   ...project,
   artifact_count: artifactCount,
+  current_content_package_artifact_id:
+    store.getCurrentContentArtifact(project.id)?.id ?? null,
   workspace_path: `artifacts/${project.id}`,
 });
 
@@ -235,6 +240,38 @@ app.post("/api/projects/:id/editor-patches", async (request, response) => {
       .json({ error: code });
   }
 });
+
+const restoreRevisionRequestSchema = z.object({
+  base_content_package_artifact_id: z.string().min(1),
+});
+
+app.post(
+  "/api/projects/:id/content-revisions/:artifactId/restore",
+  async (request, response) => {
+    try {
+      const input = restoreRevisionRequestSchema.parse(request.body);
+      response.status(201).json(
+        await restoreContentRevision({
+          artifacts,
+          baseArtifactId: input.base_content_package_artifact_id,
+          projectId: request.params.id,
+          targetArtifactId: request.params.artifactId,
+          store,
+        }),
+      );
+    } catch (error) {
+      if (error && typeof error === "object" && "issues" in error) {
+        response.status(400).json({ error: "invalid_restore_revision" });
+        return;
+      }
+      const code =
+        error instanceof Error ? error.message : "restore_revision_failed";
+      response
+        .status(code === "stale_content_package" ? 409 : 400)
+        .json({ error: code });
+    }
+  },
+);
 
 app.post(
   "/api/projects/:id/assets",

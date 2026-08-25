@@ -62,7 +62,8 @@ describe("AudioTrackRail", () => {
           track("track_music_bed", "Music", "music"),
         ]}
         height={156}
-        onEditorCommand={() => undefined}
+        onChangeTrack={() => undefined}
+        onRequestTrack={() => undefined}
         scenes={[scene]}
       />,
     );
@@ -71,7 +72,7 @@ describe("AudioTrackRail", () => {
     expect(html).toContain("Hindi dub");
     expect(html).toContain("Music");
     expect(html).toContain('aria-label="Mute Hindi dub"');
-    expect(html).toContain('aria-label="Solo Hindi dub"');
+    expect(html).toContain('aria-label="Hear only Hindi dub"');
     expect(html).toContain('aria-label="Exclude Hindi dub from export"');
   });
 });

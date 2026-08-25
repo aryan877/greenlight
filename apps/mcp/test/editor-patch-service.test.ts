@@ -5,7 +5,10 @@ import { join } from "node:path";
 import type { ContentPackage } from "@greenlight/contracts";
 import { describe, expect, it } from "vitest";
 
-import { saveEditorPatch } from "../src/services/editor-patches.js";
+import {
+  restoreContentRevision,
+  saveEditorPatch,
+} from "../src/services/editor-patches.js";
 import { ArtifactStore } from "../src/storage/artifacts.js";
 import { GreenlightStore } from "../src/storage/store.js";
 
@@ -75,6 +78,7 @@ describe("editor patch revisions", () => {
             scene_ids: ["scene_open"],
             track_ids: ["visual", "voice", "caption", "transcript"],
             artifact_ids: [],
+            playhead_seconds: 0,
             time_range_seconds: { start: 0, end: 30 },
           },
           operations: [
@@ -92,6 +96,30 @@ describe("editor patch revisions", () => {
       expect(saved.content_package_artifact.id).not.toBe(base.id);
       expect(
         (await artifacts.readJson<ContentPackage>(base.id)).scenes[0],
+      ).toMatchObject({ duration_seconds: 30 });
+      expect(
+        (
+          await artifacts.readJson<ContentPackage>(
+            saved.content_package_artifact.id,
+          )
+        ).scenes[0],
+      ).toMatchObject({ duration_seconds: 29, gap_after_seconds: 1 });
+
+      const restored = await restoreContentRevision({
+        artifacts,
+        baseArtifactId: saved.content_package_artifact.id,
+        projectId: project.id,
+        targetArtifactId: base.id,
+        store,
+      });
+      expect(restored.content_package_artifact.id).toBe(base.id);
+      expect(store.getCurrentContentArtifact(project.id)?.id).toBe(base.id);
+      expect(
+        (
+          await artifacts.readJson<ContentPackage>(
+            restored.content_package_artifact.id,
+          )
+        ).scenes[0],
       ).toMatchObject({ duration_seconds: 30 });
       expect(
         (

@@ -55,6 +55,7 @@ const patch = (
     scene_ids: ["scene_002"],
     track_ids: ["visual", "voice", "caption", "transcript"],
     artifact_ids: [],
+    playhead_seconds: 10,
     time_range_seconds: {
       start: sceneStartSeconds(base.scenes, 1),
       end: sceneStartSeconds(base.scenes, 1) + base.scenes[1]!.duration_seconds,
@@ -115,8 +116,38 @@ describe("applyEditorPatch", () => {
   });
 
   it("splits one selected scene without replacing the cut", () => {
+    const withAudio = structuredClone(base);
+    withAudio.audio_tracks = [
+      {
+        id: "track_primary_voice",
+        name: "Primary voice",
+        role: "narration",
+        locale: "en",
+        voice_label: "Kore",
+        muted: false,
+        solo: false,
+        export_enabled: true,
+        gain: 1,
+        clips: [
+          {
+            id: "clip_scene_002",
+            scene_id: "scene_002",
+            label: "Second",
+            artifact_id: null,
+            script: "Second has enough narration to be useful.",
+            transcript_artifact_id: null,
+            captions_artifact_id: null,
+            start_offset_seconds: 0,
+            source_in_seconds: 0,
+            source_out_seconds: 10,
+            playback_rate: 1,
+            status: "draft",
+          },
+        ],
+      },
+    ];
     const revised = applyEditorPatch(
-      base,
+      withAudio,
       patch([
         {
           type: "split_scene",
@@ -142,6 +173,19 @@ describe("applyEditorPatch", () => {
     expect(
       revised.scenes.reduce((sum, item) => sum + item.duration_seconds, 0),
     ).toBe(30);
+    expect(revised.audio_tracks?.[0]?.clips).toMatchObject([
+      {
+        id: "clip_scene_002",
+        scene_id: "scene_002",
+        source_in_seconds: 0,
+        source_out_seconds: 5,
+      },
+      {
+        scene_id: "scene_004",
+        source_in_seconds: 5,
+        source_out_seconds: 10,
+      },
+    ]);
   });
 
   it("records a real gap when a scene is shortened", () => {
@@ -246,6 +290,25 @@ describe("applyEditorPatch", () => {
         ]),
       ),
     ).toThrow("scene_extension_has_no_source");
+  });
+
+  it("rate-stretches the selected scene and ripples later scenes", () => {
+    const revised = applyEditorPatch(
+      base,
+      patch([
+        {
+          type: "update_scene",
+          scene_id: "scene_002",
+          playback_rate: 0.5,
+          duration_seconds: 20,
+          gap_after_seconds: 0,
+        },
+      ]),
+    );
+
+    expect(revised.scenes[1]!.playback_rate).toBe(0.5);
+    expect(revised.scenes[1]!.duration_seconds).toBe(20);
+    expect(sceneStartSeconds(revised.scenes, 2)).toBe(30);
   });
 
   it("materializes legacy narration before adding a scene-sized dub track", () => {

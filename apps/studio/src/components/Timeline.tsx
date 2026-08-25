@@ -12,7 +12,9 @@ import {
   Layers3,
   Mic2,
   Plus,
+  Redo2,
   Split,
+  Undo2,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -29,7 +31,7 @@ import {
   formatTime,
   sceneOffset,
   sceneTimelineDuration,
-  snapTimelineSeconds,
+  snapToFrame,
   totalDuration,
   timelineTicks,
 } from "../editor/model.js";
@@ -68,10 +70,17 @@ export const Timeline = ({
   onSelectMany,
   onSeek,
   onIntent,
-  onPreviewEdit,
+  onDirectEdit,
+  onCutAtPlayhead,
+  onAttachSceneToProducer,
   onSelectGap,
   onSelectAll,
   onCollapse,
+  canUndo,
+  canRedo,
+  editing,
+  onUndo,
+  onRedo,
 }: {
   content: ContentPackage;
   selectedSceneIds: string[];
@@ -83,14 +92,21 @@ export const Timeline = ({
   onSelectMany: (sceneIds: string[], gapAfterSceneIds?: string[]) => void;
   onSeek: (seconds: number) => void;
   onIntent: (instruction: string) => void;
-  onPreviewEdit: (
+  onDirectEdit: (
     sceneIds: string[],
     operations: EditorPatchOperation[],
     summary: string,
   ) => void;
+  onCutAtPlayhead: (sceneId: string) => void;
+  onAttachSceneToProducer: (sceneId: string) => void;
   onSelectGap: (sceneId: string, additive: boolean) => void;
   onSelectAll: () => void;
   onCollapse: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  editing: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
 }) => {
   const duration = totalDuration(content);
   const audioTracks = effectiveAudioTracks(content);
@@ -127,6 +143,14 @@ export const Timeline = ({
     () => timelineTicks(duration, trackWidth),
     [duration, trackWidth],
   );
+  const playheadScene = content.scenes.find((scene, index) => {
+    const start = sceneOffset(content.scenes, index);
+    const local = currentTime - start;
+    return (
+      local >= MIN_SCENE_DURATION_SECONDS &&
+      local <= scene.duration_seconds - MIN_SCENE_DURATION_SECONDS
+    );
+  });
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-surface">
@@ -176,14 +200,26 @@ export const Timeline = ({
           </span>
           <span className="mx-1 h-4 w-px bg-line-subtle" />
           <IconButton
-            Icon={Split}
-            label="Split selected scene with Producer"
+            Icon={Undo2}
+            label="Undo last timeline edit"
             size="sm"
-            onClick={() =>
-              onIntent(
-                "Split the attached scene into two clean beats. Preserve its total duration, meaning, sources, and media provenance. Show me the scoped patch before applying it.",
-              )
-            }
+            disabled={!canUndo || editing}
+            onClick={onUndo}
+          />
+          <IconButton
+            Icon={Redo2}
+            label="Redo timeline edit"
+            size="sm"
+            disabled={!canRedo || editing}
+            onClick={onRedo}
+          />
+          <span className="mx-1 h-4 w-px bg-line-subtle" />
+          <IconButton
+            Icon={Split}
+            label="Cut at playhead"
+            size="sm"
+            disabled={!playheadScene || previewing || editing}
+            onClick={() => playheadScene && onCutAtPlayhead(playheadScene.id)}
           />
           <IconButton
             Icon={Plus}
@@ -203,16 +239,27 @@ export const Timeline = ({
           className="relative min-h-full"
           style={{
             minHeight: trackHeight + 60,
-            width: `calc(${zoom * 100}% + 168px)`,
+            width: `calc(${zoom * 100}% + 180px)`,
           }}
         >
           <AudioTrackRail
             audioTracks={audioTracks}
             height={trackHeight + 28}
-            onEditorCommand={(_sceneIds, instruction) => onIntent(instruction)}
+            onChangeTrack={(sceneIds, track, summary) =>
+              onDirectEdit(
+                sceneIds,
+                [{ type: "upsert_audio_track", track }],
+                summary,
+              )
+            }
+            onRequestTrack={() =>
+              onIntent(
+                "Add an audio track. Ask me whether it is voice, music, or effects, then show the proposed track before generating media.",
+              )
+            }
             scenes={content.scenes}
           />
-          <div className="absolute left-36 right-0 top-0">
+          <div className="absolute left-[156px] right-0 top-0">
             <button
               type="button"
               aria-label="Seek timeline"
@@ -389,6 +436,7 @@ export const Timeline = ({
                       if (
                         event.button !== 0 ||
                         previewing ||
+                        editing ||
                         event.shiftKey ||
                         event.metaKey ||
                         event.ctrlKey
@@ -477,6 +525,18 @@ export const Timeline = ({
                         onSeek(sceneOffset(content.scenes, index));
                         return;
                       }
+                      const dropTarget = document.elementFromPoint(
+                        event.clientX,
+                        event.clientY,
+                      );
+                      if (
+                        dropTarget?.closest('[data-testid="producer-composer"]')
+                      ) {
+                        setDraggedSceneId(null);
+                        setDropSceneId(null);
+                        onAttachSceneToProducer(scene.id);
+                        return;
+                      }
                       const order = content.scenes
                         .filter((item) => item.id !== scene.id)
                         .map((item) => item.id);
@@ -491,7 +551,7 @@ export const Timeline = ({
                       ) {
                         return;
                       }
-                      onPreviewEdit(
+                      onDirectEdit(
                         content.scenes.map((item) => item.id),
                         [{ type: "reorder_scenes", scene_ids: order }],
                         `Move “${scene.title}” in the timeline`,
@@ -599,7 +659,7 @@ export const Timeline = ({
                       />
                       <span className="truncate">{scene.narration}</span>
                     </span>
-                    {selected && !previewing ? (
+                    {selected && !previewing && !editing ? (
                       <button
                         type="button"
                         data-trim-handle
@@ -619,15 +679,7 @@ export const Timeline = ({
                               initial +
                               ((pointer.clientX - startX) / trackWidth) *
                                 duration;
-                            const seconds = snapTimelineSeconds(
-                              rawSeconds,
-                              trackWidth / duration,
-                              [
-                                MIN_SCENE_DURATION_SECONDS,
-                                initial,
-                                maximumDuration,
-                              ],
-                            );
+                            const seconds = snapToFrame(rawSeconds);
                             setTrim({
                               sceneId: scene.id,
                               duration: Math.max(
@@ -641,15 +693,7 @@ export const Timeline = ({
                               initial +
                               ((pointer.clientX - startX) / trackWidth) *
                                 duration;
-                            const seconds = snapTimelineSeconds(
-                              rawSeconds,
-                              trackWidth / duration,
-                              [
-                                MIN_SCENE_DURATION_SECONDS,
-                                initial,
-                                maximumDuration,
-                              ],
-                            );
+                            const seconds = snapToFrame(rawSeconds);
                             const next = Math.max(
                               MIN_SCENE_DURATION_SECONDS,
                               Math.min(maximumDuration, seconds),
@@ -670,7 +714,7 @@ export const Timeline = ({
                                     next * scene.playback_rate,
                                 }
                               : undefined;
-                            onPreviewEdit(
+                            onDirectEdit(
                               [scene.id],
                               [
                                 {

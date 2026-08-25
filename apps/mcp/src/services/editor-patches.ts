@@ -29,9 +29,8 @@ export const saveEditorPatch = async (input: {
   if (!input.store.getProject(selection.project_id)) {
     throw new Error("project_not_found");
   }
-  const latestContent = input.store.getLatestArtifact(
+  const latestContent = input.store.getCurrentContentArtifact(
     selection.project_id,
-    "content_package",
   );
   if (latestContent?.id !== selection.base_content_package_artifact_id) {
     throw new Error("stale_content_package");
@@ -145,9 +144,65 @@ export const saveEditorPatch = async (input: {
       contract_version: 1,
     },
   });
+  input.store.setCurrentContentArtifact(
+    selection.project_id,
+    contentArtifact.id,
+  );
   return {
     patch_artifact: patchArtifact,
     content_package_artifact: contentArtifact,
     project: input.store.setProjectStage(selection.project_id, "packaged"),
+  };
+};
+
+export const restoreContentRevision = async (input: {
+  artifacts: ArtifactStore;
+  baseArtifactId: string;
+  projectId: string;
+  targetArtifactId: string;
+  store: GreenlightStore;
+}) => {
+  const latest = input.store.getCurrentContentArtifact(input.projectId);
+  if (latest?.id !== input.baseArtifactId) {
+    throw new Error("stale_content_package");
+  }
+  const target = input.artifacts.resolveArtifact(
+    input.targetArtifactId,
+  ).artifact;
+  if (
+    target.project_id !== input.projectId ||
+    target.kind !== "content_package"
+  ) {
+    throw new Error("invalid_content_revision");
+  }
+  const restored = contentPackageSchema.parse(
+    await input.artifacts.readJson(input.targetArtifactId),
+  );
+  const historyArtifact = await input.artifacts.importJson({
+    projectId: input.projectId,
+    kind: "edit_patch",
+    value: {
+      version: 1,
+      type: "restore_revision",
+      base_content_package_artifact_id: input.baseArtifactId,
+      restored_content_package_artifact_id: input.targetArtifactId,
+      result_content_package_hash: hashJson(restored),
+      created_at: new Date().toISOString(),
+    },
+    provenance: {
+      producer: "creator",
+      base_content_package_artifact_id: input.baseArtifactId,
+      restored_content_package_artifact_id: input.targetArtifactId,
+      contract_version: 1,
+    },
+  });
+  const contentArtifact = input.store.setCurrentContentArtifact(
+    input.projectId,
+    target.id,
+  );
+  return {
+    patch_artifact: historyArtifact,
+    content_package_artifact: contentArtifact,
+    project: input.store.setProjectStage(input.projectId, "packaged"),
   };
 };

@@ -99,6 +99,7 @@ export const ProgramMonitor = ({
   video,
   poster,
   media,
+  duration,
   timelineOpen,
   previewing,
   previewUsesCanvas,
@@ -109,6 +110,7 @@ export const ProgramMonitor = ({
   video: Artifact | null;
   poster: Artifact | null;
   media: MediaController;
+  duration: number;
   timelineOpen: boolean;
   previewing: boolean;
   previewUsesCanvas: boolean;
@@ -179,15 +181,15 @@ export const ProgramMonitor = ({
           aria-label="Program position"
           type="range"
           min={0}
-          max={Math.max(media.duration, 0.01)}
-          step={0.01}
-          value={Math.min(media.currentTime, media.duration || 0)}
+          max={Math.max(duration, 1 / 30)}
+          step={1 / 30}
+          value={Math.min(media.currentTime, duration)}
           style={
             {
-              "--range-progress": `${media.duration > 0 ? (media.currentTime / media.duration) * 100 : 0}%`,
+              "--range-progress": `${duration > 0 ? (media.currentTime / duration) * 100 : 0}%`,
             } as CSSProperties
           }
-          disabled={!video}
+          disabled={!scene}
           onPointerDown={media.beginScrub}
           onInput={(event) =>
             media.previewSeek(Number(event.currentTarget.value))
@@ -205,7 +207,7 @@ export const ProgramMonitor = ({
           className="precision-range min-w-0 flex-1 disabled:opacity-30"
         />
         <span className="w-20 text-right font-mono text-[10px] text-ink-caption">
-          {formatTime(media.duration)}
+          {formatTime(duration)}
         </span>
         <IconButton
           Icon={media.muted ? VolumeX : Volume2}

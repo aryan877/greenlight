@@ -10,6 +10,7 @@ import {
 
 export type ProjectSummary = Project & {
   artifact_count: number;
+  current_content_package_artifact_id: string | null;
   workspace_path: string;
 };
 
@@ -92,6 +93,25 @@ export const greenlightApi = {
       body: JSON.stringify(patch),
       headers: { "content-type": "application/json" },
     }),
+  restoreContentRevision: (
+    projectId: string,
+    targetArtifactId: string,
+    baseArtifactId: string,
+  ) =>
+    request<{
+      content_package_artifact: Artifact;
+      patch_artifact: Artifact;
+      project: ProjectSummary;
+    }>(
+      `/projects/${encodeURIComponent(projectId)}/content-revisions/${encodeURIComponent(targetArtifactId)}/restore`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          base_content_package_artifact_id: baseArtifactId,
+        }),
+        headers: { "content-type": "application/json" },
+      },
+    ),
   getContentPackage: (artifactId: string) =>
     request<ContentPackage>(
       `/artifacts/${encodeURIComponent(artifactId)}`,
