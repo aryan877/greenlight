@@ -86,6 +86,7 @@ export const createSelection = (input: {
   contentArtifactId: string;
   content: ContentPackage;
   sceneIds: string[];
+  gapAfterSceneIds?: string[];
   sourceLedgerArtifact: Artifact | null;
   extraArtifactIds?: string[];
 }): EditorSelection => {
@@ -120,6 +121,7 @@ export const createSelection = (input: {
     artifactIds.push(input.sourceLedgerArtifact.id);
   }
 
+  const selectedGapIds = new Set(input.gapAfterSceneIds ?? []);
   return {
     project_id: input.projectId,
     base_content_package_artifact_id: input.contentArtifactId,
@@ -129,6 +131,7 @@ export const createSelection = (input: {
       "voice",
       "caption",
       "transcript",
+      ...[...selectedGapIds].map((sceneId) => `gap_after_${sceneId}`),
       ...effectiveAudioTracks(input.content).map((track) => track.id),
     ],
     artifact_ids: artifactIds,
@@ -136,7 +139,10 @@ export const createSelection = (input: {
       start: sceneOffset(input.content.scenes, first.index),
       end:
         sceneOffset(input.content.scenes, last.index) +
-        last.scene.duration_seconds,
+        last.scene.duration_seconds +
+        (selectedGapIds.has(last.scene.id)
+          ? (last.scene.gap_after_seconds ?? 0)
+          : 0),
     },
   };
 };

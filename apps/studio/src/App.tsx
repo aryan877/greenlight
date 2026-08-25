@@ -1,6 +1,8 @@
 import {
   applyEditorPatch,
   editorPatchInputSchema,
+  type EditorPatchInput,
+  type EditorPatchOperation,
   type EditorFocusInput,
   type EditorSelection,
 } from "@greenlight/contracts";
@@ -16,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useProducerAgent } from "./api/trueforge.js";
 import {
   useContentPackage,
+  useApplyEditorPatch,
   useCreateProject,
   useProject,
   useProjects,
@@ -43,6 +46,10 @@ export const App = () => {
   const createProject = useCreateProject();
   const [projectId, setProjectId] = useState<string | null>(null);
   const [selectedSceneIds, setSelectedSceneIds] = useState<string[]>([]);
+  const [selectedGapAfterSceneIds, setSelectedGapAfterSceneIds] = useState<
+    string[]
+  >([]);
+  const [manualPatch, setManualPatch] = useState<EditorPatchInput | null>(null);
   const [rightTab, setRightTab] = useState<"producer" | "details">("producer");
   const [attachedArtifactIds, setAttachedArtifactIds] = useState<string[]>([]);
   const [importError, setImportError] = useState<string | null>(null);
@@ -59,6 +66,7 @@ export const App = () => {
 
   const project = useProject(projectId);
   const uploadAsset = useUploadAsset(projectId);
+  const applyManualPatch = useApplyEditorPatch(projectId);
   const contentArtifact =
     project.data?.artifacts
       .filter((artifact) => artifact.kind === "content_package")
@@ -119,6 +127,7 @@ export const App = () => {
       contentArtifactId: contentArtifact.id,
       content: content.data,
       sceneIds: selectedSceneIds,
+      gapAfterSceneIds: selectedGapAfterSceneIds,
       sourceLedgerArtifact: evidenceArtifact,
       extraArtifactIds: attachedArtifactIds,
     });
@@ -128,6 +137,7 @@ export const App = () => {
     evidenceArtifact,
     projectId,
     selectedSceneIds,
+    selectedGapAfterSceneIds,
     attachedArtifactIds,
   ]);
 
@@ -163,7 +173,7 @@ export const App = () => {
 
   const producer = useProducerAgent(projectId, focusFromAgent);
 
-  const previewPatch = useMemo(() => {
+  const agentPreviewPatch = useMemo(() => {
     const pending = producer.pendingApprovals.find(
       (approval) => approval.toolName === "apply_editor_patch",
     );
@@ -171,6 +181,12 @@ export const App = () => {
     const parsed = editorPatchInputSchema.safeParse(pending.arguments);
     return parsed.success ? parsed.data : null;
   }, [producer.pendingApprovals]);
+  const previewPatch = manualPatch ?? agentPreviewPatch;
+
+  useEffect(() => {
+    setManualPatch(null);
+    setSelectedGapAfterSceneIds([]);
+  }, [contentArtifact?.id, projectId]);
 
   const previewContent = useMemo(() => {
     if (!content.data || !previewPatch) return null;
@@ -238,28 +254,39 @@ export const App = () => {
     [layout],
   );
 
-  const runEditorCommand = useCallback(
-    (sceneIds: string[], instruction: string) => {
+  const previewEditorOperations = useCallback(
+    (
+      sceneIds: string[],
+      operations: EditorPatchOperation[],
+      instructionSummary: string,
+    ) => {
       if (!projectId || !contentArtifact || !content.data) return;
       const commandSelection = createSelection({
         projectId,
         contentArtifactId: contentArtifact.id,
         content: content.data,
         sceneIds,
+        gapAfterSceneIds: selectedGapAfterSceneIds,
         sourceLedgerArtifact: evidenceArtifact,
       });
       setSelectedSceneIds(sceneIds);
       setRightTab("producer");
       layout.setRightOpen(true);
-      producer.send({ instruction, selection: commandSelection });
+      setManualPatch(
+        editorPatchInputSchema.parse({
+          instruction_summary: instructionSummary,
+          operations,
+          selection: commandSelection,
+        }),
+      );
     },
     [
       content.data,
       contentArtifact,
       evidenceArtifact,
       layout,
-      producer,
       projectId,
+      selectedGapAfterSceneIds,
     ],
   );
 
@@ -281,6 +308,7 @@ export const App = () => {
         )
         .map((scene) => scene.id);
     });
+    if (!additive) setSelectedGapAfterSceneIds([]);
     media.seek(sceneOffset(content.data.scenes, index));
   };
 
@@ -291,10 +319,43 @@ export const App = () => {
       .map((scene) => scene.id);
     if (ordered.length === 0) return;
     setSelectedSceneIds(ordered);
+    setSelectedGapAfterSceneIds((current) =>
+      current.filter((sceneId) => ordered.includes(sceneId)),
+    );
     const first = content.data.scenes.findIndex(
       (scene) => scene.id === ordered[0],
     );
     if (first >= 0) media.seek(sceneOffset(content.data.scenes, first));
+  };
+
+  const selectGap = (sceneId: string, additive = false) => {
+    if (!content.data) return;
+    const index = content.data.scenes.findIndex(
+      (scene) => scene.id === sceneId,
+    );
+    const scene = content.data.scenes[index];
+    if (!scene?.gap_after_seconds) return;
+    setSelectedSceneIds((current) =>
+      additive
+        ? content
+            .data!.scenes.filter((item) =>
+              [...current, sceneId].includes(item.id),
+            )
+            .map((item) => item.id)
+        : [sceneId],
+    );
+    setSelectedGapAfterSceneIds((current) =>
+      additive
+        ? current.includes(sceneId)
+          ? current.filter((id) => id !== sceneId)
+          : [...current, sceneId]
+        : [sceneId],
+    );
+    media.seek(
+      sceneOffset(content.data.scenes, index) + scene.duration_seconds,
+    );
+    setRightTab("producer");
+    layout.setRightOpen(true);
   };
 
   const selectArtifact = (artifactId: string) => {
@@ -455,16 +516,24 @@ export const App = () => {
                   <Timeline
                     content={visibleContent ?? content.data}
                     selectedSceneIds={selectedSceneIds}
+                    selectedGapAfterSceneIds={selectedGapAfterSceneIds}
                     previewSceneIds={previewSceneIds}
                     previewing={Boolean(previewContent)}
                     currentTime={media.currentTime}
                     onSelect={(scene, additive) =>
                       selectScene(scene.id, additive)
                     }
-                    onSelectMany={selectScenes}
+                    onSelectMany={(sceneIds, gapIds = []) => {
+                      const requiredSceneIds = [
+                        ...new Set([...sceneIds, ...gapIds]),
+                      ];
+                      selectScenes(requiredSceneIds);
+                      setSelectedGapAfterSceneIds(gapIds);
+                    }}
                     onSeek={media.seek}
                     onIntent={directProducer}
-                    onEditorCommand={runEditorCommand}
+                    onPreviewEdit={previewEditorOperations}
+                    onSelectGap={selectGap}
                     onSelectAll={() =>
                       setSelectedSceneIds(
                         content.data!.scenes.map((scene) => scene.id),
@@ -521,6 +590,7 @@ export const App = () => {
                   }
                 >
                   <ProducerPanel
+                    projectId={projectId}
                     content={content.data ?? null}
                     artifacts={project.data?.artifacts ?? []}
                     selection={selection}
@@ -529,8 +599,13 @@ export const App = () => {
                     )}
                     draftIntent={draftIntent}
                     events={producer.events}
+                    activity={producer.activity}
                     pendingApprovals={producer.pendingApprovals}
                     pendingQuestions={producer.pendingQuestions}
+                    manualPatch={manualPatch}
+                    manualPatchError={applyManualPatch.error}
+                    manualPatchSaving={applyManualPatch.isPending}
+                    selectedGapAfterSceneIds={selectedGapAfterSceneIds}
                     isSending={producer.isSending}
                     isApproving={producer.isApproving}
                     isAnswering={producer.isAnswering}
@@ -545,6 +620,13 @@ export const App = () => {
                       producer.answerQuestion({ pending, answer })
                     }
                     onCancelQuestion={producer.cancelQuestion}
+                    onApplyManualPatch={() => {
+                      if (!manualPatch) return;
+                      applyManualPatch.mutate(manualPatch, {
+                        onSuccess: () => setManualPatch(null),
+                      });
+                    }}
+                    onCancelManualPatch={() => setManualPatch(null)}
                     onRemoveScene={(sceneId) =>
                       setSelectedSceneIds((current) => {
                         const next = current.filter((id) => id !== sceneId);

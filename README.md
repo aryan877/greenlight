@@ -2,14 +2,14 @@
 
 Greenlight is a TrueForge-native production agent inside a real, scene-based video editor. It researches and verifies a short YouTube story, creates editable media, renders it with Remotion, stages it as unlisted, and stops for a human before anything becomes public.
 
-The editor is the product surface. Selecting one or many scene bundles gives the Producer exact typed context—scene IDs, time range, media artifacts, transcript, and sources. An edit becomes a reversible preview first. The same validated patch is then either denied or applied through TrueForge's native approval event.
+The editor is the product surface. Selecting one or many scene bundles or gaps gives the Producer exact typed context—scene IDs, time range, media artifacts, transcript, and sources. Every edit becomes a reversible preview first. Direct manipulation uses immediate Apply or Cancel controls; agent-proposed changes use TrueForge's native approval event. Both persist through the same validated patch service.
 
 ## What works
 
 - TrueForge root agent with typed MCP tools, sandbox, dynamic subagents, streamed turns, and resumable approvals
 - Immutable projects and artifacts in SQLite plus content-addressed local files
 - Scene-bundle selection with no arbitrary selection or scene-count cap
-- Click, Shift/Cmd, and marquee multi-select; whole-cut selection, drag reorder, end trim, timeline zoom, playback, mute, volume, and resizable/collapsible panes
+- Click, Shift/Cmd, and marquee multi-select across scene bundles and real gaps; local drag reorder and end-trim previews; timeline zoom, playback, mute, volume, and resizable/collapsible panes
 - Project history and new-project creation backed by the saved SQLite workspace, with managed paths and artifact counts
 - A creator-media bin with measured size, duration, dimensions and codecs; full image/audio/video viewers; signature-checked import; click/drag attachment; and direct file drop into Producer
 - Agent-driven Studio focus through `focus_editor_selection`
@@ -19,7 +19,7 @@ The editor is the product surface. Selecting one or many scene bundles gives the
 - One compact before/after media preview for trims, splits, speed changes, ranges, and other typed patches, with Apply, Refine, and Cancel
 - OpenMoji search and attachment with licensed SVG provenance
 - Optional bounded Codex-subscription image generation; GPT Image API routes stay disabled
-- Per-scene multilingual voice through OpenRouter with provider/model/voice/locale provenance; optional Sarvam and ElevenLabs batch routes stay behind the same immutable clip boundary
+- Per-scene multilingual voice through one production route—OpenRouter to Gemini TTS—with an in-chat voice audition card and complete model, voice, locale, and artifact provenance
 - Core timed transcription: OpenRouter `gpt-4o-mini-transcribe` reference text plus local `whisper.cpp` word boundaries, exact phrase lookup, immutable corrections, and typed active-word captions derived from measured timing
 - Native TrueForge sandbox-output import: derived files are downloaded by exact session and turn, signature-checked, content-addressed, deduplicated, and handed back to the Producer only by artifact ID
 - Deterministic Remotion render and thumbnail, best-effort cross-platform hardware encoding with safe software fallback, FFprobe-backed quality checks, and playback-rate support
@@ -97,7 +97,7 @@ The suite covers contracts, scoped patch safety, storage, voice conversion, tran
 - Generated narration is never given estimated word timing.
 - YouTube uploads are unlisted first.
 - TrueForge authenticates to the MCP service with a private header; the Studio never receives that credential.
-- `apply_editor_patch`, render, upload, publish, and schedule are TrueForge approval-gated in the hackathon agent.
+- Agent calls to `apply_editor_patch`, render, upload, publish, and schedule are TrueForge approval-gated. Direct timeline edits require an explicit local Apply and never invoke the model.
 - Publish and schedule atomically claim an unlisted release before contacting YouTube, preventing concurrent release attempts.
 - Public release rechecks the exact immutable snapshot and configured channel allowlist.
 - There is no delete-video tool.

@@ -4,11 +4,17 @@ import { basename, resolve } from "node:path";
 
 import cors from "cors";
 import express from "express";
+import { z } from "zod";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { projectBriefSchema, type Project } from "@greenlight/contracts";
+import {
+  editorPatchInputSchema,
+  projectBriefSchema,
+  type Project,
+} from "@greenlight/contracts";
 
 import { loadConfig } from "./config.js";
 import { inspectImportedMedia } from "./media-import.js";
+import { sha256 } from "./lib/canonical.js";
 import { buildMcpServer } from "./mcp/tools.js";
 import { CodexImageProvider } from "./providers/codex-image.js";
 import { QualityInspector } from "./providers/quality.js";
@@ -26,6 +32,7 @@ import {
 import { YouTubeUploader } from "./providers/youtube.js";
 import { ArtifactStore } from "./storage/artifacts.js";
 import { GreenlightStore } from "./storage/store.js";
+import { saveEditorPatch } from "./services/editor-patches.js";
 
 const config = loadConfig();
 mkdirSync(config.dataDir, { recursive: true });
@@ -81,6 +88,10 @@ app.get("/health", (_request, response) => {
   response.json({ ok: true, service: "greenlight-mcp", version: "0.1.0" });
 });
 
+app.get("/api/voice", (_request, response) => {
+  response.json(voice.describe());
+});
+
 const studioProject = (project: Project, artifactCount: number) => ({
   ...project,
   artifact_count: artifactCount,
@@ -122,6 +133,107 @@ app.get("/api/projects/:id", (request, response) => {
     artifacts: store.listArtifacts(project.id),
     release: store.getLatestReleaseForProject(project.id),
   });
+});
+
+const voiceSampleRequestSchema = z.object({
+  locale: z
+    .string()
+    .trim()
+    .regex(/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i)
+    .optional(),
+  script: z.string().trim().min(1).max(240),
+  voice_id: z.string().trim().min(1).max(80),
+});
+
+app.post("/api/projects/:id/voice-samples", async (request, response) => {
+  try {
+    const project = store.getProject(request.params.id);
+    if (!project) {
+      response.status(404).json({ error: "project_not_found" });
+      return;
+    }
+    const input = voiceSampleRequestSchema.parse(request.body);
+    const capabilities = voice.describe();
+    if (!capabilities.available) {
+      response.status(503).json({ error: "voice_provider_not_configured" });
+      return;
+    }
+    if (!capabilities.voices.some((option) => option.id === input.voice_id)) {
+      response.status(400).json({ error: "voice_not_supported" });
+      return;
+    }
+
+    const scriptHash = sha256(input.script);
+    const cached = store.listArtifacts(project.id).find((artifact) => {
+      const provenance = artifact.provenance;
+      return (
+        artifact.kind === "narration" &&
+        provenance.purpose === "voice_sample" &&
+        provenance.model === capabilities.model &&
+        provenance.voice_id === input.voice_id &&
+        provenance.locale === (input.locale ?? null) &&
+        provenance.script_sha256 === scriptHash
+      );
+    });
+    if (cached) {
+      response.json({ artifact: cached, cached: true });
+      return;
+    }
+
+    const generated = await voice.generate({
+      locale: input.locale,
+      script: input.script,
+      voiceId: input.voice_id,
+    });
+    const artifact = await artifacts.importBuffer({
+      projectId: project.id,
+      kind: "narration",
+      filename: `voice-sample-${input.voice_id}${generated.extension}`,
+      bytes: generated.bytes,
+      provenance: {
+        ...generated.provenance,
+        purpose: "voice_sample",
+      },
+    });
+    response.status(201).json({ artifact, cached: false });
+  } catch (error) {
+    if (error && typeof error === "object" && "issues" in error) {
+      response.status(400).json({ error: "invalid_voice_sample" });
+      return;
+    }
+    const code = error instanceof Error ? error.message : "voice_sample_failed";
+    response.status(502).json({ error: code });
+  }
+});
+
+app.post("/api/projects/:id/editor-patches", async (request, response) => {
+  try {
+    const patch = editorPatchInputSchema.parse(request.body);
+    if (
+      patch.selection.project_id !== request.params.id ||
+      !store.getProject(request.params.id)
+    ) {
+      response.status(404).json({ error: "project_not_found" });
+      return;
+    }
+    response.status(201).json(
+      await saveEditorPatch({
+        artifacts,
+        producer: "creator",
+        request: patch,
+        store,
+      }),
+    );
+  } catch (error) {
+    if (error && typeof error === "object" && "issues" in error) {
+      response.status(400).json({ error: "invalid_editor_patch" });
+      return;
+    }
+    const code = error instanceof Error ? error.message : "edit_failed";
+    response
+      .status(code === "stale_content_package" ? 409 : 400)
+      .json({ error: code });
+  }
 });
 
 app.post(

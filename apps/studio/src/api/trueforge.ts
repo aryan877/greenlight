@@ -24,6 +24,7 @@ export type StudioAgentEvent = {
   sceneIds: string[];
   delivery?: "sending" | "sent" | "failed";
   document?: StudioReviewDocument;
+  artifactId?: string;
 };
 
 export type StudioReviewDocument = {
@@ -348,6 +349,41 @@ const toolPresentation = (
     : null;
 };
 
+const creatorFacingSentence = (value: string): string | null => {
+  const content = value
+    .replace(/[*_`#]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!content) return null;
+  if (
+    /(?:\bartifact[_-]?[a-z0-9]+|\bscene_[a-z0-9_-]+|frame math|frames? \d|gapafter|base_content_package|content_package_artifact|sha256|current revision)/i.test(
+      content,
+    )
+  ) {
+    return null;
+  }
+  if (
+    /^(got it|understood|okay|let me|i(?:'ll| will)|now i|first[, ]|to begin)/i.test(
+      content,
+    )
+  ) {
+    return null;
+  }
+  if (/^(done|patch applied successfully)\.?$/i.test(content)) {
+    return "Change applied.";
+  }
+  if (
+    /patch (?:was )?(?:cancelled|canceled|not applied)|no changes were made/i.test(
+      content,
+    )
+  ) {
+    return "Change cancelled.";
+  }
+  const sentence = content.match(/^.*?[.!?](?:\s|$)/)?.[0] ?? content;
+  if (sentence.length > 180) return null;
+  return sentence.trim();
+};
+
 export const describeEvent = (event: WireEvent): StudioAgentEvent[] => {
   const type = String(event.type ?? "agent.event");
   if (type === "model.message") {
@@ -357,24 +393,12 @@ export const describeEvent = (event: WireEvent): StudioAgentEvent[] => {
       const presentation = toolPresentation(call);
       if (presentation) output.push({ id: call.id, ...presentation });
     }
-    const content = textContent(event.content)
-      .replace(/[*_`#]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    const isFiller = /^(let me|i(?:'ll| will)|now i|first[, ]|to begin)/i.test(
-      content,
-    );
-    if (content && (calls.length === 0 || output.length === 0) && !isFiller) {
-      const sentence =
-        content.match(/^.{1,180}?(?:[.!?](?:\s|$)|$)/)?.[0] ??
-        content.slice(0, 180);
-      const humanSentence = /patch was not applied/i.test(sentence)
-        ? "Change discarded."
-        : sentence;
+    const humanSentence = creatorFacingSentence(textContent(event.content));
+    if (humanSentence && (calls.length === 0 || output.length === 0)) {
       output.push({
         id: String(event.id ?? crypto.randomUUID()),
         kind: "message",
-        label: humanSentence.trim(),
+        label: humanSentence,
         detail: "",
         sceneIds: [],
       });
@@ -411,6 +435,7 @@ export const useProducerAgent = (
   const [pendingQuestions, setPendingQuestions] = useState<PendingQuestion[]>(
     [],
   );
+  const [activity, setActivity] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -459,6 +484,17 @@ export const useProducerAgent = (
 
       if (event.type === "model.message") {
         for (const call of toolCallsOf(event)) {
+          const nextActivity: Record<string, string> = {
+            get_project: "Checking the current cut…",
+            get_artifact: "Reading the selected media…",
+            apply_editor_patch: "Preparing the preview…",
+            transcribe_audio: "Timing the words…",
+            find_spoken_phrase: "Finding the exact words…",
+            generate_voice: "Generating the voice…",
+            generate_image: "Creating the visual…",
+            render_video: "Rendering the video…",
+          };
+          setActivity(nextActivity[call.function.name] ?? "Working…");
           if (call.function.name !== "focus_editor_selection") continue;
           const parsed = editorFocusInputSchema.safeParse(parseArguments(call));
           if (parsed.success) onFocusRef.current(parsed.data);
@@ -484,6 +520,7 @@ export const useProducerAgent = (
         });
 
         if (event.type === "tool.approval_required") {
+          setActivity(null);
           const approvals = resolved.map(({ call }) => ({
             eventId: String(event.id ?? crypto.randomUUID()),
             turnId: sourceTurnId,
@@ -502,6 +539,7 @@ export const useProducerAgent = (
             ...approvals,
           ]);
         } else {
+          setActivity(null);
           const questions = pendingQuestionsFromEvent(
             event,
             eventStore.current,
@@ -577,6 +615,7 @@ export const useProducerAgent = (
               label: `Created ${reference.name}`,
               detail: "Ready for this edit",
               sceneIds: [],
+              artifactId: artifact.id,
             },
           ]);
         } catch (error) {
@@ -668,6 +707,7 @@ export const useProducerAgent = (
     setEvents([]);
     setPendingApprovals([]);
     setPendingQuestions([]);
+    setActivity(null);
     if (!projectId) return;
 
     let cancelled = false;
@@ -838,6 +878,7 @@ export const useProducerAgent = (
         await consume(stream, projectId);
       },
       onMutate: (input) => {
+        setActivity("Thinking…");
         const eventId =
           input.clientEventId ?? `instruction-${crypto.randomUUID()}`;
         outgoingStore.current.set(eventId, {
@@ -860,6 +901,7 @@ export const useProducerAgent = (
         return { eventId };
       },
       onError: (_error, _input, context) => {
+        setActivity(null);
         if (!context) return;
         setEvents((current) =>
           current.map((item) =>
@@ -877,6 +919,7 @@ export const useProducerAgent = (
         }
       },
       onSettled: (_data, error, _input, context) => {
+        setActivity(null);
         if (!context || error) return;
         outgoingStore.current.delete(context.eventId);
         setEvents((current) =>
@@ -1013,6 +1056,7 @@ export const useProducerAgent = (
   );
 
   return {
+    activity,
     events,
     pendingApprovals,
     pendingQuestions,

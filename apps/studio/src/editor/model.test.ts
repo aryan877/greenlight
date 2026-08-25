@@ -104,6 +104,22 @@ describe("editor selection", () => {
     expect(selection.time_range_seconds!.end).toBe(36);
   });
 
+  it("records an explicitly selected gap in Producer context", () => {
+    const withGap = structuredClone(content);
+    withGap.scenes[0]!.gap_after_seconds = 3;
+    const selection = createSelection({
+      projectId: withGap.project_id,
+      contentArtifactId: "artifact_content",
+      content: withGap,
+      sceneIds: [withGap.scenes[0]!.id],
+      gapAfterSceneIds: [withGap.scenes[0]!.id],
+      sourceLedgerArtifact: null,
+    });
+
+    expect(selection.track_ids).toContain("gap_after_scene_000");
+    expect(selection.time_range_seconds).toEqual({ start: 0, end: 5 });
+  });
+
   it("makes the ruler more granular as visible pixels increase", () => {
     const compact = timelineTicks(30, 600);
     const detailed = timelineTicks(30, 4800);

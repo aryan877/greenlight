@@ -130,6 +130,36 @@ describe("Producer event projection", () => {
     expect(describeEvent(read("get_artifact"))).toEqual([]);
   });
 
+  it("keeps runtime identifiers and frame arithmetic out of creator copy", async () => {
+    const { describeEvent } = await import("./trueforge.js");
+    const message = (content: string) => ({
+      id: crypto.randomUUID(),
+      type: "model.message",
+      content,
+    });
+
+    expect(
+      describeEvent(
+        message(
+          "Got it — scene_open_hook uses artifact_123 from the current revision.",
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      describeEvent(
+        message("Frame math confirmed: frames 0–78, gapAfter 5.0 seconds."),
+      ),
+    ).toEqual([]);
+    expect(
+      describeEvent(message("Patch applied successfully."))[0]?.label,
+    ).toBe("Change applied.");
+    expect(
+      describeEvent(
+        message("The patch was cancelled. No changes were made."),
+      )[0]?.label,
+    ).toBe("Change cancelled.");
+  });
+
   it("ignores malformed tool references instead of breaking the feed", async () => {
     const { pendingQuestionsFromEvent } = await import("./trueforge.js");
 

@@ -7,6 +7,7 @@ import {
 
 import { greenlightApi } from "../api/greenlight.js";
 import { formatTime, sceneOffset } from "../editor/model.js";
+import { SceneCanvas } from "./ProgramMonitor.js";
 
 const affectedSceneIds = (patch: EditorPatchInput) => [
   ...new Set(
@@ -148,7 +149,21 @@ export const EditPatchPreview = ({
             </div>
           ) : null}
         </div>
-      ) : null}
+      ) : (
+        <div className="relative aspect-video overflow-hidden bg-[#f8faf9]">
+          <SceneCanvas scene={after ?? before} artifacts={artifacts} />
+          {markerPercent !== null ? (
+            <div
+              className="pointer-events-none absolute inset-y-0 w-px bg-warning"
+              style={{ left: `${markerPercent}%` }}
+            >
+              <span className="absolute left-1 top-1 bg-warning px-1.5 py-0.5 font-mono text-[8px] text-white">
+                {label} · {formatTime(markerSeconds ?? 0)}
+              </span>
+            </div>
+          ) : null}
+        </div>
+      )}
       <div className="px-3 py-2.5">
         <div className="relative flex h-6 overflow-hidden border-y border-line bg-surface-sunken">
           {beforeRange.map((scene) => (

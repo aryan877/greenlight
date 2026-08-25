@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { EditorPatchInput } from "@greenlight/contracts";
 
 import { greenlightApi } from "./greenlight.js";
 
@@ -9,6 +10,7 @@ export const greenlightKeys = {
     [...greenlightKeys.projects(), projectId] as const,
   artifact: (artifactId: string) =>
     [...greenlightKeys.all, "artifacts", artifactId] as const,
+  voice: () => [...greenlightKeys.all, "voice"] as const,
 };
 
 export const useProjects = () =>
@@ -43,6 +45,22 @@ export const useContentPackage = (artifactId: string | null) =>
     enabled: Boolean(artifactId),
   });
 
+export const useVoiceCapabilities = () =>
+  useQuery({
+    queryKey: greenlightKeys.voice(),
+    queryFn: greenlightApi.getVoiceCapabilities,
+    staleTime: 60_000,
+  });
+
+export const useVoiceSample = (projectId: string) =>
+  useMutation({
+    mutationFn: (input: {
+      locale?: string;
+      script: string;
+      voice_id: string;
+    }) => greenlightApi.createVoiceSample(projectId, input),
+  });
+
 export const useUploadAsset = (projectId: string | null) => {
   const client = useQueryClient();
   return useMutation({
@@ -53,6 +71,23 @@ export const useUploadAsset = (projectId: string | null) => {
           queryKey: greenlightKeys.project(projectId),
         });
       }
+    },
+  });
+};
+
+export const useApplyEditorPatch = (projectId: string | null) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: EditorPatchInput) =>
+      greenlightApi.applyEditorPatch(projectId!, patch),
+    onSuccess: async () => {
+      if (!projectId) return;
+      await Promise.all([
+        client.invalidateQueries({
+          queryKey: greenlightKeys.project(projectId),
+        }),
+        client.invalidateQueries({ queryKey: greenlightKeys.projects() }),
+      ]);
     },
   });
 };

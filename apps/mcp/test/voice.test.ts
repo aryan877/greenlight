@@ -1,12 +1,31 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  GEMINI_VOICES,
   OpenRouterVoiceProvider,
   TestVoiceProvider,
   pcm16MonoToWav,
 } from "../src/providers/voice.js";
 
 describe("voice provider", () => {
+  it("exposes the official Gemini voice catalog through one provider", () => {
+    const provider = new OpenRouterVoiceProvider({
+      apiKey: "test",
+      model: "google/gemini-3.1-flash-tts-preview",
+      voiceId: "Kore",
+    });
+
+    expect(provider.describe()).toMatchObject({
+      provider: "openrouter",
+      voice_id: "Kore",
+      voices: expect.arrayContaining([
+        { id: "Kore", character: "Firm" },
+        { id: "Puck", character: "Upbeat" },
+      ]),
+    });
+    expect(GEMINI_VOICES).toHaveLength(30);
+  });
+
   it("wraps 24 kHz mono PCM in a valid WAV header", () => {
     const wav = pcm16MonoToWav(Uint8Array.from([0, 0, 1, 0]));
     const view = Buffer.from(wav);

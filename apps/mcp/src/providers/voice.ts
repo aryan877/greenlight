@@ -13,6 +13,44 @@ export type VoiceResult = {
   provenance: Record<string, unknown>;
 };
 
+export type VoiceOption = {
+  id: string;
+  character: string;
+};
+
+export const GEMINI_VOICES = [
+  { id: "Zephyr", character: "Bright" },
+  { id: "Puck", character: "Upbeat" },
+  { id: "Charon", character: "Informative" },
+  { id: "Kore", character: "Firm" },
+  { id: "Fenrir", character: "Excitable" },
+  { id: "Leda", character: "Youthful" },
+  { id: "Orus", character: "Firm" },
+  { id: "Aoede", character: "Breezy" },
+  { id: "Callirrhoe", character: "Easy-going" },
+  { id: "Autonoe", character: "Bright" },
+  { id: "Enceladus", character: "Breathy" },
+  { id: "Iapetus", character: "Clear" },
+  { id: "Umbriel", character: "Easy-going" },
+  { id: "Algieba", character: "Smooth" },
+  { id: "Despina", character: "Smooth" },
+  { id: "Erinome", character: "Clear" },
+  { id: "Algenib", character: "Gravelly" },
+  { id: "Rasalgethi", character: "Informative" },
+  { id: "Laomedeia", character: "Upbeat" },
+  { id: "Achernar", character: "Soft" },
+  { id: "Alnilam", character: "Firm" },
+  { id: "Schedar", character: "Even" },
+  { id: "Gacrux", character: "Mature" },
+  { id: "Pulcherrima", character: "Forward" },
+  { id: "Achird", character: "Friendly" },
+  { id: "Zubenelgenubi", character: "Casual" },
+  { id: "Vindemiatrix", character: "Gentle" },
+  { id: "Sadachbia", character: "Lively" },
+  { id: "Sadaltager", character: "Knowledgeable" },
+  { id: "Sulafat", character: "Warm" },
+] as const satisfies readonly VoiceOption[];
+
 export interface VoiceProvider {
   describe(): {
     available: boolean;
@@ -21,6 +59,7 @@ export interface VoiceProvider {
     supports_locale_auto_detection: boolean;
     supports_voice_override: boolean;
     voice_id: string | null;
+    voices: readonly VoiceOption[];
   };
   generate(input: VoiceRequest): Promise<VoiceResult>;
 }
@@ -67,6 +106,7 @@ export class OpenRouterVoiceProvider implements VoiceProvider {
       supports_locale_auto_detection: true,
       supports_voice_override: true,
       voice_id: this.config.voiceId,
+      voices: GEMINI_VOICES,
     };
   }
 
@@ -131,6 +171,7 @@ export class DisabledVoiceProvider implements VoiceProvider {
       supports_locale_auto_detection: false,
       supports_voice_override: false,
       voice_id: null,
+      voices: [],
     };
   }
 
@@ -148,6 +189,7 @@ export class TestVoiceProvider implements VoiceProvider {
       supports_locale_auto_detection: false,
       supports_voice_override: true,
       voice_id: "fixture",
+      voices: [{ id: "fixture", character: "Test" }],
     };
   }
 

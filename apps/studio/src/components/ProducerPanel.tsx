@@ -1,6 +1,7 @@
 import type {
   Artifact,
   ContentPackage,
+  EditorPatchInput,
   EditorSelection,
 } from "@greenlight/contracts";
 import { editorPatchInputSchema } from "@greenlight/contracts";
@@ -12,10 +13,13 @@ import {
   CircleDot,
   Film,
   Image as ImageIcon,
+  LoaderCircle,
   Mic2,
   MousePointer2,
   Paperclip,
+  Play,
   RotateCcw,
+  Search,
   SlidersHorizontal,
   Sparkles,
   FileText,
@@ -23,7 +27,8 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { greenlightApi } from "../api/greenlight.js";
+import { greenlightApi, type VoiceOption } from "../api/greenlight.js";
+import { useVoiceCapabilities, useVoiceSample } from "../api/queries.js";
 import type {
   PendingToolApproval,
   PendingQuestion,
@@ -133,17 +138,18 @@ const approvalCopy = (
     });
     const fields = new Set<string>();
     for (const operation of operations) {
-      if ("title" in operation) fields.add("title");
-      if ("claim_ids" in operation) fields.add("sources");
-      if ("narration" in operation) fields.add("script");
-      if ("narration_artifact_id" in operation) fields.add("voice");
-      if ("captions_artifact_id" in operation) fields.add("captions");
-      if ("transcript_artifact_id" in operation) fields.add("transcript");
-      if ("duration_seconds" in operation) fields.add("timing");
-      if ("gap_after_seconds" in operation) fields.add("gap");
-      if ("source_clip" in operation) fields.add("source range");
-      if ("playback_rate" in operation) fields.add("speed");
-      if ("visual" in operation) fields.add("visual");
+      if (operation.title !== undefined) fields.add("title");
+      if (operation.claim_ids !== undefined) fields.add("sources");
+      if (operation.narration !== undefined) fields.add("script");
+      if (operation.narration_artifact_id !== undefined) fields.add("voice");
+      if (operation.captions_artifact_id !== undefined) fields.add("captions");
+      if (operation.transcript_artifact_id !== undefined)
+        fields.add("transcript");
+      if (operation.duration_seconds !== undefined) fields.add("timing");
+      if (operation.gap_after_seconds !== undefined) fields.add("gap");
+      if (operation.source_clip !== undefined) fields.add("source range");
+      if (operation.playback_rate !== undefined) fields.add("speed");
+      if (operation.visual !== undefined) fields.add("visual");
       if (operation.type === "split_scene") fields.add("structure");
       if (
         operation.type === "upsert_audio_track" ||
@@ -220,7 +226,6 @@ const ApprovalCard = ({
     <div className="mx-3 mb-2 overflow-hidden rounded-xl border border-warning/25 bg-warning-soft">
       <div className="border-l-[3px] border-warning p-3">
         <div className="flex items-center gap-2 text-[12px] font-medium text-warning">
-          <CircleDot size={14} className="text-warning" />
           Needs your approval
         </div>
         <p className="mt-2 text-[14px] font-medium leading-5 text-ink">
@@ -296,6 +301,67 @@ const ApprovalCard = ({
     </div>
   );
 };
+
+const ManualEditCard = ({
+  artifacts,
+  busy,
+  content,
+  error,
+  patch,
+  onApply,
+  onCancel,
+  onRefine,
+}: {
+  artifacts: Artifact[];
+  busy: boolean;
+  content: ContentPackage;
+  error: Error | null;
+  patch: EditorPatchInput;
+  onApply: () => void;
+  onCancel: () => void;
+  onRefine: () => void;
+}) => (
+  <div className="mb-2 overflow-hidden rounded-xl border border-action/25 bg-action-soft/40">
+    <div className="border-l-[3px] border-action p-3">
+      <p className="text-[12px] font-medium text-action">Preview</p>
+      <p className="mt-1 text-[14px] font-medium leading-5 text-ink">
+        {patch.instruction_summary}
+      </p>
+      <EditPatchPreview artifacts={artifacts} content={content} patch={patch} />
+      {error ? (
+        <p className="mt-2 text-[11px] text-warning">
+          This preview is out of date. Cancel it and try the edit again.
+        </p>
+      ) : null}
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onApply}
+          className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-ink text-[12px] font-medium text-white hover:bg-ink-secondary disabled:opacity-40"
+        >
+          <Check size={13} /> Apply
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onRefine}
+          className="h-9 rounded-lg border border-line bg-surface px-3 text-[11px] text-ink-secondary hover:bg-hover disabled:opacity-40"
+        >
+          Refine
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onCancel}
+          className="h-9 px-2 text-[11px] text-ink-tertiary hover:text-ink disabled:opacity-40"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+);
 
 const ReviewDocument = ({
   document,
@@ -419,15 +485,199 @@ const ComposerExamples = ({
   );
 };
 
+const VoicePickerCard = ({
+  projectId,
+  sampleScript,
+  onChoose,
+  onCancel,
+}: {
+  projectId: string;
+  sampleScript: string;
+  onChoose: (voice: VoiceOption) => void;
+  onCancel: () => void;
+}) => {
+  const capabilities = useVoiceCapabilities();
+  const sample = useVoiceSample(projectId);
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const voices = capabilities.data?.voices ?? [];
+  const filteredVoices = voices.filter((voice) =>
+    `${voice.id} ${voice.character}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+  const selected = voices.find((voice) => voice.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!selectedId && capabilities.data?.voice_id) {
+      setSelectedId(capabilities.data.voice_id);
+    }
+  }, [capabilities.data?.voice_id, selectedId]);
+
+  useEffect(
+    () => () => {
+      audioRef.current?.pause();
+    },
+    [],
+  );
+
+  const audition = async (voice: VoiceOption) => {
+    audioRef.current?.pause();
+    setPlayingId(voice.id);
+    try {
+      const result = await sample.mutateAsync({
+        script: sampleScript,
+        voice_id: voice.id,
+      });
+      const audio = new Audio(greenlightApi.artifactUrl(result.artifact.id));
+      audioRef.current = audio;
+      audio.addEventListener("ended", () => setPlayingId(null), {
+        once: true,
+      });
+      await audio.play();
+    } catch {
+      setPlayingId(null);
+    }
+  };
+
+  return (
+    <section className="mx-3 mb-2 overflow-hidden rounded-xl border border-line bg-surface-raised shadow-[0_6px_24px_rgb(17_24_39/0.07)]">
+      <header className="flex items-start gap-3 border-b border-line-subtle px-4 py-3">
+        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-action-soft text-action">
+          <Mic2 size={15} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[14px] font-medium leading-5 text-ink">
+            Choose a voice
+          </h3>
+          <p className="text-[12px] leading-5 text-ink-tertiary">
+            Hear this scene in a Gemini voice before using it.
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label="Close voice picker"
+          onClick={onCancel}
+          className="grid size-7 place-items-center text-ink-tertiary hover:text-ink"
+        >
+          <X size={14} />
+        </button>
+      </header>
+
+      {capabilities.isLoading ? (
+        <div className="grid h-32 place-items-center text-ink-caption">
+          <LoaderCircle size={18} className="animate-spin" />
+        </div>
+      ) : capabilities.isError || !capabilities.data?.available ? (
+        <p className="px-4 py-5 text-[13px] leading-5 text-ink-secondary">
+          Voice previews need the project’s OpenRouter connection.
+        </p>
+      ) : (
+        <>
+          <label className="mx-3 mt-3 flex h-9 items-center gap-2 border border-line bg-surface px-3 focus-within:border-action">
+            <Search size={13} className="text-ink-caption" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search voices"
+              className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-caption"
+            />
+          </label>
+          <div className="scroll-stable mx-3 my-2 max-h-56 overflow-y-auto border-y border-line-subtle">
+            {filteredVoices.map((voice) => {
+              const chosen = voice.id === selectedId;
+              const loading = sample.isPending && playingId === voice.id;
+              return (
+                <div
+                  key={voice.id}
+                  className={cx(
+                    "flex min-h-11 items-center border-b border-line-subtle px-2 last:border-0",
+                    chosen && "bg-action-soft",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(voice.id)}
+                    className="flex min-w-0 flex-1 items-center gap-3 py-2 text-left"
+                  >
+                    <span
+                      className={cx(
+                        "size-3 rounded-full border border-line-strong bg-surface",
+                        chosen && "border-[4px] border-action",
+                      )}
+                    />
+                    <span className="min-w-0">
+                      <strong className="block text-[13px] font-medium text-ink">
+                        {voice.id}
+                      </strong>
+                      <span className="block text-[11px] text-ink-tertiary">
+                        {voice.character}
+                      </span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={sample.isPending}
+                    onClick={() => void audition(voice)}
+                    aria-label={`Hear ${voice.id}`}
+                    className="grid size-8 place-items-center rounded-full border border-line bg-surface text-ink-secondary hover:border-action hover:text-action disabled:opacity-35"
+                  >
+                    {loading ? (
+                      <LoaderCircle size={13} className="animate-spin" />
+                    ) : (
+                      <Play size={13} fill="currentColor" />
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {sample.isError ? (
+        <p className="px-4 pb-2 text-[11px] text-warning">
+          That preview could not be generated. Try another voice.
+        </p>
+      ) : null}
+      <footer className="flex items-center justify-end gap-2 border-t border-line-subtle px-3 py-2.5">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-8 px-3 text-[12px] text-ink-tertiary hover:text-ink"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={!selected}
+          onClick={() => selected && onChoose(selected)}
+          className="h-8 rounded-md bg-ink px-3 text-[12px] font-medium text-white disabled:opacity-30"
+        >
+          Use {selected?.id ?? "voice"}
+        </button>
+      </footer>
+    </section>
+  );
+};
+
 export const ProducerPanel = ({
+  projectId,
   content,
   artifacts,
   selection,
   contextArtifacts,
   draftIntent,
   events,
+  activity,
   pendingApprovals,
   pendingQuestions,
+  manualPatch,
+  manualPatchError,
+  manualPatchSaving,
+  selectedGapAfterSceneIds,
   isSending,
   isApproving,
   isAnswering,
@@ -436,20 +686,28 @@ export const ProducerPanel = ({
   onApproval,
   onAnswerQuestion,
   onCancelQuestion,
+  onApplyManualPatch,
+  onCancelManualPatch,
   onRemoveScene,
   onRemoveArtifact,
   onAttachArtifact,
   onImportFiles,
   importing,
 }: {
+  projectId: string | null;
   content: ContentPackage | null;
   artifacts: Artifact[];
   selection: EditorSelection | null;
   contextArtifacts: Artifact[];
   draftIntent: { id: string; text: string } | null;
   events: StudioAgentEvent[];
+  activity: string | null;
   pendingApprovals: PendingToolApproval[];
   pendingQuestions: PendingQuestion[];
+  manualPatch: EditorPatchInput | null;
+  manualPatchError: Error | null;
+  manualPatchSaving: boolean;
+  selectedGapAfterSceneIds: string[];
   isSending: boolean;
   isApproving: boolean;
   isAnswering: boolean;
@@ -462,6 +720,8 @@ export const ProducerPanel = ({
   ) => void;
   onAnswerQuestion: (pending: PendingQuestion, answer: string) => void;
   onCancelQuestion: (pending: PendingQuestion) => void;
+  onApplyManualPatch: () => void;
+  onCancelManualPatch: () => void;
   onRemoveScene: (sceneId: string) => void;
   onRemoveArtifact: (artifactId: string) => void;
   onAttachArtifact: (artifactId: string) => void;
@@ -470,6 +730,7 @@ export const ProducerPanel = ({
 }) => {
   const [instruction, setInstruction] = useState("");
   const [dragActive, setDragActive] = useState(false);
+  const [voicePickerOpen, setVoicePickerOpen] = useState(false);
   const [openDocument, setOpenDocument] = useState<StudioReviewDocument | null>(
     null,
   );
@@ -478,7 +739,17 @@ export const ProducerPanel = ({
     if (draftIntent) setInstruction(draftIntent.text);
   }, [draftIntent]);
   const conversationPaused =
-    pendingQuestions.length > 0 || pendingApprovals.length > 0;
+    pendingQuestions.length > 0 ||
+    pendingApprovals.length > 0 ||
+    manualPatch !== null;
+  const sampleScript =
+    selection?.scene_ids
+      .map((sceneId) =>
+        content?.scenes.find((scene) => scene.id === sceneId)?.narration.trim(),
+      )
+      .find(Boolean)
+      ?.slice(0, 220) ??
+    "Every edit stays intentional, reversible, and ready to share.";
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -501,11 +772,6 @@ export const ProducerPanel = ({
                       <p className="whitespace-pre-wrap text-[14px] leading-6">
                         {event.label}
                       </p>
-                      {event.delivery === "sending" ? (
-                        <span className="mt-1 block text-[10px] leading-4 text-white/60">
-                          Sending…
-                        </span>
-                      ) : null}
                       {event.delivery === "failed" ? (
                         <button
                           type="button"
@@ -521,18 +787,13 @@ export const ProducerPanel = ({
                 );
               }
               const Icon = eventIcon[event.kind];
+              const eventArtifact = event.artifactId
+                ? artifacts.find((artifact) => artifact.id === event.artifactId)
+                : null;
               return (
-                <button
-                  type="button"
+                <div
                   key={event.id}
-                  disabled={!event.document}
-                  onClick={() =>
-                    event.document && setOpenDocument(event.document)
-                  }
-                  className={cx(
-                    "flex w-full gap-2.5 rounded-lg px-2 py-2.5 text-left",
-                    event.document && "hover:bg-hover",
-                  )}
+                  className="flex w-full gap-2.5 rounded-lg px-2 py-2.5 text-left"
                 >
                   <span
                     className={cx(
@@ -558,38 +819,94 @@ export const ProducerPanel = ({
                       </p>
                     ) : null}
                     {event.document ? (
-                      <span className="mt-1 block text-[11px] font-medium text-action">
+                      <button
+                        type="button"
+                        onClick={() => setOpenDocument(event.document!)}
+                        className="mt-1 block text-[11px] font-medium text-action hover:underline"
+                      >
                         Open
-                      </span>
+                      </button>
+                    ) : null}
+                    {eventArtifact ? (
+                      <a
+                        href={greenlightApi.artifactUrl(eventArtifact.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 block text-[11px] font-medium text-action hover:underline"
+                      >
+                        Open media
+                      </a>
                     ) : null}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
         )}
+        {activity ? (
+          <div className="flex items-center gap-2.5 px-2 py-2.5 text-[12px] text-ink-secondary">
+            <span className="grid size-6 shrink-0 place-items-center rounded-full bg-action-soft text-action">
+              <LoaderCircle size={12} className="animate-spin" />
+            </span>
+            <span>{activity}</span>
+          </div>
+        ) : null}
+        {pendingQuestions.map((pending) => (
+          <QuestionCard
+            key={pending.toolCallId}
+            pending={pending}
+            busy={isAnswering}
+            onAnswer={(answer) => onAnswerQuestion(pending, answer)}
+            onCancel={() => onCancelQuestion(pending)}
+          />
+        ))}
+
+        {manualPatch && content ? (
+          <ManualEditCard
+            artifacts={artifacts}
+            busy={manualPatchSaving}
+            content={content}
+            error={manualPatchError}
+            patch={manualPatch}
+            onApply={onApplyManualPatch}
+            onCancel={onCancelManualPatch}
+            onRefine={() => {
+              setInstruction(
+                `Refine this preview: ${manualPatch.instruction_summary}`,
+              );
+              onCancelManualPatch();
+            }}
+          />
+        ) : null}
+
+        {pendingApprovals.map((pending) => (
+          <ApprovalCard
+            key={pending.toolCallId}
+            pending={pending}
+            content={content}
+            artifacts={artifacts}
+            busy={isApproving}
+            onDecision={(status, reason) => onApproval(pending, status, reason)}
+          />
+        ))}
+
+        {voicePickerOpen && !conversationPaused && projectId ? (
+          <VoicePickerCard
+            projectId={projectId}
+            sampleScript={sampleScript}
+            onCancel={() => setVoicePickerOpen(false)}
+            onChoose={(voice) => {
+              setInstruction((current) => {
+                const choice = `Use the ${voice.id} voice (${voice.character.toLowerCase()}) for the selected narration or dub track. Generate scene-sized clips and preview the track change before applying it.`;
+                return current.trim()
+                  ? `${current.trim()}\n\n${choice}`
+                  : choice;
+              });
+              setVoicePickerOpen(false);
+            }}
+          />
+        ) : null}
       </div>
-
-      {pendingQuestions.map((pending) => (
-        <QuestionCard
-          key={pending.toolCallId}
-          pending={pending}
-          busy={isAnswering}
-          onAnswer={(answer) => onAnswerQuestion(pending, answer)}
-          onCancel={() => onCancelQuestion(pending)}
-        />
-      ))}
-
-      {pendingApprovals.map((pending) => (
-        <ApprovalCard
-          key={pending.toolCallId}
-          pending={pending}
-          content={content}
-          artifacts={artifacts}
-          busy={isApproving}
-          onDecision={(status, reason) => onApproval(pending, status, reason)}
-        />
-      ))}
 
       <form
         data-testid="producer-composer"
@@ -632,7 +949,7 @@ export const ProducerPanel = ({
         }}
       >
         {selection && content ? (
-          <div className="flex max-h-[68px] flex-wrap gap-1.5 overflow-y-auto border-b border-line-subtle px-3 pb-2 pt-2.5">
+          <div className="flex flex-wrap gap-1.5 border-b border-line-subtle px-3 pb-2 pt-2.5">
             <span className="flex h-6 shrink-0 items-center gap-1 text-[9px] text-ink-caption">
               <MousePointer2 size={11} className="text-action" />
               {selection.scene_ids.length}
@@ -663,6 +980,28 @@ export const ProducerPanel = ({
             {selection.scene_ids.length > 3 ? (
               <span className="flex h-6 shrink-0 items-center rounded-md bg-action-soft px-2 font-mono text-[8px] text-ink-secondary">
                 +{selection.scene_ids.length - 3}
+              </span>
+            ) : null}
+            {selectedGapAfterSceneIds.slice(0, 2).map((sceneId) => {
+              const scene = content.scenes.find(
+                (candidate) => candidate.id === sceneId,
+              );
+              if (!scene?.gap_after_seconds) return null;
+              return (
+                <span
+                  key={`${sceneId}-gap`}
+                  className="flex h-6 min-w-0 max-w-[220px] items-center gap-1.5 rounded-md bg-warning-soft px-2 text-[9px] text-ink-secondary"
+                >
+                  <span className="truncate">
+                    {scene.gap_after_seconds.toFixed(1)}s gap after{" "}
+                    {scene.title}
+                  </span>
+                </span>
+              );
+            })}
+            {selectedGapAfterSceneIds.length > 2 ? (
+              <span className="flex h-6 shrink-0 items-center rounded-md bg-warning-soft px-2 font-mono text-[8px] text-ink-secondary">
+                +{selectedGapAfterSceneIds.length - 2} gaps
               </span>
             ) : null}
             {contextArtifacts.slice(0, 3).map((artifact) => {
@@ -745,6 +1084,18 @@ export const ProducerPanel = ({
               event.target.value = "";
             }}
           />
+          <button
+            type="button"
+            aria-label="Choose a Gemini voice"
+            disabled={conversationPaused || !projectId}
+            onClick={() => setVoicePickerOpen((open) => !open)}
+            className={cx(
+              "grid size-8 place-items-center rounded-full text-ink-tertiary hover:bg-hover hover:text-ink disabled:opacity-30",
+              voicePickerOpen && "bg-action-soft text-action",
+            )}
+          >
+            <Mic2 size={14} />
+          </button>
           <button
             type="button"
             aria-label="Attach media"

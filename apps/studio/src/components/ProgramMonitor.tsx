@@ -16,7 +16,7 @@ import { cx, IconButton } from "./controls.js";
 
 type MediaController = ReturnType<typeof useMediaController>;
 
-const SceneCanvas = ({
+export const SceneCanvas = ({
   scene,
   artifacts,
 }: {

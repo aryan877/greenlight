@@ -2,6 +2,7 @@ import {
   contentPackageSchema,
   type Artifact,
   type ContentPackage,
+  type EditorPatchInput,
   type Project,
   type ProjectBrief,
   type ReleaseSnapshot,
@@ -20,6 +21,19 @@ export type ProjectDetail = {
     snapshot: ReleaseSnapshot;
     snapshotSha256: string;
   } | null;
+};
+
+export type VoiceOption = {
+  character: string;
+  id: string;
+};
+
+export type VoiceCapabilities = {
+  available: boolean;
+  model: string | null;
+  provider: "openrouter" | "disabled";
+  voice_id: string | null;
+  voices: VoiceOption[];
 };
 
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
@@ -55,6 +69,29 @@ export const greenlightApi = {
     }).then((response) => response.project),
   getProject: (projectId: string) =>
     request<ProjectDetail>(`/projects/${encodeURIComponent(projectId)}`),
+  getVoiceCapabilities: () => request<VoiceCapabilities>("/voice"),
+  createVoiceSample: (
+    projectId: string,
+    input: { locale?: string; script: string; voice_id: string },
+  ) =>
+    request<{ artifact: Artifact; cached: boolean }>(
+      `/projects/${encodeURIComponent(projectId)}/voice-samples`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      },
+    ),
+  applyEditorPatch: (projectId: string, patch: EditorPatchInput) =>
+    request<{
+      content_package_artifact: Artifact;
+      patch_artifact: Artifact;
+      project: ProjectSummary;
+    }>(`/projects/${encodeURIComponent(projectId)}/editor-patches`, {
+      method: "POST",
+      body: JSON.stringify(patch),
+      headers: { "content-type": "application/json" },
+    }),
   getContentPackage: (artifactId: string) =>
     request<ContentPackage>(
       `/artifacts/${encodeURIComponent(artifactId)}`,

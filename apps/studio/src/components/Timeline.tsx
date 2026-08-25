@@ -3,6 +3,7 @@ import {
   MIN_SCENE_DURATION_SECONDS,
   VIDEO_FPS,
   type ContentPackage,
+  type EditorPatchOperation,
   type Scene,
 } from "@greenlight/contracts";
 import {
@@ -43,6 +44,15 @@ type Marquee = {
   additive: boolean;
 };
 
+type ClipDrag = {
+  pointerId: number;
+  sceneId: string;
+  startX: number;
+  currentX: number;
+  dropIndex: number;
+  moved: boolean;
+};
+
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 8;
 const ZOOM_STEP = 0.1;
@@ -50,6 +60,7 @@ const ZOOM_STEP = 0.1;
 export const Timeline = ({
   content,
   selectedSceneIds,
+  selectedGapAfterSceneIds,
   previewSceneIds,
   previewing,
   currentTime,
@@ -57,20 +68,27 @@ export const Timeline = ({
   onSelectMany,
   onSeek,
   onIntent,
-  onEditorCommand,
+  onPreviewEdit,
+  onSelectGap,
   onSelectAll,
   onCollapse,
 }: {
   content: ContentPackage;
   selectedSceneIds: string[];
+  selectedGapAfterSceneIds: string[];
   previewSceneIds: string[];
   previewing: boolean;
   currentTime: number;
   onSelect: (scene: Scene, additive: boolean) => void;
-  onSelectMany: (sceneIds: string[]) => void;
+  onSelectMany: (sceneIds: string[], gapAfterSceneIds?: string[]) => void;
   onSeek: (seconds: number) => void;
   onIntent: (instruction: string) => void;
-  onEditorCommand: (sceneIds: string[], instruction: string) => void;
+  onPreviewEdit: (
+    sceneIds: string[],
+    operations: EditorPatchOperation[],
+    summary: string,
+  ) => void;
+  onSelectGap: (sceneId: string, additive: boolean) => void;
   onSelectAll: () => void;
   onCollapse: () => void;
 }) => {
@@ -90,6 +108,7 @@ export const Timeline = ({
   } | null>(null);
   const [marquee, setMarquee] = useState<Marquee | null>(null);
   const marqueeRef = useRef<Marquee | null>(null);
+  const clipDragRef = useRef<ClipDrag | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const updateMarquee = (next: Marquee | null) => {
     marqueeRef.current = next;
@@ -190,7 +209,7 @@ export const Timeline = ({
           <AudioTrackRail
             audioTracks={audioTracks}
             height={trackHeight + 28}
-            onEditorCommand={onEditorCommand}
+            onEditorCommand={(_sceneIds, instruction) => onIntent(instruction)}
             scenes={content.scenes}
           />
           <div className="absolute left-36 right-0 top-0">
@@ -234,10 +253,7 @@ export const Timeline = ({
               onPointerDown={(event) => {
                 if (event.button !== 0) return;
                 const target = event.target as HTMLElement;
-                if (
-                  target.closest("[data-reorder-handle]") ||
-                  target.closest("[data-trim-handle]")
-                ) {
+                if (target.closest("[data-trim-handle]")) {
                   return;
                 }
                 const bounds = event.currentTarget.getBoundingClientRect();
@@ -297,17 +313,35 @@ export const Timeline = ({
                     bounds.width;
                   const sceneRight =
                     sceneLeft +
-                    (sceneTimelineDuration(content.scenes, index) / duration) *
-                      bounds.width;
+                    (scene.duration_seconds / duration) * bounds.width;
                   return sceneRight >= left && sceneLeft <= right
                     ? [scene.id]
                     : [];
                 });
-                if (selected.length > 0) {
+                const selectedGaps = content.scenes.flatMap((scene, index) => {
+                  const gap = scene.gap_after_seconds ?? 0;
+                  if (gap <= 0) return [];
+                  const gapLeft =
+                    ((sceneOffset(content.scenes, index) +
+                      scene.duration_seconds) /
+                      duration) *
+                    bounds.width;
+                  const gapRight = gapLeft + (gap / duration) * bounds.width;
+                  return gapRight >= left && gapLeft <= right ? [scene.id] : [];
+                });
+                if (selected.length > 0 || selectedGaps.length > 0) {
                   onSelectMany(
                     active.additive
                       ? Array.from(new Set([...selectedSceneIds, ...selected]))
                       : selected,
+                    active.additive
+                      ? Array.from(
+                          new Set([
+                            ...selectedGapAfterSceneIds,
+                            ...selectedGaps,
+                          ]),
+                        )
+                      : selectedGaps,
                   );
                 }
               }}
@@ -351,47 +385,122 @@ export const Timeline = ({
                     tabIndex={0}
                     aria-pressed={selected}
                     title={scene.title}
-                    onDragStart={(event) => {
+                    onPointerDown={(event) => {
                       if (
-                        !(event.target as HTMLElement).closest(
-                          "[data-reorder-handle]",
-                        )
+                        event.button !== 0 ||
+                        previewing ||
+                        event.shiftKey ||
+                        event.metaKey ||
+                        event.ctrlKey
                       ) {
-                        event.preventDefault();
                         return;
                       }
-                      setDraggedSceneId(scene.id);
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", scene.id);
-                    }}
-                    onDragEnd={() => {
-                      setDraggedSceneId(null);
-                      setDropSceneId(null);
-                    }}
-                    onDragOver={(event) => {
                       event.preventDefault();
-                      if (draggedSceneId && draggedSceneId !== scene.id) {
-                        setDropSceneId(scene.id);
+                      event.stopPropagation();
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      clipDragRef.current = {
+                        pointerId: event.pointerId,
+                        sceneId: scene.id,
+                        startX: event.clientX,
+                        currentX: event.clientX,
+                        dropIndex: index,
+                        moved: false,
+                      };
+                    }}
+                    onPointerMove={(event) => {
+                      const active = clipDragRef.current;
+                      if (
+                        !active ||
+                        active.pointerId !== event.pointerId ||
+                        active.sceneId !== scene.id
+                      ) {
+                        return;
                       }
+                      const moved =
+                        active.moved ||
+                        Math.abs(event.clientX - active.startX) >= 5;
+                      if (!moved) return;
+                      const bounds = trackRef.current?.getBoundingClientRect();
+                      if (!bounds) return;
+                      const seconds =
+                        (Math.max(
+                          0,
+                          Math.min(bounds.width, event.clientX - bounds.left),
+                        ) /
+                          bounds.width) *
+                        duration;
+                      const remaining = content.scenes.filter(
+                        (item) => item.id !== scene.id,
+                      );
+                      const dropIndex = remaining.findIndex((item) => {
+                        const itemIndex = content.scenes.findIndex(
+                          (candidate) => candidate.id === item.id,
+                        );
+                        return (
+                          seconds <
+                          sceneOffset(content.scenes, itemIndex) +
+                            sceneTimelineDuration(content.scenes, itemIndex) / 2
+                        );
+                      });
+                      const resolvedIndex =
+                        dropIndex < 0 ? remaining.length : dropIndex;
+                      clipDragRef.current = {
+                        ...active,
+                        currentX: event.clientX,
+                        dropIndex: resolvedIndex,
+                        moved: true,
+                      };
+                      setDraggedSceneId(scene.id);
+                      setDropSceneId(
+                        remaining[resolvedIndex]?.id ?? "timeline-end",
+                      );
                     }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const sourceId =
-                        draggedSceneId ||
-                        event.dataTransfer.getData("text/plain");
-                      if (!sourceId || sourceId === scene.id) return;
-                      const order = content.scenes.map((item) => item.id);
-                      const from = order.indexOf(sourceId);
-                      const to = order.indexOf(scene.id);
-                      if (from < 0 || to < 0) return;
-                      order.splice(from, 1);
-                      order.splice(to, 0, sourceId);
+                    onPointerUp={(event) => {
+                      const active = clipDragRef.current;
+                      if (
+                        !active ||
+                        active.pointerId !== event.pointerId ||
+                        active.sceneId !== scene.id
+                      ) {
+                        return;
+                      }
+                      clipDragRef.current = null;
+                      if (
+                        event.currentTarget.hasPointerCapture(event.pointerId)
+                      ) {
+                        event.currentTarget.releasePointerCapture(
+                          event.pointerId,
+                        );
+                      }
+                      if (!active.moved) {
+                        onSelect(scene, false);
+                        onSeek(sceneOffset(content.scenes, index));
+                        return;
+                      }
+                      const order = content.scenes
+                        .filter((item) => item.id !== scene.id)
+                        .map((item) => item.id);
+                      order.splice(active.dropIndex, 0, scene.id);
                       setDraggedSceneId(null);
                       setDropSceneId(null);
-                      onEditorCommand(
+                      if (
+                        order.every(
+                          (sceneId, sceneIndex) =>
+                            sceneId === content.scenes[sceneIndex]?.id,
+                        )
+                      ) {
+                        return;
+                      }
+                      onPreviewEdit(
                         content.scenes.map((item) => item.id),
-                        `Reorder the full cut to this exact scene order: ${order.join(", ")}. Change only scene order and show the preview before applying it.`,
+                        [{ type: "reorder_scenes", scene_ids: order }],
+                        `Move “${scene.title}” in the timeline`,
                       );
+                    }}
+                    onPointerCancel={() => {
+                      clipDragRef.current = null;
+                      setDraggedSceneId(null);
+                      setDropSceneId(null);
                     }}
                     onKeyDown={(event) => {
                       if (event.key !== "Enter" && event.key !== " ") return;
@@ -403,10 +512,13 @@ export const Timeline = ({
                       onSeek(sceneOffset(content.scenes, index));
                     }}
                     className={cx(
-                      "group absolute bottom-1 top-1 grid min-w-0 select-none gap-px focus-visible:outline-none focus-visible:[&>span]:ring-1 focus-visible:[&>span]:ring-inset focus-visible:[&>span]:ring-action",
+                      "group absolute bottom-1 top-1 grid min-w-0 cursor-grab select-none gap-px active:cursor-grabbing focus-visible:outline-none focus-visible:[&>span]:ring-1 focus-visible:[&>span]:ring-inset focus-visible:[&>span]:ring-action",
                       draggedSceneId === scene.id && "opacity-40",
                       dropSceneId === scene.id &&
                         "before:absolute before:inset-y-0 before:left-0 before:z-20 before:w-0.5 before:bg-action",
+                      dropSceneId === "timeline-end" &&
+                        index === content.scenes.length - 1 &&
+                        "after:absolute after:inset-y-0 after:right-0 after:z-20 after:w-0.5 after:bg-action",
                     )}
                     style={{
                       left: `${left}%`,
@@ -425,10 +537,8 @@ export const Timeline = ({
                       )}
                     >
                       <span
-                        data-reorder-handle
-                        draggable={!previewing && !marquee}
-                        title="Drag to reorder this scene"
-                        className="grid size-4 shrink-0 cursor-grab place-items-center rounded-sm text-track-video-strong hover:bg-white/70 active:cursor-grabbing"
+                        title="Drag the scene to reorder it"
+                        className="grid size-4 shrink-0 place-items-center rounded-sm text-track-video-strong"
                       >
                         <Layers3 size={10} className="pointer-events-none" />
                       </span>
@@ -495,7 +605,7 @@ export const Timeline = ({
                         data-trim-handle
                         aria-label={`Trim ${scene.title}`}
                         title="Drag to trim the end"
-                        className="absolute inset-y-1 right-0 z-20 w-1.5 cursor-ew-resize rounded-full bg-action opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                        className="absolute inset-y-1 right-0 z-20 w-1.5 cursor-ew-resize rounded-full bg-action opacity-70 transition-opacity hover:opacity-100 focus:opacity-100"
                         onPointerDown={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
@@ -552,12 +662,28 @@ export const Timeline = ({
                               0,
                               currentGap + initial - next,
                             );
-                            const sourceInstruction = scene.source_clip
-                              ? ` Move the source out point to ${(scene.source_clip.in_seconds + next * scene.playback_rate).toFixed(3)} seconds; its measured source ends at ${scene.source_clip.source_duration_seconds.toFixed(3)} seconds.`
-                              : " This scene has no recorded unused source handles, so do not extend it beyond its current duration.";
-                            onEditorCommand(
+                            const sourceClip = scene.source_clip
+                              ? {
+                                  ...scene.source_clip,
+                                  out_seconds:
+                                    scene.source_clip.in_seconds +
+                                    next * scene.playback_rate,
+                                }
+                              : undefined;
+                            onPreviewEdit(
                               [scene.id],
-                              `Set scene ${scene.id} to exactly ${next.toFixed(3)} seconds and set its gap after to exactly ${nextGap.toFixed(3)} seconds. Keep its start, media, captions, sources, and wording unchanged.${sourceInstruction} Show the frame-accurate preview before applying it.`,
+                              [
+                                {
+                                  type: "update_scene",
+                                  scene_id: scene.id,
+                                  duration_seconds: next,
+                                  gap_after_seconds: nextGap,
+                                  ...(sourceClip
+                                    ? { source_clip: sourceClip }
+                                    : {}),
+                                },
+                              ],
+                              `Trim “${scene.title}” to ${formatTime(next)}`,
                             );
                           };
                           window.addEventListener("pointermove", move);
@@ -586,16 +712,35 @@ export const Timeline = ({
                     duration) *
                   100;
                 return (
-                  <div
+                  <button
+                    type="button"
                     key={`${scene.id}-gap`}
-                    className="preview-hatch pointer-events-none absolute bottom-1 top-3 z-10 grid place-items-center border-x border-warning/40 text-[8px] font-medium text-warning"
+                    aria-pressed={selectedGapAfterSceneIds.includes(scene.id)}
+                    aria-label={`Select ${formatTime(gap)} gap after ${scene.title}`}
+                    title="Select this gap and ask Producer what should fill it"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                    }}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelectGap(
+                        scene.id,
+                        event.shiftKey || event.metaKey || event.ctrlKey,
+                      );
+                    }}
+                    className={cx(
+                      "preview-hatch absolute bottom-1 top-1 z-10 grid place-items-center border-x text-[8px] font-medium text-warning hover:bg-warning/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-warning",
+                      selectedGapAfterSceneIds.includes(scene.id)
+                        ? "border-warning bg-warning/15 ring-1 ring-inset ring-warning"
+                        : "border-warning/40",
+                    )}
                     style={{
                       left: `${left}%`,
                       width: `${(gap / duration) * 100}%`,
                     }}
                   >
                     <span className="truncate px-1">{formatTime(gap)} gap</span>
-                  </div>
+                  </button>
                 );
               })}
               {marquee ? (
