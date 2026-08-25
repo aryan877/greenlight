@@ -137,6 +137,8 @@ openssl rand -hex 32
 
 Put the generated value in `GREENLIGHT_MCP_AUTH_TOKEN`. Put provider credentials only in the ignored `.env` file.
 
+The judged configuration uses OpenRouter, but TrueForge is not locked to it. Set `GREENLIGHT_ROOT_PROVIDER_NAME`, `GREENLIGHT_ROOT_BASE_URL`, `GREENLIGHT_ROOT_MODEL`, and `GREENLIGHT_ROOT_API_KEY` to any OpenAI-compatible provider route that supports the selected model. The configured provider name becomes the prefix in the root agent's model reference.
+
 Start TrueForge:
 
 ```bash

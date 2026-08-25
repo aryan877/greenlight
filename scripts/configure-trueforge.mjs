@@ -8,7 +8,13 @@ const trueForgeUrl = (
   process.env.TRUEFORGE_API_URL ?? "http://localhost:8790"
 ).replace(/\/$/, "");
 const mcpUrl = process.env.GREENLIGHT_MCP_URL ?? "http://localhost:8941/mcp";
-const openRouterKey = process.env.OPENROUTER_API_KEY;
+const rootProviderName =
+  process.env.GREENLIGHT_ROOT_PROVIDER_NAME ?? "greenlight";
+const rootProviderBaseUrl = (
+  process.env.GREENLIGHT_ROOT_BASE_URL ?? "https://openrouter.ai/api/v1"
+).replace(/\/$/, "");
+const rootApiKey =
+  process.env.GREENLIGHT_ROOT_API_KEY ?? process.env.OPENROUTER_API_KEY;
 const mcpAuthToken = process.env.GREENLIGHT_MCP_AUTH_TOKEN;
 const upstreamModel =
   process.env.GREENLIGHT_ROOT_MODEL ?? "google/gemini-3.7-flash";
@@ -45,9 +51,29 @@ const skillManifests = [
   },
 ];
 
-if (!openRouterKey) {
+if (!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(rootProviderName)) {
   throw new Error(
-    "OPENROUTER_API_KEY is required. Put it in ignored .env and rerun the command.",
+    "GREENLIGHT_ROOT_PROVIDER_NAME must be a lowercase provider identifier.",
+  );
+}
+let parsedRootProviderUrl;
+try {
+  parsedRootProviderUrl = new URL(rootProviderBaseUrl);
+} catch {
+  throw new Error("GREENLIGHT_ROOT_BASE_URL must be a valid HTTP(S) URL.");
+}
+if (
+  !["http:", "https:"].includes(parsedRootProviderUrl.protocol) ||
+  parsedRootProviderUrl.username ||
+  parsedRootProviderUrl.password
+) {
+  throw new Error(
+    "GREENLIGHT_ROOT_BASE_URL must be an HTTP(S) URL without embedded credentials.",
+  );
+}
+if (!rootApiKey) {
+  throw new Error(
+    "GREENLIGHT_ROOT_API_KEY is required. Put it in ignored .env and rerun the command.",
   );
 }
 if (!mcpAuthToken || mcpAuthToken.length < 32) {
@@ -125,8 +151,8 @@ const gitSkillsAreAvailable = async () => {
 const resolveCompactionThreshold = async () => {
   const fallback = 50_000;
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/models", {
-      headers: { authorization: `Bearer ${openRouterKey}` },
+    const response = await fetch(`${rootProviderBaseUrl}/models`, {
+      headers: { authorization: `Bearer ${rootApiKey}` },
     });
     if (!response.ok) return fallback;
     const body = await response.json();
@@ -158,9 +184,9 @@ await request("/api/v1/settings/model-providers", {
   body: JSON.stringify({
     manifest: {
       type: "custom",
-      name: "greenlight",
-      base_url: "https://openrouter.ai/api/v1",
-      auth: { api_key: openRouterKey },
+      name: rootProviderName,
+      base_url: rootProviderBaseUrl,
+      auth: { api_key: rootApiKey },
       models: [
         {
           model_id: upstreamModel,
@@ -224,6 +250,10 @@ if (enableGitSkills) {
 const compactionThreshold = await resolveCompactionThreshold();
 const manifest = {
   ...agentSource.manifest,
+  model: {
+    ...agentSource.manifest.model,
+    name: `${rootProviderName}/root-model`,
+  },
   skills: enableGitSkills ? agentSource.manifest.skills : [],
   instructions: instructions.trim(),
   config: {
@@ -251,7 +281,7 @@ const saved = existing
     });
 
 console.log(
-  `Configured TrueForge provider: greenlight/root-model -> ${upstreamModel}`,
+  `Configured TrueForge provider: ${rootProviderName}/root-model -> ${upstreamModel}`,
 );
 console.log(`Configured TrueForge connector: greenlight -> ${mcpUrl}`);
 console.log("Configured TrueForge connector: exa (deferred web research)");
