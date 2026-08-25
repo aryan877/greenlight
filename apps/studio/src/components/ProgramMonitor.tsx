@@ -159,6 +159,11 @@ export const ProgramMonitor = ({
             />
           ) : scene ? (
             <SceneCanvas scene={scene} artifacts={artifacts} />
+          ) : duration > 0 ? (
+            <div
+              aria-label="Empty timeline gap"
+              className="size-full bg-black"
+            />
           ) : (
             <div className="grid size-full place-items-center text-[12px] text-ink-tertiary">
               No scene selected
@@ -171,7 +176,7 @@ export const ProgramMonitor = ({
         <IconButton
           Icon={media.playing ? Pause : Play}
           label={media.playing ? "Pause" : "Play"}
-          disabled={!scene || duration <= 0}
+          disabled={duration <= 0}
           onClick={() => void media.togglePlay(duration)}
         />
         <span className="w-20 font-mono text-[10px] text-ink-secondary">
@@ -189,7 +194,7 @@ export const ProgramMonitor = ({
               "--range-progress": `${duration > 0 ? (media.currentTime / duration) * 100 : 0}%`,
             } as CSSProperties
           }
-          disabled={!scene}
+          disabled={duration <= 0}
           onPointerDown={media.beginScrub}
           onInput={(event) =>
             media.previewSeek(Number(event.currentTarget.value))
@@ -212,6 +217,7 @@ export const ProgramMonitor = ({
         <IconButton
           Icon={media.muted ? VolumeX : Volume2}
           label={media.muted ? "Unmute" : "Mute"}
+          active={media.muted}
           onClick={media.toggleMute}
         />
         <input

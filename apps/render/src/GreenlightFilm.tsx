@@ -479,7 +479,7 @@ export const GreenlightFilm = ({
           key={`${scene.id}-gap`}
           durationInFrames={Math.round((scene.gap_after_seconds ?? 0) * FPS)}
         >
-          <AbsoluteFill style={{ background: color.paper }} />
+          <AbsoluteFill style={{ background: "#000000" }} />
         </Series.Sequence>,
       );
     }

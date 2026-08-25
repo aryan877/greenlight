@@ -53,6 +53,7 @@ import {
   timelineItems,
   timelineTracks,
   videoItemId,
+  sceneAtTimelineTime,
   sceneOffset,
   splitSceneAtPlayhead,
   totalDuration,
@@ -549,24 +550,7 @@ export const App = () => {
   }, [media.setTimelineAudioSources, programAudioSources]);
   const visibleScene = useMemo(() => {
     if (!visibleContent) return selectedScene;
-    const exact = visibleContent.scenes.find((scene, index) => {
-      const start = sceneOffset(visibleContent.scenes, index);
-      return (
-        media.currentTime >= start &&
-        media.currentTime < start + scene.duration_seconds
-      );
-    });
-    if (exact) return exact;
-    return (
-      [...visibleContent.scenes].reverse().find((scene) => {
-        const index = visibleContent.scenes.findIndex(
-          (candidate) => candidate.id === scene.id,
-        );
-        return sceneOffset(visibleContent.scenes, index) <= media.currentTime;
-      }) ??
-      visibleContent.scenes[0] ??
-      selectedScene
-    );
+    return sceneAtTimelineTime(visibleContent, media.currentTime);
   }, [media.currentTime, selectedScene, visibleContent]);
 
   useEffect(() => {

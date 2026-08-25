@@ -56,6 +56,7 @@ const RailAction = ({
   <button
     type="button"
     aria-label={label}
+    aria-pressed={active}
     title={label}
     onPointerDown={(event) => event.stopPropagation()}
     onClick={(event) => {
@@ -64,7 +65,7 @@ const RailAction = ({
     }}
     className={cx(
       "grid size-5 shrink-0 place-items-center rounded-full text-ink-tertiary transition-colors duration-100 hover:bg-surface-sunken hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-action",
-      active && "bg-track-voice text-track-voice-strong",
+      active && "bg-action-soft text-action ring-1 ring-inset ring-action/45",
     )}
   >
     {children}

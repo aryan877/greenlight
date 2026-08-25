@@ -10,6 +10,7 @@ import {
   timelineTracks,
   formatRulerTime,
   sceneOffset,
+  sceneAtTimelineTime,
   sceneTimelineDuration,
   splitSceneAtPlayhead,
   timelineTicks,
@@ -68,6 +69,15 @@ const sourceLedger = {
 } satisfies Artifact;
 
 describe("editor selection", () => {
+  it("returns no scene while the playhead is inside an explicit gap", () => {
+    const withGap = structuredClone(content);
+    withGap.scenes[0]!.gap_after_seconds = 3;
+
+    expect(sceneAtTimelineTime(withGap, 1)?.id).toBe("scene_000");
+    expect(sceneAtTimelineTime(withGap, 2.5)).toBeNull();
+    expect(sceneAtTimelineTime(withGap, 5)?.id).toBe("scene_001");
+  });
+
   it("tiles continuous scenes without overlaps or decorative gaps", () => {
     const spans = content.scenes.map((_, index) => ({
       start: sceneOffset(content.scenes, index),

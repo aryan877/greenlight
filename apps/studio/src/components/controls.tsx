@@ -6,7 +6,7 @@ export const cx = (...classes: Array<string | false | null | undefined>) =>
 export const IconButton = ({
   Icon,
   label,
-  active = false,
+  active,
   disabled = false,
   onClick,
   size = "md",
@@ -21,13 +21,14 @@ export const IconButton = ({
   <button
     type="button"
     aria-label={label}
+    aria-pressed={active}
     title={label}
     disabled={disabled}
     onClick={onClick}
     className={cx(
       "grid shrink-0 place-items-center rounded-full text-ink-tertiary transition-colors duration-100 ease-product hover:bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-30",
       size === "sm" ? "size-7" : "size-8",
-      active && "bg-active text-ink",
+      active && "bg-active text-action",
     )}
   >
     <Icon size={size === "sm" ? 14 : 15} strokeWidth={1.75} />

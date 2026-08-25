@@ -29,6 +29,15 @@ export const sceneOffset = (scenes: Scene[], index: number) =>
 export const totalDuration = (content: ContentPackage) =>
   productionDurationSeconds(content.scenes);
 
+export const sceneAtTimelineTime = (
+  content: ContentPackage,
+  seconds: number,
+): Scene | null =>
+  content.scenes.find((scene, index) => {
+    const start = sceneOffset(content.scenes, index);
+    return seconds >= start && seconds < start + scene.duration_seconds;
+  }) ?? null;
+
 export const videoItemId = videoTimelineItemId;
 export const captionItemId = captionTimelineItemId;
 export const audioItemId = audioTimelineItemId;
