@@ -315,7 +315,7 @@ describe("Producer event projection", () => {
         type: "turn.done",
         state: { status: "error", error: "provider_unavailable" },
       }),
-    ).toContain("couldn’t finish");
+    ).toBe("The model stopped before replying. Retry this message.");
     expect(
       terminalFailureMessage({
         type: "turn.done",

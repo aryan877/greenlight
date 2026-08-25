@@ -176,7 +176,7 @@ const turnDoneState = (event: WireEvent): TurnDoneState | null =>
 export const terminalFailureMessage = (event: WireEvent): string | null => {
   const state = turnDoneState(event);
   if (state?.status === "error") {
-    return "AI Producer couldn’t finish that reply. Check the model connection and retry.";
+    return "The model stopped before replying. Retry this message.";
   }
   if (state?.status === "cancelled") {
     return "AI Producer stopped before answering. Retry when you’re ready.";

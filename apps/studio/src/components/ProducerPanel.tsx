@@ -24,7 +24,7 @@ import {
   FileText,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { greenlightApi, type VoiceOption } from "../api/greenlight.js";
 import { useVoiceCapabilities, useVoiceSample } from "../api/queries.js";
@@ -646,10 +646,45 @@ export const ProducerPanel = ({
     null,
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const conversationRef = useRef<HTMLDivElement>(null);
+  const followConversationRef = useRef(true);
+  const lastCreatorEventIdRef = useRef<string | null>(null);
+  const wasSendingRef = useRef(false);
   useEffect(() => {
     if (!draftIntent) return;
     setInstruction(draftIntent.text);
   }, [draftIntent]);
+  const latestCreatorEventId = [...events]
+    .reverse()
+    .find((event) => event.kind === "instruction")?.id;
+  useLayoutEffect(() => {
+    const creatorSubmitted =
+      Boolean(latestCreatorEventId) &&
+      latestCreatorEventId !== lastCreatorEventIdRef.current;
+    const retryStarted = isSending && !wasSendingRef.current;
+    if (creatorSubmitted || retryStarted) {
+      followConversationRef.current = true;
+    }
+    lastCreatorEventIdRef.current = latestCreatorEventId ?? null;
+    wasSendingRef.current = isSending;
+    if (!followConversationRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const conversation = conversationRef.current;
+      if (!conversation) return;
+      conversation.scrollTo({
+        top: conversation.scrollHeight,
+        behavior: creatorSubmitted || retryStarted ? "smooth" : "auto",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    activity,
+    events,
+    isSending,
+    latestCreatorEventId,
+    pendingApprovals.length,
+    pendingQuestions.length,
+  ]);
   const conversationPaused =
     pendingQuestions.length > 0 || pendingApprovals.length > 0;
   const selectedItems = content
@@ -670,7 +705,19 @@ export const ProducerPanel = ({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="scroll-stable min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <div
+        data-testid="producer-conversation"
+        ref={conversationRef}
+        onScroll={(event) => {
+          const conversation = event.currentTarget;
+          followConversationRef.current =
+            conversation.scrollHeight -
+              conversation.scrollTop -
+              conversation.clientHeight <
+            72;
+        }}
+        className="scroll-stable min-h-0 flex-1 overflow-y-auto px-3 py-3"
+      >
         {events.length === 0 ? (
           <div className="h-full" />
         ) : (
