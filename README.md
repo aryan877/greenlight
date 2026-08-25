@@ -34,16 +34,16 @@ The human using the editor is the **creator**. The AI running in TrueForge is th
 
 Greenlight does not use TrueForge as a chat box around a separate workflow. TrueForge is the agent runtime.
 
-| TrueForge capability  | What Greenlight uses it for                                                              |
-| --------------------- | ---------------------------------------------------------------------------------------- |
-| Models                | Runs the root AI Producer through the configured OpenRouter model                        |
-| MCP connectors        | Greenlight production tools plus deferred Exa web search and page retrieval              |
-| Dynamic subagents     | Independent research and verification that return compact sourced findings               |
-| Skills                | Editorial writing, evidence work, release packaging, and transcript-aware edit decisions |
-| Sandbox and Code Mode | Safe calculations, transcript work, and FFmpeg on sandbox copies                         |
-| Durable sessions      | Reconnects to the latest turn, question, or approval after a refresh                     |
-| Context compaction    | Uses a threshold derived from the selected model's advertised context window             |
-| Native approvals      | Pauses exact edit, render, upload, publish, and schedule tool calls                      |
+| TrueForge capability  | What Greenlight uses it for                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Models                | Runs the root AI Producer through the configured OpenRouter model                                            |
+| MCP connectors        | Greenlight production tools plus deferred Exa web search and page retrieval                                  |
+| Dynamic subagents     | Independent research and verification that return compact sourced findings                                   |
+| Skills                | Editorial writing, evidence work, release packaging, and transcript-aware edit decisions                     |
+| Sandbox and Code Mode | Generated Python reads real selected media in bounded, hash-verified chunks, then processes the sandbox copy |
+| Durable sessions      | Reconnects to the latest turn, question, or approval after a refresh                                         |
+| Context compaction    | Uses a threshold derived from the selected model's advertised context window                                 |
+| Native approvals      | Pauses exact edit, render, upload, publish, and schedule tool calls                                          |
 
 Exa comes from TrueForge's connector catalog and needs no API key. It stays deferred, so its tool schemas enter context only when research needs them.
 
@@ -92,6 +92,8 @@ TrueForge AI Producer
 
 TrueForge owns turns, subagents, tool discovery, sandbox work, reconnect, compaction, and approvals. Greenlight owns production state and constrained side effects. The model receives artifact IDs and project-relative references, never host paths, OAuth files, or API keys.
 
+When Code Mode needs raw media, it calls Greenlight's read-only `read_artifact_chunk` tool from inside the sandbox. The script assembles a bounded copy and verifies its SHA-256 before processing. Base64 and host paths never enter the creator conversation. Derived files return through TrueForge's `sandbox_artifacts` handoff and become new immutable Greenlight artifacts.
+
 
 ## Run locally
 
@@ -117,6 +119,8 @@ Start TrueForge:
 ```bash
 npx @truefoundry/trueforge
 ```
+
+Standalone TrueForge includes a local sandbox fallback on supported macOS and Linux hosts. Confirm it before a demo with `GET /api/v1/capabilities`; `sandbox.enabled` must be `true`. A cloud sandbox provider is optional for the local judged flow.
 
 Start Greenlight, then configure TrueForge:
 

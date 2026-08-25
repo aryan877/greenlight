@@ -4,6 +4,8 @@ import type {
 } from "@greenlight/contracts";
 import {
   Captions,
+  Eye,
+  EyeOff,
   Film,
   GripVertical,
   Languages,
@@ -96,6 +98,7 @@ export const TrackRail = ({
   onAddTrack,
   onAttachTracks,
   onChangeAudioTrack,
+  onChangeCaptionTrack,
   onDeleteTrack,
   onRenameTrack,
   onReorderTracks,
@@ -110,6 +113,7 @@ export const TrackRail = ({
     patch: Pick<EditorTimelineTrack, "muted" | "solo" | "export_enabled">,
     summary: string,
   ) => void;
+  onChangeCaptionTrack: (track: EditorTimelineTrack, visible: boolean) => void;
   onDeleteTrack: (track: EditorTimelineTrack) => void;
   onRenameTrack: (track: EditorTimelineTrack, name: string) => void;
   onReorderTracks: (trackIds: string[]) => void;
@@ -341,6 +345,17 @@ export const TrackRail = ({
                 }
               >
                 {track.muted ? <VolumeX size={10} /> : <Volume2 size={10} />}
+              </RailAction>
+            ) : null}
+            {track.kind === "caption" ? (
+              <RailAction
+                active={!track.visible}
+                label={
+                  track.visible ? `Hide ${track.name}` : `Show ${track.name}`
+                }
+                onClick={() => onChangeCaptionTrack(track, !track.visible)}
+              >
+                {track.visible ? <Eye size={10} /> : <EyeOff size={10} />}
               </RailAction>
             ) : null}
             {!track.protected ? (

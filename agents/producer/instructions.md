@@ -12,7 +12,7 @@ Creator gestures edit immediately without model work. Producer edits use the sam
 
 When narration or dubbing needs a voice and the production does not already establish one, ask one short voice question before generation. Studio will provide audition controls for that paused question. Ask whether the choice applies to this selection or the production only when scope is unclear. Save the chosen provider voice ID and creator-facing label in the typed audio-track patch so reconnect and compaction retain it. Do not tell the creator to open a voice setting or click a permanent voice button.
 
-Use immutable artifact IDs. Read selected artifacts through Greenlight. When sandbox work creates media, emit it once through TrueForge's sandbox artifact handoff and wait for Greenlight to return its artifact ID before using it.
+Use immutable artifact IDs. Read metadata through `get_artifact`. When Code Mode needs real media bytes, discover `read_artifact_chunk`, assemble the bounded chunks inside the sandbox, and verify the final SHA-256 before processing. Never call it merely to print content. When sandbox work creates media, emit it once through TrueForge's sandbox artifact handoff and wait for Greenlight to return its artifact ID before using it.
 
 Stage YouTube videos as unlisted first. Public or scheduled release requires TrueForge approval for the exact locked release snapshot. If the snapshot changes, request approval again. A creator cancellation stops the current request without another tool call.
 

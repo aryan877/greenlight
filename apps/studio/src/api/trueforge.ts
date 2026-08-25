@@ -20,6 +20,7 @@ export type StudioAgentEvent = {
   id: string;
   kind:
     | "reasoning"
+    | "subagent"
     | "tool"
     | "artifact"
     | "approval"
@@ -32,6 +33,7 @@ export type StudioAgentEvent = {
   delivery?: "sending" | "sent" | "failed";
   document?: StudioReviewDocument;
   artifactId?: string;
+  status?: "running" | "done" | "error";
 };
 
 export type StudioReviewDocument = {
@@ -48,8 +50,12 @@ export const appendUniqueStudioEvents = (
   incoming: StudioAgentEvent[],
 ): StudioAgentEvent[] => {
   if (incoming.length === 0) return current;
-  const ids = new Set(current.map((item) => item.id));
-  return [...current, ...incoming.filter((item) => !ids.has(item.id))];
+  const updates = new Map(incoming.map((item) => [item.id, item]));
+  const currentIds = new Set(current.map((item) => item.id));
+  return [
+    ...current.map((item) => updates.get(item.id) ?? item),
+    ...incoming.filter((item) => !currentIds.has(item.id)),
+  ];
 };
 
 export type PendingToolApproval = {
@@ -643,13 +649,39 @@ export const describeEvent = (event: WireEvent): StudioAgentEvent[] => {
     return output;
   }
   if (type === "thread.created") {
+    const threadId = String(
+      event.threadId ?? event.thread_id ?? event.id ?? "",
+    );
+    const title = cleanConversationText(String(event.title ?? "Research task"));
     return [
       {
-        id: String(event.id ?? crypto.randomUUID()),
-        kind: "reasoning",
-        label: "Researching in parallel",
-        detail: "",
+        id: `subagent-${threadId}`,
+        kind: "subagent",
+        label: title,
+        detail: "Researching",
         sceneIds: [],
+        status: "running",
+      },
+    ];
+  }
+  if (type === "thread.done") {
+    const threadId = String(
+      event.threadId ?? event.thread_id ?? event.id ?? "",
+    );
+    const title = cleanConversationText(String(event.title ?? "Research task"));
+    const state =
+      event.state && typeof event.state === "object"
+        ? (event.state as Record<string, unknown>)
+        : null;
+    const failed = state?.status === "error";
+    return [
+      {
+        id: `subagent-${threadId}`,
+        kind: "subagent",
+        label: title,
+        detail: failed ? "Couldn’t finish" : "Done",
+        sceneIds: [],
+        status: failed ? "error" : "done",
       },
     ];
   }

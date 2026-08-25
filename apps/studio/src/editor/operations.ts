@@ -1,5 +1,6 @@
 import {
   effectiveAudioTracks,
+  effectiveCaptionTracks,
   type ContentPackage,
   type EditorPatchOperation,
   type EditorTimelineItem,
@@ -8,6 +9,7 @@ import {
 
 import {
   audioItemId,
+  captionItemId,
   snapToFrame,
   timelineItems,
   timelineTracks,
@@ -96,18 +98,23 @@ export const buildTimelineTrimPlan = (
         ],
       };
     }
-    case "caption":
+    case "caption": {
+      const clip = effectiveCaptionTracks(content)
+        .flatMap((track) => track.clips)
+        .find((candidate) => captionItemId(candidate.id) === item.id);
+      if (!clip) return null;
       return {
         sceneScope: "items",
         operations: [
           {
             type: "update_caption_clip",
             item_id: item.id,
-            scene_id: scene.id,
+            clip_id: clip.id,
             duration_seconds: nextDuration,
           },
         ],
       };
+    }
     case "video": {
       const currentGap = scene.gap_after_seconds ?? 0;
       const sourceClip = scene.source_clip
@@ -185,6 +192,9 @@ export const buildTimelineMovePlan = (
   const audioClips = effectiveAudioTracks(content).flatMap(
     (track) => track.clips,
   );
+  const captionClips = effectiveCaptionTracks(content).flatMap(
+    (track) => track.clips,
+  );
 
   for (const item of draggedItems) {
     const currentTrackIndex = laneIndex.get(item.track_id) ?? 0;
@@ -197,14 +207,7 @@ export const buildTimelineMovePlan = (
           (candidate) => audioItemId(candidate.id) === item.id,
         );
         if (!clip) break;
-        const followsMovedScene =
-          movingSceneIds.has(item.scene_id) &&
-          clip.timeline_start_seconds === undefined &&
-          targetTrackId === item.track_id;
-        if (
-          !followsMovedScene &&
-          (input.deltaSeconds !== 0 || targetTrackId !== item.track_id)
-        ) {
+        if (input.deltaSeconds !== 0 || targetTrackId !== item.track_id) {
           operations.push({
             type: "update_audio_clip",
             item_id: item.id,
@@ -218,21 +221,15 @@ export const buildTimelineMovePlan = (
         break;
       }
       case "caption": {
-        const scene = content.scenes.find(
-          (candidate) => candidate.id === item.scene_id,
+        const clip = captionClips.find(
+          (candidate) => captionItemId(candidate.id) === item.id,
         );
-        const followsMovedScene =
-          movingSceneIds.has(item.scene_id) &&
-          scene?.caption_timeline_start_seconds === undefined &&
-          targetTrackId === item.track_id;
-        if (
-          !followsMovedScene &&
-          (input.deltaSeconds !== 0 || targetTrackId !== item.track_id)
-        ) {
+        if (!clip) break;
+        if (input.deltaSeconds !== 0 || targetTrackId !== item.track_id) {
           operations.push({
             type: "update_caption_clip",
             item_id: item.id,
-            scene_id: item.scene_id,
+            clip_id: clip.id,
             target_track_id: targetTrackId,
             timeline_start_seconds: snapToFrame(
               item.start_seconds + input.deltaSeconds,

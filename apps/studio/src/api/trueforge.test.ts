@@ -103,6 +103,35 @@ describe("Producer event projection", () => {
     ).toHaveLength(65);
   });
 
+  it("updates one durable card when a subagent finishes", async () => {
+    const { appendUniqueStudioEvents, describeEvent } =
+      await import("./trueforge.js");
+    const started = describeEvent({
+      id: "thread_created",
+      type: "thread.created",
+      thread_id: "research_sources",
+      title: "Verify the launch claim",
+    });
+    const finished = describeEvent({
+      id: "thread_done",
+      type: "thread.done",
+      thread_id: "research_sources",
+      title: "Verify the launch claim",
+      state: { status: "done" },
+    });
+
+    expect(appendUniqueStudioEvents(started, finished)).toEqual([
+      {
+        id: "subagent-research_sources",
+        kind: "subagent",
+        label: "Verify the launch claim",
+        detail: "Done",
+        sceneIds: [],
+        status: "done",
+      },
+    ]);
+  });
+
   it("shows a compaction milestone only when TrueForge emits one", async () => {
     const { describeEvent } = await import("./trueforge.js");
 

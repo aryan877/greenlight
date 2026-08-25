@@ -2,6 +2,9 @@ import {
   audioTimelineItemId,
   applyEditorPatch,
   captionTimelineItemId,
+  effectiveAudioTracks,
+  effectiveCaptionTracks,
+  materializeIndependentTimeline,
   sceneStartSeconds,
   type ContentPackage,
   type EditorPatchInput,
@@ -197,6 +200,9 @@ describe("applyEditorPatch", () => {
         ],
       },
     ];
+    const materializedBefore = materializeIndependentTimeline(withAudio);
+    const audioBefore = effectiveAudioTracks(materializedBefore)[0]!.clips;
+    const captionsBefore = effectiveCaptionTracks(materializedBefore)[0]!.clips;
     const revised = applyEditorPatch(
       withAudio,
       patch([
@@ -224,19 +230,8 @@ describe("applyEditorPatch", () => {
     expect(
       revised.scenes.reduce((sum, item) => sum + item.duration_seconds, 0),
     ).toBe(30);
-    expect(revised.audio_tracks?.[0]?.clips).toMatchObject([
-      {
-        id: "clip_scene_002",
-        scene_id: "scene_002",
-        source_in_seconds: 0,
-        source_out_seconds: 5,
-      },
-      {
-        scene_id: "scene_004",
-        source_in_seconds: 5,
-        source_out_seconds: 10,
-      },
-    ]);
+    expect(effectiveAudioTracks(revised)[0]!.clips).toEqual(audioBefore);
+    expect(effectiveCaptionTracks(revised)[0]!.clips).toEqual(captionsBefore);
   });
 
   it("records a real gap when a scene is shortened", () => {
@@ -427,6 +422,7 @@ describe("applyEditorPatch", () => {
             name: "Hindi captions",
             kind: "caption",
             protected: false,
+            visible: true,
           },
         },
       ]),
@@ -635,15 +631,16 @@ describe("applyEditorPatch", () => {
       source_out_seconds: 12,
     });
 
-    request.operations[0]!.item_id = captionTimelineItemId("scene_002");
-    request.selection.item_ids = [captionTimelineItemId("scene_002")];
+    request.operations[0]!.item_id = captionTimelineItemId("caption_scene_002");
+    request.selection.item_ids = [captionTimelineItemId("caption_scene_002")];
     expect(() => applyEditorPatch(withAudio, request)).toThrow(
       "audio_item_clip_mismatch",
     );
   });
 
   it("moves and trims one exact caption clip", () => {
-    const itemId = captionTimelineItemId("scene_002");
+    const clipId = "caption_scene_002";
+    const itemId = captionTimelineItemId(clipId);
     const revised = applyEditorPatch(base, {
       selection: {
         project_id: base.project_id,
@@ -661,16 +658,21 @@ describe("applyEditorPatch", () => {
         {
           type: "update_caption_clip",
           item_id: itemId,
-          scene_id: "scene_002",
+          clip_id: clipId,
           timeline_start_seconds: 14,
           duration_seconds: 4,
         },
       ],
     });
 
-    expect(revised.scenes[1]).toMatchObject({
-      caption_timeline_start_seconds: 14,
-      caption_duration_seconds: 4,
+    expect(
+      effectiveCaptionTracks(revised)[0]?.clips.find(
+        (clip) => clip.id === clipId,
+      ),
+    ).toMatchObject({
+      id: clipId,
+      timeline_start_seconds: 14,
+      duration_seconds: 4,
     });
     expect(revised.scenes[1]!.duration_seconds).toBe(10);
   });

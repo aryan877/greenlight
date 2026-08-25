@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const VIDEO_FPS = 30;
 export const MIN_SCENE_DURATION_SECONDS = 0.5;
+export const ARTIFACT_CHUNK_MAX_BYTES = 768 * 1024;
 const FRAME_EPSILON_SECONDS = 1e-6;
 const snapSecondsToFrame = (seconds: number) =>
   Math.round(seconds * VIDEO_FPS) / VIDEO_FPS;
@@ -307,8 +308,20 @@ export const videoTrackSchema = baseTimelineTrackSchema.extend({
   kind: z.literal("video"),
 });
 
+export const captionTimelineClipSchema = z.object({
+  id: audioClipIdSchema,
+  scene_id: idSchema,
+  label: z.string().trim().min(1).max(650),
+  artifact_id: idSchema.nullable().default(null),
+  transcript_artifact_id: idSchema.nullable().default(null),
+  timeline_start_seconds: frameAlignedSecondsSchema.nonnegative().max(120),
+  duration_seconds: frameAlignedSecondsSchema.min(1 / VIDEO_FPS).max(120),
+});
+
 export const captionTimelineTrackSchema = baseTimelineTrackSchema.extend({
   kind: z.literal("caption"),
+  visible: z.boolean().default(true),
+  clips: z.array(captionTimelineClipSchema).optional(),
 });
 
 export const youtubeMetadataSchema = z.object({
@@ -454,6 +467,47 @@ export const contentPackageSchema = z
           trackIds.add(track.id);
         }
       }
+      for (const [trackIndex, track] of (captionTracks ?? []).entries()) {
+        for (const [clipIndex, clip] of (track.clips ?? []).entries()) {
+          if (!sceneIds.has(clip.scene_id)) {
+            context.addIssue({
+              code: "custom",
+              message: `Caption clip references missing scene ${clip.scene_id}`,
+              path: [
+                "caption_tracks",
+                trackIndex,
+                "clips",
+                clipIndex,
+                "scene_id",
+              ],
+            });
+          }
+          if (clipIds.has(clip.id)) {
+            context.addIssue({
+              code: "custom",
+              message: `Duplicate timeline clip ${clip.id}`,
+              path: ["caption_tracks", trackIndex, "clips", clipIndex, "id"],
+            });
+          }
+          clipIds.add(clip.id);
+          if (
+            clip.timeline_start_seconds + clip.duration_seconds >
+            seconds + 1 / VIDEO_FPS
+          ) {
+            context.addIssue({
+              code: "custom",
+              message: "Caption clip exceeds the production duration",
+              path: [
+                "caption_tracks",
+                trackIndex,
+                "clips",
+                clipIndex,
+                "duration_seconds",
+              ],
+            });
+          }
+        }
+      }
       for (const [trackIndex, track] of (audioTracks ?? []).entries()) {
         if (trackIds.has(track.id)) {
           context.addIssue({
@@ -488,7 +542,11 @@ export const contentPackageSchema = z
           const scene = scenes.find(
             (candidate) => candidate.id === clip.scene_id,
           );
-          if (scene && clip.start_offset_seconds >= scene.duration_seconds) {
+          if (
+            scene &&
+            clip.timeline_start_seconds === undefined &&
+            clip.start_offset_seconds >= scene.duration_seconds
+          ) {
             context.addIssue({
               code: "custom",
               message: "Audio clip offset must be inside its scene",
@@ -526,7 +584,8 @@ export const contentPackageSchema = z
             const clipDuration = audioClipDurationSeconds(clip, scene);
             const availableDuration =
               clip.source_out_seconds === null
-                ? scene.duration_seconds - clip.start_offset_seconds
+                ? (clip.duration_seconds ??
+                  scene.duration_seconds - clip.start_offset_seconds)
                 : (clip.source_out_seconds - clip.source_in_seconds) /
                   clip.playback_rate;
             if (clipDuration > availableDuration + 1 / VIDEO_FPS) {
@@ -594,6 +653,13 @@ export const contentPackageSchema = z
 export type AudioTrack = z.infer<typeof audioTrackSchema>;
 export type VideoTrack = z.infer<typeof videoTrackSchema>;
 export type CaptionTimelineTrack = z.infer<typeof captionTimelineTrackSchema>;
+export type CaptionTimelineClip = z.infer<typeof captionTimelineClipSchema>;
+export type EffectiveCaptionTimelineTrack = Omit<
+  CaptionTimelineTrack,
+  "clips"
+> & {
+  clips: CaptionTimelineClip[];
+};
 
 export const effectiveVideoTracks = (content: ContentPackage): VideoTrack[] =>
   content.video_tracks ?? [
@@ -602,15 +668,43 @@ export const effectiveVideoTracks = (content: ContentPackage): VideoTrack[] =>
 
 export const effectiveCaptionTracks = (
   content: ContentPackage,
-): CaptionTimelineTrack[] =>
-  content.caption_tracks ?? [
+): EffectiveCaptionTimelineTrack[] => {
+  const tracks = content.caption_tracks ?? [
     {
       id: "track_captions",
       name: "Captions",
-      kind: "caption",
+      kind: "caption" as const,
       protected: true,
+      visible: true,
     },
   ];
+  return tracks.map((track) => ({
+    ...track,
+    clips:
+      track.clips ??
+      content.scenes.flatMap((scene, index) => {
+        if ((scene.caption_track_id ?? "track_captions") !== track.id) {
+          return [];
+        }
+        return [
+          {
+            id: `caption_${scene.id}`,
+            scene_id: scene.id,
+            label: scene.narration,
+            artifact_id: scene.captions_artifact_id,
+            transcript_artifact_id: scene.transcript_artifact_id,
+            timeline_start_seconds: snapSecondsToFrame(
+              scene.caption_timeline_start_seconds ??
+                sceneStartSeconds(content.scenes, index),
+            ),
+            duration_seconds: snapSecondsToFrame(
+              scene.caption_duration_seconds ?? scene.duration_seconds,
+            ),
+          },
+        ];
+      }),
+  }));
+};
 
 const primaryAudioClip = (scene: Scene): AudioTrack["clips"][number] => ({
   id: `voice_${scene.id}`,
@@ -626,45 +720,6 @@ const primaryAudioClip = (scene: Scene): AudioTrack["clips"][number] => ({
   playback_rate: 1,
   status: scene.narration_artifact_id ? "generated" : "draft",
 });
-
-const splitAudioClip = (
-  clip: AudioTrack["clips"][number],
-  first: Scene,
-  second: Scene,
-  originalDuration: number,
-): AudioTrack["clips"] => {
-  const splitAt = first.duration_seconds;
-  const startsAt = clip.start_offset_seconds;
-  const sourceDuration =
-    clip.source_out_seconds === null
-      ? originalDuration - startsAt
-      : (clip.source_out_seconds - clip.source_in_seconds) / clip.playback_rate;
-  const endsAt = startsAt + sourceDuration;
-  const secondId = `${clip.id.slice(0, 58)}_${second.id.slice(-32)}`;
-  if (startsAt >= splitAt) {
-    return [
-      {
-        ...clip,
-        id: secondId,
-        scene_id: second.id,
-        start_offset_seconds: snapSecondsToFrame(startsAt - splitAt),
-      },
-    ];
-  }
-  if (endsAt <= splitAt + 1 / VIDEO_FPS) return [clip];
-  const boundary =
-    clip.source_in_seconds + (splitAt - startsAt) * clip.playback_rate;
-  return [
-    { ...clip, source_out_seconds: boundary },
-    {
-      ...clip,
-      id: secondId,
-      scene_id: second.id,
-      start_offset_seconds: 0,
-      source_in_seconds: boundary,
-    },
-  ];
-};
 
 const primaryAudioTrack = (content: { scenes: Scene[] }): AudioTrack => ({
   id: "track_narration",
@@ -715,6 +770,49 @@ export const effectiveAudioTracks = (content: ContentPackage): AudioTrack[] => {
       })),
     })),
   ];
+};
+
+/**
+ * Migrates scene-relative legacy placement into explicit non-linear timeline
+ * placement without changing what the creator currently sees or hears.
+ */
+export const materializeIndependentTimeline = (
+  contentInput: ContentPackage,
+): ContentPackage => {
+  const content = structuredClone(contentInput);
+  const scenes = content.scenes;
+  content.audio_tracks = effectiveAudioTracks(content).map((track) => ({
+    ...track,
+    clips: track.clips.map((clip) => {
+      const sceneIndex = scenes.findIndex(
+        (scene) => scene.id === clip.scene_id,
+      );
+      const scene = scenes[sceneIndex];
+      if (!scene) return clip;
+      return {
+        ...clip,
+        timeline_start_seconds:
+          clip.timeline_start_seconds ??
+          snapSecondsToFrame(
+            sceneStartSeconds(scenes, sceneIndex) + clip.start_offset_seconds,
+          ),
+        duration_seconds:
+          clip.duration_seconds ??
+          snapSecondsToFrame(audioClipDurationSeconds(clip, scene)),
+      };
+    }),
+  }));
+  content.scenes = scenes.map((scene, index) => ({
+    ...scene,
+    caption_timeline_start_seconds:
+      scene.caption_timeline_start_seconds ??
+      snapSecondsToFrame(sceneStartSeconds(scenes, index)),
+    caption_duration_seconds:
+      scene.caption_duration_seconds ??
+      snapSecondsToFrame(scene.duration_seconds),
+  }));
+  content.caption_tracks = effectiveCaptionTracks(content);
+  return content;
 };
 
 export const audibleAudioTracks = (content: ContentPackage): AudioTrack[] => {
@@ -909,6 +1007,29 @@ export const getArtifactInputSchema = z.object({
   artifact_id: idSchema,
 });
 
+export const readArtifactChunkInputSchema = getArtifactInputSchema.extend({
+  offset_bytes: z.number().int().nonnegative().default(0),
+  length_bytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(ARTIFACT_CHUNK_MAX_BYTES)
+    .default(ARTIFACT_CHUNK_MAX_BYTES),
+});
+
+export const artifactChunkSchema = z.object({
+  artifact_id: idSchema,
+  suggested_filename: z.string().trim().min(1).max(180),
+  mime_type: z.string().trim().min(1).max(160),
+  sha256: sha256Schema,
+  offset_bytes: z.number().int().nonnegative(),
+  length_bytes: z.number().int().nonnegative(),
+  total_bytes: z.number().int().nonnegative(),
+  next_offset_bytes: z.number().int().nonnegative().nullable(),
+  eof: z.boolean(),
+  data_base64: z.string(),
+});
+
 export const qualityCheckInputSchema = z.object({
   project_id: idSchema,
   video_artifact_id: idSchema,
@@ -971,6 +1092,7 @@ export const editorTimelineTrackSchema = z.object({
   solo: z.boolean().default(false),
   export_enabled: z.boolean().default(true),
   gain: z.number().min(0).max(2).default(1),
+  visible: z.boolean().default(true),
 });
 
 export const editorTimelineItemSchema = z
@@ -1219,7 +1341,7 @@ export const editorPatchOperationSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("update_caption_clip"),
       item_id: idSchema,
-      scene_id: idSchema,
+      clip_id: audioClipIdSchema,
       target_track_id: idSchema.optional(),
       timeline_start_seconds: frameAlignedSecondsSchema
         .nonnegative()
@@ -1231,7 +1353,7 @@ export const editorPatchOperationSchema = z.discriminatedUnion("type", [
         .optional(),
     })
     .refine(
-      ({ type: _type, item_id: _itemId, scene_id: _sceneId, ...patch }) =>
+      ({ type: _type, item_id: _itemId, clip_id: _clipId, ...patch }) =>
         Object.values(patch).some((value) => value !== undefined),
       { message: "Caption clip patch must change at least one field" },
     ),
@@ -1292,6 +1414,10 @@ export type CorrectTranscriptInput = z.infer<
 >;
 export type RenderVideoInput = z.infer<typeof renderVideoInputSchema>;
 export type GetArtifactInput = z.infer<typeof getArtifactInputSchema>;
+export type ReadArtifactChunkInput = z.infer<
+  typeof readArtifactChunkInputSchema
+>;
+export type ArtifactChunk = z.infer<typeof artifactChunkSchema>;
 export type QualityCheckInput = z.infer<typeof qualityCheckInputSchema>;
 export type StageVideoInput = z.infer<typeof stageVideoInputSchema>;
 export type EditorSelection = z.infer<typeof editorSelectionSchema>;
@@ -1379,7 +1505,19 @@ export const applyEditorPatch = (
     }
   };
 
-  const next = structuredClone(base);
+  const changesVideoTiming = patch.operations.some(
+    (operation) =>
+      operation.type === "reorder_scenes" ||
+      operation.type === "split_scene" ||
+      (operation.type === "update_scene" &&
+        (operation.duration_seconds !== undefined ||
+          operation.gap_after_seconds !== undefined ||
+          operation.playback_rate !== undefined ||
+          operation.source_clip !== undefined)),
+  );
+  const next = changesVideoTiming
+    ? materializeIndependentTimeline(base)
+    : structuredClone(base);
   next.localized_narration_tracks ??= [];
 
   for (const operation of patch.operations) {
@@ -1528,8 +1666,6 @@ export const applyEditorPatch = (
       case "split_scene": {
         requireSelectedScene(selectedSceneIds, operation.scene_id);
         requireTrack("visual");
-        requireTrack("voice");
-        requireTrack("caption");
         const index = requireScene(next.scenes, operation.scene_id);
         const current = next.scenes[index]!;
         if (operation.first.id !== operation.scene_id) {
@@ -1552,21 +1688,6 @@ export const applyEditorPatch = (
           throw new Error("split_scene_must_preserve_duration");
         }
         next.scenes.splice(index, 1, operation.first, operation.second);
-        if (next.audio_tracks) {
-          next.audio_tracks = next.audio_tracks.map((track) => ({
-            ...track,
-            clips: track.clips.flatMap((clip) =>
-              clip.scene_id === operation.scene_id
-                ? splitAudioClip(
-                    clip,
-                    operation.first,
-                    operation.second,
-                    current.duration_seconds,
-                  )
-                : [clip],
-            ),
-          }));
-        }
         break;
       }
       case "remove_scene": {
@@ -1759,7 +1880,7 @@ export const applyEditorPatch = (
       }
       case "upsert_caption_track": {
         requireOneTrack("caption", operation.track.id);
-        next.caption_tracks ??= effectiveCaptionTracks(next);
+        next.caption_tracks = effectiveCaptionTracks(next);
         const index = next.caption_tracks.findIndex(
           (track) => track.id === operation.track.id,
         );
@@ -1771,7 +1892,7 @@ export const applyEditorPatch = (
       }
       case "remove_caption_track": {
         requireOneTrack("caption", operation.track_id);
-        next.caption_tracks ??= effectiveCaptionTracks(next);
+        next.caption_tracks = effectiveCaptionTracks(next);
         const index = next.caption_tracks.findIndex(
           (track) => track.id === operation.track_id,
         );
@@ -1779,13 +1900,7 @@ export const applyEditorPatch = (
         if (next.caption_tracks[index]!.protected) {
           throw new Error("protected_track");
         }
-        if (
-          next.scenes.some(
-            (scene) =>
-              (scene.caption_track_id ?? "track_captions") ===
-              operation.track_id,
-          )
-        ) {
+        if ((next.caption_tracks[index]!.clips ?? []).length > 0) {
           throw new Error("track_not_empty");
         }
         next.caption_tracks.splice(index, 1);
@@ -1798,39 +1913,37 @@ export const applyEditorPatch = (
         if (!selection.item_ids.includes(operation.item_id)) {
           throw new Error(`item_outside_selection:${operation.item_id}`);
         }
-        if (operation.item_id !== captionTimelineItemId(operation.scene_id)) {
-          throw new Error("caption_item_scene_mismatch");
+        if (operation.item_id !== captionTimelineItemId(operation.clip_id)) {
+          throw new Error("caption_item_clip_mismatch");
         }
-        requireSelectedScene(selectedSceneIds, operation.scene_id);
-        requireOneTrack(
-          "caption",
-          operation.target_track_id ?? "track_captions",
+        const captionTracks = effectiveCaptionTracks(next);
+        next.caption_tracks = captionTracks;
+        const sourceTrack = captionTracks.find((track) =>
+          track.clips.some((clip) => clip.id === operation.clip_id),
         );
-        const sceneIndex = requireScene(next.scenes, operation.scene_id);
-        if (
-          operation.target_track_id !== undefined &&
-          !effectiveCaptionTracks(next).some(
-            (track) => track.id === operation.target_track_id,
-          )
-        ) {
-          throw new Error("caption_track_not_found");
-        }
-        const current = next.scenes[sceneIndex]!;
-        next.scenes[sceneIndex] = {
-          ...current,
-          ...(operation.target_track_id === undefined
-            ? {}
-            : { caption_track_id: operation.target_track_id }),
+        const targetTrack = operation.target_track_id
+          ? captionTracks.find(
+              (track) => track.id === operation.target_track_id,
+            )
+          : sourceTrack;
+        if (!sourceTrack) throw new Error("caption_clip_not_found");
+        if (!targetTrack) throw new Error("caption_track_not_found");
+        requireOneTrack("caption", sourceTrack.id);
+        const clipIndex = sourceTrack.clips.findIndex(
+          (clip) => clip.id === operation.clip_id,
+        );
+        const [clip] = sourceTrack.clips.splice(clipIndex, 1);
+        if (!clip) throw new Error("caption_clip_not_found");
+        requireSelectedScene(selectedSceneIds, clip.scene_id);
+        targetTrack.clips.push({
+          ...clip,
           ...(operation.timeline_start_seconds === undefined
             ? {}
-            : {
-                caption_timeline_start_seconds:
-                  operation.timeline_start_seconds,
-              }),
+            : { timeline_start_seconds: operation.timeline_start_seconds }),
           ...(operation.duration_seconds === undefined
             ? {}
-            : { caption_duration_seconds: operation.duration_seconds }),
-        };
+            : { duration_seconds: operation.duration_seconds }),
+        });
         break;
       }
       case "reorder_tracks": {

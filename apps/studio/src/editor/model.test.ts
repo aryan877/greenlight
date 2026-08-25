@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  captionItemId,
   changeSceneSpeed,
   createSelection,
   createTimelineContext,
@@ -217,6 +218,131 @@ describe("editor selection", () => {
     expect(effectiveAudioTracks(revised)[0]?.muted).toBe(true);
   });
 
+  it("keeps narration and captions fixed when only video is trimmed", () => {
+    const video = timelineItems(content).find(
+      (item) => item.kind === "video" && item.scene_id === "scene_000",
+    )!;
+    const before = timelineItems(content).filter(
+      (item) =>
+        item.scene_id === "scene_000" &&
+        (item.kind === "audio" || item.kind === "caption"),
+    );
+    const selection = createSelection({
+      projectId: content.project_id,
+      contentArtifactId: "artifact_content",
+      content,
+      itemIds: [video.id],
+      sourceLedgerArtifact: null,
+    });
+
+    const revised = applyEditorPatch(content, {
+      selection,
+      instruction_summary: "Trim only the video",
+      operations: [
+        {
+          type: "update_scene",
+          scene_id: "scene_000",
+          duration_seconds: 1,
+          gap_after_seconds: 1,
+        },
+      ],
+    });
+    const after = timelineItems(revised).filter((item) =>
+      before.some((candidate) => candidate.id === item.id),
+    );
+
+    expect(
+      after.map(({ id, start_seconds, end_seconds }) => ({
+        id,
+        start_seconds,
+        end_seconds,
+      })),
+    ).toEqual(
+      before.map(({ id, start_seconds, end_seconds }) => ({
+        id,
+        start_seconds,
+        end_seconds,
+      })),
+    );
+    expect(revised.audio_tracks?.[0]?.clips[0]).toMatchObject({
+      timeline_start_seconds: 0,
+      duration_seconds: 2,
+    });
+    expect(revised.scenes[0]).toMatchObject({
+      caption_timeline_start_seconds: 0,
+      caption_duration_seconds: 2,
+    });
+  });
+
+  it("keeps narration and captions fixed when videos are reordered", () => {
+    const items = timelineItems(content);
+    const videoIds = items
+      .filter((item) => item.kind === "video")
+      .map((item) => item.id);
+    const independentBefore = items
+      .filter((item) => item.kind !== "video")
+      .map(({ id, start_seconds, end_seconds }) => ({
+        id,
+        start_seconds,
+        end_seconds,
+      }))
+      .toSorted((left, right) => left.id.localeCompare(right.id));
+    const selection = createSelection({
+      projectId: content.project_id,
+      contentArtifactId: "artifact_content",
+      content,
+      itemIds: videoIds,
+      sourceLedgerArtifact: null,
+    });
+    const sceneIds = content.scenes.map((scene) => scene.id);
+
+    const revised = applyEditorPatch(content, {
+      selection,
+      instruction_summary: "Reorder only the video clips",
+      operations: [
+        {
+          type: "reorder_scenes",
+          scene_ids: [sceneIds[1]!, sceneIds[0]!, ...sceneIds.slice(2)],
+        },
+      ],
+    });
+    const independentAfter = timelineItems(revised)
+      .filter((item) => item.kind !== "video")
+      .map(({ id, start_seconds, end_seconds }) => ({
+        id,
+        start_seconds,
+        end_seconds,
+      }))
+      .toSorted((left, right) => left.id.localeCompare(right.id));
+
+    expect(independentAfter).toEqual(independentBefore);
+  });
+
+  it("exposes caption-track visibility to Studio and the Producer", () => {
+    const hidden = structuredClone(content);
+    hidden.caption_tracks = [
+      {
+        id: "track_captions",
+        name: "Captions",
+        kind: "caption",
+        protected: true,
+        visible: false,
+      },
+    ];
+
+    expect(
+      timelineTracks(hidden).find((track) => track.kind === "caption")?.visible,
+    ).toBe(false);
+    expect(
+      createTimelineContext({
+        projectId: hidden.project_id,
+        contentArtifactId: "artifact_content",
+        content: hidden,
+        playheadSeconds: 0,
+      }).tracks.find((track) => track.kind === "caption")?.visible,
+    ).toBe(false);
+  });
+
   it("uses the persisted track order instead of rebuilding lane order", () => {
     const reordered = {
       ...content,
@@ -268,7 +394,7 @@ describe("editor selection", () => {
 
     const projected = timelineItems(placed);
     expect(
-      projected.find((item) => item.id === "caption_scene_001"),
+      projected.find((item) => item.id === captionItemId("caption_scene_001")),
     ).toMatchObject({ start_seconds: 7, end_seconds: 8 });
     expect(
       projected.find((item) => item.id === "audio_clip_scene_001"),

@@ -19,9 +19,11 @@ type MediaController = ReturnType<typeof useMediaController>;
 export const SceneCanvas = ({
   scene,
   artifacts,
+  captionText,
 }: {
   scene: Scene;
   artifacts: Artifact[];
+  captionText: string | null;
 }) => {
   const visuals = scene.visual.artifact_ids.slice(0, 4);
   const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
@@ -82,10 +84,10 @@ export const SceneCanvas = ({
           {scene.title}
         </h1>
       </div>
-      {scene.captions_artifact_id ? (
+      {captionText ? (
         <div className="absolute inset-x-[8%] bottom-[5%] flex justify-center">
           <span className="max-w-[88%] rounded-lg bg-black/88 px-3 py-2 text-center text-[clamp(9px,1vw,14px)] font-medium leading-snug text-white">
-            {scene.narration}
+            {captionText}
           </span>
         </div>
       ) : null}
@@ -103,6 +105,7 @@ export const ProgramMonitor = ({
   timelineOpen,
   previewing,
   previewUsesCanvas,
+  captionText,
   onToggleTimeline,
 }: {
   scene: Scene | null;
@@ -114,6 +117,7 @@ export const ProgramMonitor = ({
   timelineOpen: boolean;
   previewing: boolean;
   previewUsesCanvas: boolean;
+  captionText: string | null;
   onToggleTimeline: () => void;
 }) => {
   const monitorRef = useRef<HTMLElement>(null);
@@ -158,7 +162,11 @@ export const ProgramMonitor = ({
               {...media.mediaEvents}
             />
           ) : scene ? (
-            <SceneCanvas scene={scene} artifacts={artifacts} />
+            <SceneCanvas
+              scene={scene}
+              artifacts={artifacts}
+              captionText={captionText}
+            />
           ) : duration > 0 ? (
             <div
               aria-label="Empty timeline gap"

@@ -111,26 +111,22 @@ export const timelineItems = (
     }),
   );
 
-  const captionItems = content.scenes.map((scene, index) => {
-    const start = snapToFrame(
-      scene.caption_timeline_start_seconds ??
-        sceneOffset(content.scenes, index),
-    );
-    return {
-      id: captionItemId(scene.id),
+  const captionItems = effectiveCaptionTracks(content).flatMap((track) =>
+    track.clips.map((clip) => ({
+      id: captionItemId(clip.id),
       kind: "caption" as const,
-      track_id: scene.caption_track_id ?? "track_captions",
-      scene_id: scene.id,
-      label: scene.narration,
-      start_seconds: start,
+      track_id: track.id,
+      scene_id: clip.scene_id,
+      label: clip.label,
+      start_seconds: clip.timeline_start_seconds,
       end_seconds: snapToFrame(
-        start + (scene.caption_duration_seconds ?? scene.duration_seconds),
+        clip.timeline_start_seconds + clip.duration_seconds,
       ),
-      artifact_ids: scene.captions_artifact_id
-        ? [scene.captions_artifact_id]
-        : [],
-    };
-  });
+      artifact_ids: [clip.artifact_id, clip.transcript_artifact_id].filter(
+        (id): id is string => Boolean(id),
+      ),
+    })),
+  );
 
   return [...videoItems, ...audioItems, ...captionItems];
 };
@@ -164,6 +160,7 @@ export const timelineTracks = (
       solo: false,
       export_enabled: true,
       gain: 1,
+      visible: true,
     })),
     ...effectiveAudioTracks(content).map((track, index, audioTracks) => ({
       id: track.id,
@@ -180,6 +177,7 @@ export const timelineTracks = (
       solo: track.solo,
       export_enabled: track.export_enabled,
       gain: track.gain,
+      visible: true,
     })),
     ...effectiveCaptionTracks(content).map((track) => ({
       ...track,
@@ -188,6 +186,7 @@ export const timelineTracks = (
       solo: false,
       export_enabled: true,
       gain: 1,
+      visible: track.visible,
     })),
   ];
   if (!content.track_order) return tracks;

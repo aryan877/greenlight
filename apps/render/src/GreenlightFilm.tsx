@@ -3,10 +3,11 @@ import type { CSSProperties, ReactNode } from "react";
 import {
   audioClipDurationSeconds,
   audibleAudioTracks,
-  effectiveAudioTracks,
+  effectiveCaptionTracks,
   sceneStartSeconds,
   type AudioTrack,
   type AudioTrackClip,
+  type CaptionTimelineClip,
   type ContentPackage,
   type Scene,
 } from "@greenlight/contracts";
@@ -56,21 +57,9 @@ export const audioClipRenderPlacement = (
   };
 };
 
-export const captionClipRenderPlacement = (
-  content: ContentPackage,
-  scene: Scene,
-  sceneIndex: number,
-) => ({
-  from: Math.round(
-    (scene.caption_timeline_start_seconds ??
-      sceneStartSeconds(content.scenes, sceneIndex)) * FPS,
-  ),
-  durationInFrames: Math.max(
-    1,
-    Math.round(
-      (scene.caption_duration_seconds ?? scene.duration_seconds) * FPS,
-    ),
-  ),
+export const captionClipRenderPlacement = (clip: CaptionTimelineClip) => ({
+  from: Math.round(clip.timeline_start_seconds * FPS),
+  durationInFrames: Math.max(1, Math.round(clip.duration_seconds * FPS)),
 });
 
 const enterProgress = (frame: number, fps: number): number =>
@@ -419,31 +408,34 @@ const ProductionCaptions = ({
   captionTracks,
   content,
 }: Pick<RenderProject, "captionTracks" | "content">) => {
-  const audioTracks = effectiveAudioTracks(content);
   return (
     <>
-      {content.scenes.flatMap((scene, index) => {
-        const captionArtifactId =
-          audioTracks
-            .flatMap((track) => track.clips)
-            .find(
-              (clip) => clip.scene_id === scene.id && clip.captions_artifact_id,
-            )?.captions_artifact_id ?? scene.captions_artifact_id;
-        const cues = captionArtifactId
-          ? (captionTracks[captionArtifactId] ?? null)
-          : null;
-        if (!cues) return [];
-        const placement = captionClipRenderPlacement(content, scene, index);
-        return [
-          <Sequence
-            key={`captions:${scene.id}`}
-            from={placement.from}
-            durationInFrames={placement.durationInFrames}
-          >
-            <TimedCaptions cues={cues} playbackRate={scene.playback_rate} />
-          </Sequence>,
-        ];
-      })}
+      {effectiveCaptionTracks(content).flatMap((track) =>
+        track.visible
+          ? track.clips.flatMap((clip) => {
+              const cues = clip.artifact_id
+                ? (captionTracks[clip.artifact_id] ?? null)
+                : null;
+              const scene = content.scenes.find(
+                (candidate) => candidate.id === clip.scene_id,
+              );
+              if (!cues || !scene) return [];
+              const placement = captionClipRenderPlacement(clip);
+              return [
+                <Sequence
+                  key={`${track.id}:${clip.id}`}
+                  from={placement.from}
+                  durationInFrames={placement.durationInFrames}
+                >
+                  <TimedCaptions
+                    cues={cues}
+                    playbackRate={scene.playback_rate}
+                  />
+                </Sequence>,
+              ];
+            })
+          : [],
+      )}
     </>
   );
 };

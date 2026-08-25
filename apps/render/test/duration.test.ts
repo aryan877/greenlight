@@ -23,8 +23,15 @@ describe("GreenlightFilm", () => {
   it("renders independent audio and caption timeline placements", () => {
     const content = structuredClone(fixturePackage);
     const scene = content.scenes[0]!;
-    scene.caption_timeline_start_seconds = 3;
-    scene.caption_duration_seconds = 2;
+    const captionClip = {
+      id: "caption_scene_hook",
+      scene_id: scene.id,
+      label: scene.narration,
+      artifact_id: null,
+      transcript_artifact_id: null,
+      timeline_start_seconds: 3,
+      duration_seconds: 2,
+    };
     const clip = {
       id: "clip_scene_hook",
       scene_id: scene.id,
@@ -46,7 +53,7 @@ describe("GreenlightFilm", () => {
       from: 5 * FPS,
       durationInFrames: 3 * FPS,
     });
-    expect(captionClipRenderPlacement(content, scene, 0)).toEqual({
+    expect(captionClipRenderPlacement(captionClip)).toEqual({
       from: 3 * FPS,
       durationInFrames: 2 * FPS,
     });

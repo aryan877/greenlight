@@ -46,6 +46,7 @@ const eventIcon: Partial<
   Record<StudioAgentEvent["kind"], typeof SlidersHorizontal>
 > = {
   reasoning: Sparkles,
+  subagent: Search,
   tool: SlidersHorizontal,
   artifact: Film,
   approval: CircleDot,
@@ -849,6 +850,41 @@ export const ProducerPanel = ({
                     <p className="whitespace-pre-wrap text-[14px] leading-6 text-ink">
                       {event.label}
                     </p>
+                  </div>
+                );
+              }
+              if (event.kind === "subagent") {
+                return (
+                  <div
+                    key={event.id}
+                    className="ml-8 flex w-[calc(100%-2rem)] items-center gap-2.5 rounded-xl border border-line bg-surface px-3 py-2.5"
+                  >
+                    <span
+                      className={cx(
+                        "grid size-6 shrink-0 place-items-center rounded-full bg-action-soft text-action",
+                        event.status === "error" &&
+                          "bg-warning-soft text-warning",
+                      )}
+                    >
+                      {event.status === "running" ? (
+                        <LoaderCircle
+                          size={13}
+                          className="motion-safe:animate-spin"
+                        />
+                      ) : event.status === "done" ? (
+                        <Check size={13} />
+                      ) : (
+                        <X size={13} />
+                      )}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <strong className="block truncate text-[12px] font-medium leading-5 text-ink">
+                        {event.label}
+                      </strong>
+                      <span className="text-[11px] text-ink-tertiary">
+                        {event.detail}
+                      </span>
+                    </div>
                   </div>
                 );
               }

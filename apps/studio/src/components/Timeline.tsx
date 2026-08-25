@@ -262,7 +262,13 @@ export const Timeline = ({
         [
           {
             type: "upsert_caption_track",
-            track: { id, name, kind: "caption", protected: false },
+            track: {
+              id,
+              name,
+              kind: "caption",
+              protected: false,
+              visible: true,
+            },
           },
         ],
         `Add ${name}`,
@@ -897,6 +903,22 @@ export const Timeline = ({
                   },
                 ],
                 summary,
+              );
+            }}
+            onChangeCaptionTrack={(track, visible) => {
+              const source = effectiveCaptionTracks(content).find(
+                (candidate) => candidate.id === track.id,
+              );
+              if (!source) return;
+              onDirectTrackEdit(
+                ["caption", track.id],
+                [
+                  {
+                    type: "upsert_caption_track",
+                    track: { ...source, visible },
+                  },
+                ],
+                `${visible ? "Show" : "Hide"} ${track.name}`,
               );
             }}
           />

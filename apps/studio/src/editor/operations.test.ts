@@ -133,7 +133,7 @@ const item = (kind: EditorTimelineItemKind, sceneId = "scene_first") => {
 };
 
 describe("timeline operations", () => {
-  it("keeps legacy audio and captions attached when their video is reordered", () => {
+  it("moves only the timeline items the creator selected", () => {
     const video = item("video");
     const audio = item("audio");
     const caption = item("caption");
@@ -146,6 +146,38 @@ describe("timeline operations", () => {
     });
 
     expect(plan.sceneScope).toBe("all");
+    expect(plan.operations).toEqual([
+      {
+        type: "reorder_scenes",
+        scene_ids: ["scene_second", "scene_first", "scene_third"],
+      },
+      {
+        type: "update_audio_clip",
+        item_id: audio.id,
+        clip_id: "clip_first_scene",
+        target_track_id: "track_narration",
+        timeline_start_seconds: 6,
+      },
+      {
+        type: "update_caption_clip",
+        item_id: caption.id,
+        clip_id: "caption_scene_first",
+        target_track_id: "track_captions",
+        timeline_start_seconds: 6,
+      },
+    ]);
+  });
+
+  it("does not move audio or captions when only video is dragged", () => {
+    const video = item("video");
+    const plan = buildTimelineMovePlan(content, {
+      itemIds: [video.id],
+      primaryItemId: video.id,
+      deltaSeconds: 6,
+      targetTrackId: video.track_id,
+      dropIndex: 1,
+    });
+
     expect(plan.operations).toEqual([
       {
         type: "reorder_scenes",
@@ -177,7 +209,7 @@ describe("timeline operations", () => {
       {
         type: "update_caption_clip",
         item_id: caption.id,
-        scene_id: "scene_first",
+        clip_id: "caption_scene_first",
         target_track_id: "track_captions",
         timeline_start_seconds: 2,
       },

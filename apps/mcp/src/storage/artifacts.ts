@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, relative, resolve, sep } from "node:path";
 
 import {
@@ -102,6 +102,37 @@ export class ArtifactStore {
   async readJson<T>(id: string): Promise<T> {
     const { absolutePath } = this.resolveArtifact(id);
     return JSON.parse(await readFile(absolutePath, "utf8")) as T;
+  }
+
+  async readChunk(
+    id: string,
+    offsetBytes: number,
+    lengthBytes: number,
+  ): Promise<Buffer> {
+    const { artifact, absolutePath } = this.resolveArtifact(id);
+    if (offsetBytes > artifact.byte_size) {
+      throw new Error("artifact_offset_out_of_range");
+    }
+
+    const bytesToRead = Math.min(
+      lengthBytes,
+      Math.max(0, artifact.byte_size - offsetBytes),
+    );
+    if (bytesToRead === 0) return Buffer.alloc(0);
+
+    const handle = await open(absolutePath, "r");
+    try {
+      const buffer = Buffer.allocUnsafe(bytesToRead);
+      const { bytesRead } = await handle.read(
+        buffer,
+        0,
+        bytesToRead,
+        offsetBytes,
+      );
+      return buffer.subarray(0, bytesRead);
+    } finally {
+      await handle.close();
+    }
   }
 
   private resolveRelative(relativePath: string): string {

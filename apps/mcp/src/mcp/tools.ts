@@ -1,4 +1,5 @@
 import {
+  artifactChunkSchema,
   captionTrackSchema,
   attachOpenMojiInputSchema,
   contentPackageSchema,
@@ -14,6 +15,7 @@ import {
   publishVideoInputSchema,
   qualityCheckInputSchema,
   qualityReportSchema,
+  readArtifactChunkInputSchema,
   renderVideoInputSchema,
   scheduleVideoInputSchema,
   searchOpenMojiInputSchema,
@@ -22,6 +24,7 @@ import {
   transcriptSchema,
 } from "@greenlight/contracts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { extname } from "node:path";
 import { z } from "zod";
 
 import { createId, hashJson } from "../lib/canonical.js";
@@ -240,6 +243,60 @@ export const buildMcpServer = ({
   );
 
   server.registerTool(
+    "read_artifact_chunk",
+    {
+      title: "Stream managed media into Code Mode",
+      description:
+        "Read one bounded chunk of an immutable Greenlight artifact. Use this only from TrueForge Code Mode to assemble an authorized sandbox copy for media inspection or FFmpeg. Loop until eof, verify sha256, and never print base64 or expose a host path.",
+      inputSchema: readArtifactChunkInputSchema.shape,
+      outputSchema: artifactChunkSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (input) => {
+      const request = readArtifactChunkInputSchema.parse(input);
+      const resolved = artifacts.resolveArtifact(request.artifact_id);
+      if (resolved.artifact.project_id !== request.project_id) {
+        throw new Error("artifact_project_mismatch");
+      }
+
+      const bytes = await artifacts.readChunk(
+        request.artifact_id,
+        request.offset_bytes,
+        request.length_bytes,
+      );
+      const nextOffset = request.offset_bytes + bytes.byteLength;
+      const payload = artifactChunkSchema.parse({
+        artifact_id: resolved.artifact.id,
+        suggested_filename: `${resolved.artifact.id}${extname(resolved.artifact.relative_path)}`,
+        mime_type: resolved.artifact.mime_type,
+        sha256: resolved.artifact.sha256,
+        offset_bytes: request.offset_bytes,
+        length_bytes: bytes.byteLength,
+        total_bytes: resolved.artifact.byte_size,
+        next_offset_bytes:
+          nextOffset < resolved.artifact.byte_size ? nextOffset : null,
+        eof: nextOffset >= resolved.artifact.byte_size,
+        data_base64: bytes.toString("base64"),
+      });
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Read ${String(payload.length_bytes)} of ${String(payload.total_bytes)} bytes.`,
+          },
+        ],
+        structuredContent: payload,
+      };
+    },
+  );
+
+  server.registerTool(
     "save_evidence_ledger",
     {
       title: "Save the sourced evidence ledger",
@@ -450,9 +507,9 @@ export const buildMcpServer = ({
   server.registerTool(
     "transcribe_audio",
     {
-      title: "Transcribe narration with word timing",
+      title: "Transcribe media with word timing",
       description:
-        "Create an immutable transcript for one narration artifact. Uses OpenRouter gpt-4o-mini-transcribe for the reference text and local whisper.cpp word timestamps for precise captioning and phrase cuts.",
+        "Create an immutable transcript for one narration artifact or rendered video. Uses OpenRouter gpt-4o-mini-transcribe for the reference text and local whisper.cpp word timestamps for precise captioning and phrase cuts. Ask the creator before calling this paid provider.",
       inputSchema: transcribeAudioInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -469,14 +526,13 @@ export const buildMcpServer = ({
       const audio = artifacts.resolveArtifact(request.audio_artifact_id);
       if (
         audio.artifact.project_id !== request.project_id ||
-        audio.artifact.kind !== "narration"
+        !["narration", "video"].includes(audio.artifact.kind)
       ) {
-        throw new Error("invalid_narration_artifact");
+        throw new Error("invalid_transcribable_artifact");
       }
       const generated = await transcription.transcribe({
         absolutePath: audio.absolutePath,
-        filename:
-          audio.artifact.relative_path.split("/").at(-1) ?? "narration.wav",
+        filename: audio.artifact.relative_path.split("/").at(-1) ?? "media.wav",
         mimeType: audio.artifact.mime_type,
         locale: request.locale,
         prompt: request.prompt,

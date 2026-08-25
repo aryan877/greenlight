@@ -71,6 +71,12 @@ export const saveEditorPatch = async (input: {
       requireArtifactKind(clip.transcript_artifact_id, ["transcript"]);
     }
   }
+  for (const track of revised.caption_tracks ?? []) {
+    for (const clip of track.clips ?? []) {
+      requireArtifactKind(clip.artifact_id, ["caption"]);
+      requireArtifactKind(clip.transcript_artifact_id, ["transcript"]);
+    }
+  }
   requireArtifactKind(revised.release.thumbnail_artifact_id, ["thumbnail"]);
 
   const permittedSceneIds = new Set(selection.scene_ids);
@@ -111,6 +117,12 @@ export const saveEditorPatch = async (input: {
       for (const clip of operation.track.clips) {
         requireArtifactScope(clip.artifact_id);
         requireArtifactScope(clip.captions_artifact_id);
+        requireArtifactScope(clip.transcript_artifact_id);
+      }
+    }
+    if (operation.type === "upsert_caption_track") {
+      for (const clip of operation.track.clips ?? []) {
+        requireArtifactScope(clip.artifact_id);
         requireArtifactScope(clip.transcript_artifact_id);
       }
     }

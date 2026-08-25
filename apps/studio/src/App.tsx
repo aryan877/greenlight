@@ -1,6 +1,7 @@
 import {
   applyEditorPatch,
   editorPatchInputSchema,
+  effectiveCaptionTracks,
   type ContentPackage,
   type EditorPatchOperation,
   type EditorFocusInput,
@@ -353,7 +354,8 @@ export const App = () => {
       !editorContent ||
       (producerReferencedItems.length === 0 &&
         producerReferencedTracks.length === 0 &&
-        producerReferencedGaps.length === 0)
+        producerReferencedGaps.length === 0 &&
+        attachedArtifactIds.length === 0)
     ) {
       return null;
     }
@@ -526,15 +528,9 @@ export const App = () => {
 
   const visibleContent = previewContent ?? editorContent;
   const programDuration = visibleContent ? totalDuration(visibleContent) : 0;
-  const previewUsesCanvas = Boolean(
-    previewPatch?.operations.some(
-      (operation) =>
-        operation.type === "update_scene" &&
-        (operation.title !== undefined ||
-          operation.narration !== undefined ||
-          operation.visual !== undefined),
-    ),
-  );
+  const previewUsesCanvas =
+    Boolean(previewPatch) ||
+    videoArtifact?.provenance.content_package_artifact_id !== editorArtifactId;
   const programAudioSources = useMemo(
     () =>
       visibleContent
@@ -553,6 +549,20 @@ export const App = () => {
     if (!visibleContent) return selectedScene;
     return sceneAtTimelineTime(visibleContent, media.currentTime);
   }, [media.currentTime, selectedScene, visibleContent]);
+  const activeCaption = useMemo(() => {
+    if (!visibleContent) return null;
+    return (
+      effectiveCaptionTracks(visibleContent)
+        .filter((track) => track.visible)
+        .flatMap((track) => track.clips)
+        .find(
+          (clip) =>
+            media.currentTime >= clip.timeline_start_seconds &&
+            media.currentTime <
+              clip.timeline_start_seconds + clip.duration_seconds,
+        ) ?? null
+    );
+  }, [media.currentTime, visibleContent]);
 
   useEffect(() => {
     if (!previewPatch?.selection.time_range_seconds) {
@@ -758,7 +768,7 @@ export const App = () => {
 
   const cutAtPlayhead = useCallback(
     (sceneId: string) => {
-      if (!editorContent) return;
+      if (!editorContent || !projectId || !editorArtifactId) return;
       const operation = splitSceneAtPlayhead({
         content: editorContent,
         sceneId,
@@ -766,13 +776,28 @@ export const App = () => {
         secondSceneId: `scene_cut_${crypto.randomUUID()}`,
       });
       if (!operation) return;
-      applyDirectOperations(
-        [sceneId],
-        [operation],
-        `Cut “${operation.first.title}” at the playhead`,
-      );
+      void persistDirectOperations({
+        selection: createSelection({
+          projectId,
+          contentArtifactId: editorArtifactId,
+          content: editorContent,
+          itemIds: [videoItemId(sceneId)],
+          playheadSeconds: media.currentTime,
+          sourceLedgerArtifact: evidenceArtifact,
+        }),
+        operations: [operation],
+        summary: `Cut “${operation.first.title}” at the playhead`,
+        recordHistory: true,
+      });
     },
-    [applyDirectOperations, editorContent, media.currentTime],
+    [
+      editorArtifactId,
+      editorContent,
+      evidenceArtifact,
+      media.currentTime,
+      persistDirectOperations,
+      projectId,
+    ],
   );
 
   const undo = useCallback(async () => {
@@ -1080,6 +1105,7 @@ export const App = () => {
             duration={programDuration}
             previewing={Boolean(previewContent)}
             previewUsesCanvas={previewUsesCanvas}
+            captionText={activeCaption?.label ?? null}
             timelineOpen={layout.timelineOpen}
             onToggleTimeline={() =>
               layout.setTimelineOpen(!layout.timelineOpen)

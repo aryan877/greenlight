@@ -121,7 +121,7 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 - The root Producer is the only agent that asks the user questions.
 - Subagents are bounded, cannot spawn nested agents, and return work to the root.
 - Greenlight exposes small typed domain tools, never a one-shot `make_video` function.
-- Flexible edit math and FFmpeg work happens in the TrueForge sandbox. Emitted files return through the SDK download boundary, Greenlight's media validator, and immutable artifact IDs; the model never receives a host path.
+- Flexible edit math and FFmpeg work happens in the TrueForge sandbox. Code Mode reads authorized source media through bounded `read_artifact_chunk` calls, assembles a sandbox copy, and verifies its SHA-256. Emitted files return through the SDK download boundary, Greenlight's media validator, and immutable artifact IDs; the model never receives a host path or raw base64.
 - Studio uses the official TrueForge TypeScript SDK and `user.tool_approval` turns.
 - Tool activity is translated into short human progress; raw event names, IDs, arguments, and chain-of-thought are not dumped into the product UI.
 
