@@ -47,6 +47,8 @@ Greenlight does not use TrueForge as a chat box around a separate workflow. True
 
 Exa comes from TrueForge's connector catalog and needs no API key. It stays deferred, so its tool schemas enter context only when research needs them.
 
+The local integration has also been exercised against a real Greenlight artifact, not a fixture: Code Mode reconstructed a 2,107,931-byte video through bounded MCP reads, matched its SHA-256, and measured 31.07 seconds, 1920×1080 H.264 at 30 fps with AAC audio. That turn made no project mutation and used no paid provider.
+
 ## Editor capabilities
 
 - Square, borderless 16:9 Program monitor with playback, seek, volume, mute, and fullscreen
@@ -103,6 +105,7 @@ Requirements:
 - pnpm 9+
 - FFmpeg and FFprobe
 - `whisper-cli` plus a local Whisper model
+- standalone Git for TrueForge skill cloning (Homebrew Git on macOS)
 - TrueForge
 - an OpenRouter API key
 
@@ -131,7 +134,7 @@ pnpm trueforge:configure
 
 Open [http://127.0.0.1:4173](http://127.0.0.1:4173).
 
-Greenlight imports its four custom skills from Git because that is TrueForge's skill boundary. The repository must be publicly cloneable before sandbox skill loading can work. Keep it private during owner-only development; make it public for the hackathon submission, then rerun `pnpm trueforge:configure`. Never put a GitHub token in a skill URL.
+Greenlight imports its four custom skills from Git because that is TrueForge's skill boundary. The repository must be publicly cloneable before sandbox skill loading can work. `pnpm trueforge:configure` detects a private repository and leaves Git skills out of the live agent so Code Mode still works during private development. Make the repository public for the hackathon submission, then rerun the command to enable them. Never put a GitHub token in a skill URL.
 
 The optional Remotion authoring view is:
 

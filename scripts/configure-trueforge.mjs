@@ -11,8 +11,8 @@ const upstreamModel =
 const skillsRepoUrl =
   process.env.GREENLIGHT_SKILLS_REPO_URL ??
   "https://github.com/aryan877/greenlight.git";
-const skillsRef =
-  process.env.GREENLIGHT_SKILLS_REF ?? "feat/contracts-and-foundation";
+const skillsRef = process.env.GREENLIGHT_SKILLS_REF ?? "main";
+const skillsMode = process.env.GREENLIGHT_ENABLE_GIT_SKILLS ?? "auto";
 
 const skillManifests = [
   {
@@ -69,6 +69,20 @@ const request = async (path, init = {}) => {
     );
   }
   return body;
+};
+
+const gitSkillsAreAvailable = async () => {
+  if (skillsMode === "true") return true;
+  if (skillsMode === "false") return false;
+  const url = new URL(skillsRepoUrl);
+  const [owner, rawRepository] = url.pathname.split("/").filter(Boolean);
+  if (url.hostname !== "github.com" || !owner || !rawRepository) return false;
+  const repository = rawRepository.replace(/\.git$/, "");
+  const response = await fetch(
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`,
+    { headers: { accept: "application/vnd.github+json" } },
+  ).catch(() => null);
+  return response?.ok === true;
 };
 
 const resolveCompactionThreshold = async () => {
@@ -151,25 +165,29 @@ await request("/api/v1/settings/mcp-servers", {
   body: JSON.stringify({ manifest: exaManifest }),
 });
 
-for (const skill of skillManifests) {
-  await request("/api/v1/settings/skills", {
-    method: "PUT",
-    body: JSON.stringify({
-      manifest: {
-        type: "git",
-        name: skill.name,
-        url: skillsRepoUrl,
-        path: skill.path,
-        ref: skillsRef,
-        description: skill.description,
-      },
-    }),
-  });
+const enableGitSkills = await gitSkillsAreAvailable();
+if (enableGitSkills) {
+  for (const skill of skillManifests) {
+    await request("/api/v1/settings/skills", {
+      method: "PUT",
+      body: JSON.stringify({
+        manifest: {
+          type: "git",
+          name: skill.name,
+          url: skillsRepoUrl,
+          path: skill.path,
+          ref: skillsRef,
+          description: skill.description,
+        },
+      }),
+    });
+  }
 }
 
 const compactionThreshold = await resolveCompactionThreshold();
 const manifest = {
   ...agentSource.manifest,
+  skills: enableGitSkills ? agentSource.manifest.skills : [],
   instructions: instructions.trim(),
   config: {
     ...agentSource.manifest.config,
@@ -201,7 +219,9 @@ console.log(
 console.log(`Configured TrueForge connector: greenlight -> ${mcpUrl}`);
 console.log("Configured TrueForge connector: exa (deferred web research)");
 console.log(
-  `Configured TrueForge skills: ${skillManifests.map((skill) => skill.name).join(", ")}`,
+  enableGitSkills
+    ? `Configured TrueForge skills: ${skillManifests.map((skill) => skill.name).join(", ")}`
+    : "Deferred TrueForge Git skills until their repository is publicly cloneable",
 );
 console.log(
   `Configured TrueForge agent: ${saved.data.name} (${saved.data.id})`,
