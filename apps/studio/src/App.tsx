@@ -15,6 +15,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useProducerAgent } from "./api/trueforge.js";
+import { greenlightApi } from "./api/greenlight.js";
 import {
   useContentPackage,
   useApplyEditorPatch,
@@ -63,6 +64,7 @@ import {
   type ProducerReferenceId,
 } from "./editor/producer-references.js";
 import { useMediaController } from "./editor/use-media-controller.js";
+import { timelineAudioSources } from "./editor/timeline-audio.js";
 import { useWorkspaceLayout } from "./editor/use-workspace-layout.js";
 
 type DirectRevision = {
@@ -522,6 +524,29 @@ export const App = () => {
 
   const visibleContent = previewContent ?? editorContent;
   const programDuration = visibleContent ? totalDuration(visibleContent) : 0;
+  const previewUsesCanvas = Boolean(
+    previewPatch?.operations.some(
+      (operation) =>
+        operation.type === "update_scene" &&
+        (operation.title !== undefined ||
+          operation.narration !== undefined ||
+          operation.visual !== undefined),
+    ),
+  );
+  const programAudioSources = useMemo(
+    () =>
+      visibleContent
+        ? timelineAudioSources(visibleContent).map((source) => ({
+            ...source,
+            url: greenlightApi.artifactUrl(source.artifactId),
+          }))
+        : [],
+    [visibleContent],
+  );
+
+  useEffect(() => {
+    media.setTimelineAudioSources(programAudioSources);
+  }, [media.setTimelineAudioSources, programAudioSources]);
   const visibleScene = useMemo(() => {
     if (!visibleContent) return selectedScene;
     const exact = visibleContent.scenes.find((scene, index) => {
@@ -551,13 +576,8 @@ export const App = () => {
       return;
     }
     media.setPlaybackWindow(previewPatch.selection.time_range_seconds);
-    media.setPlaybackRate(visibleScene?.playback_rate ?? 1);
-  }, [
-    media.setPlaybackRate,
-    media.setPlaybackWindow,
-    previewPatch,
-    visibleScene?.playback_rate,
-  ]);
+    media.setPlaybackRate(1);
+  }, [media.setPlaybackRate, media.setPlaybackWindow, previewPatch]);
 
   const directProducer = useCallback(
     (text: string) => {
@@ -1001,7 +1021,7 @@ export const App = () => {
             layout.setRightOpen(true);
           }}
           className={cx(
-            "flex h-8 items-center gap-2 border border-line-subtle px-3 text-[10px] font-medium text-ink-secondary hover:border-ink-caption hover:text-ink",
+            "flex h-8 items-center gap-2 rounded-full border border-line-subtle px-3 text-[10px] font-medium text-ink-secondary hover:border-ink-caption hover:text-ink",
             rightTab === "release" && "border-action text-action",
           )}
         >
@@ -1073,15 +1093,7 @@ export const App = () => {
             media={media}
             duration={programDuration}
             previewing={Boolean(previewContent)}
-            previewUsesCanvas={Boolean(
-              previewPatch?.operations.some(
-                (operation) =>
-                  operation.type === "update_scene" &&
-                  (operation.title !== undefined ||
-                    operation.narration !== undefined ||
-                    operation.visual !== undefined),
-              ),
-            )}
+            previewUsesCanvas={previewUsesCanvas}
             timelineOpen={layout.timelineOpen}
             onToggleTimeline={() =>
               layout.setTimelineOpen(!layout.timelineOpen)

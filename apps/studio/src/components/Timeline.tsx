@@ -1048,6 +1048,20 @@ export const Timeline = ({
                     item.kind === "video" &&
                     dropSceneId === "timeline-end" &&
                     sceneIndex === content.scenes.length - 1;
+                  const hasPreviousNeighbor = items.some(
+                    (candidate) =>
+                      candidate.id !== item.id &&
+                      candidate.track_id === item.track_id &&
+                      Math.abs(candidate.end_seconds - item.start_seconds) <
+                        1 / 1_000,
+                  );
+                  const hasNextNeighbor = items.some(
+                    (candidate) =>
+                      candidate.id !== item.id &&
+                      candidate.track_id === item.track_id &&
+                      Math.abs(candidate.start_seconds - displayedEnd) <
+                        1 / 1_000,
+                  );
                   return (
                     <button
                       type="button"
@@ -1087,6 +1101,8 @@ export const Timeline = ({
                           ? "border-action ring-1 ring-inset ring-action"
                           : "border-line hover:border-line-strong",
                         proposed && "preview-hatch border-warning/50",
+                        !hasPreviousNeighbor && "rounded-l-md",
+                        !hasNextNeighbor && "rounded-r-md",
                         draggedItemIds.includes(item.id) && "opacity-40",
                         isDropTarget &&
                           "before:absolute before:inset-y-0 before:left-0 before:z-20 before:w-0.5 before:bg-action",
@@ -1290,7 +1306,7 @@ export const Timeline = ({
         ? createPortal(
             <div
               className={cx(
-                "pointer-events-none fixed z-[100] flex h-9 max-w-[260px] select-none items-center gap-2 border bg-surface-raised px-3 text-[12px] font-medium text-ink shadow-float",
+                "pointer-events-none fixed z-[100] flex h-9 max-w-[260px] select-none items-center gap-2 rounded-lg border bg-surface-raised px-3 text-[12px] font-medium text-ink shadow-float",
                 dragPreview.overProducer
                   ? "border-action bg-action-soft"
                   : "border-line-strong",
@@ -1306,7 +1322,7 @@ export const Timeline = ({
                   return (
                     <span
                       key={item.id}
-                      className="grid size-5 place-items-center bg-surface-raised text-action"
+                      className="grid size-5 place-items-center rounded-md bg-surface-raised text-action"
                     >
                       <Icon size={12} />
                     </span>

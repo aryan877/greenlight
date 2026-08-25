@@ -38,7 +38,7 @@ export const ThemeToggle = () => {
       aria-label={`Switch to ${nextTheme} mode`}
       title={`Switch to ${nextTheme} mode`}
       onClick={() => setTheme(nextTheme)}
-      className="grid size-8 place-items-center border border-line-subtle text-ink-tertiary transition-colors hover:border-line-strong hover:bg-hover hover:text-ink"
+      className="grid size-8 place-items-center rounded-full border border-line-subtle text-ink-tertiary transition-colors hover:border-line-strong hover:bg-hover hover:text-ink"
     >
       <Icon size={14} strokeWidth={1.8} />
     </button>

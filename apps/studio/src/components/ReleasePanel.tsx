@@ -135,12 +135,12 @@ export const ReleasePanel = ({
             <button
               type="button"
               onClick={() => setChoosingThumbnail((current) => !current)}
-              className="flex items-center gap-1 text-[10px] text-ink-tertiary hover:text-ink"
+              className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] text-ink-tertiary hover:bg-hover hover:text-ink"
             >
               Choose <ChevronDown size={11} />
             </button>
           </div>
-          <div className="aspect-video overflow-hidden bg-canvas">
+          <div className="aspect-video overflow-hidden rounded-xl bg-canvas">
             {displayedThumbnail ? (
               <img
                 src={greenlightApi.artifactUrl(displayedThumbnail.id)}
@@ -200,7 +200,7 @@ export const ReleasePanel = ({
                     setChoosingThumbnail(false);
                   }}
                   className={cx(
-                    "overflow-hidden border border-line bg-canvas text-left hover:border-action",
+                    "overflow-hidden rounded-xl border border-line bg-canvas text-left hover:border-action",
                     artifact.id === selectedThumbnail?.id && "border-action",
                   )}
                 >
@@ -231,7 +231,7 @@ export const ReleasePanel = ({
                   commitMetadata({ title: value }, "Update the YouTube title");
                 }
               }}
-              className="mt-1.5 w-full border-0 border-b border-line bg-transparent px-0 py-2 text-[13px] text-ink outline-none focus:border-action"
+              className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-[13px] text-ink outline-none focus:border-action"
             />
             <span className="mt-1 block text-right font-mono text-[9px] text-ink-caption">
               {title.length}/100
@@ -256,7 +256,7 @@ export const ReleasePanel = ({
                   );
                 }
               }}
-              className="mt-1.5 w-full resize-y border border-line bg-surface px-3 py-2 text-[12px] leading-5 text-ink outline-none focus:border-action"
+              className="mt-1.5 w-full resize-y rounded-xl border border-line bg-surface px-3 py-2 text-[12px] leading-5 text-ink outline-none focus:border-action"
             />
           </label>
 
@@ -272,14 +272,14 @@ export const ReleasePanel = ({
                 }
               }}
               placeholder="agents, video editing, creator tools"
-              className="mt-1.5 w-full border-0 border-b border-line bg-transparent px-0 py-2 text-[12px] text-ink outline-none focus:border-action"
+              className="mt-1.5 w-full rounded-lg border border-line bg-surface px-3 py-2 text-[12px] text-ink outline-none focus:border-action"
             />
           </label>
         </div>
 
         <div className="border-b border-line-subtle py-4">
           <p className="mb-2 text-[11px] font-medium text-ink">After review</p>
-          <div className="grid grid-cols-3 border border-line">
+          <div className="grid grid-cols-3 overflow-hidden rounded-xl border border-line">
             {(["unlisted", "public", "scheduled"] as const).map((option) => (
               <button
                 type="button"
@@ -313,7 +313,7 @@ export const ReleasePanel = ({
             ))}
           </div>
           {destination === "scheduled" ? (
-            <label className="mt-3 flex items-center gap-2 border-b border-line py-2">
+            <label className="mt-3 flex items-center gap-2 rounded-lg border border-line px-3 py-2">
               <CalendarClock size={13} className="text-ink-tertiary" />
               <input
                 type="datetime-local"
@@ -374,7 +374,7 @@ export const ReleasePanel = ({
             !content.release.thumbnail_artifact_id
           }
           onClick={onPrepare}
-          className="flex h-10 w-full items-center justify-center gap-2 bg-control text-[11px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-45"
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-control text-[11px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-45"
         >
           {busy ? (
             <LoaderCircle size={13} className="animate-spin" />

@@ -6,12 +6,9 @@ import {
   Captions,
   Film,
   GripVertical,
-  Headphones,
   Languages,
   Mic2,
   Music2,
-  PackageCheck,
-  PackageX,
   Plus,
   Sparkles,
   Trash2,
@@ -66,7 +63,7 @@ const RailAction = ({
       onClick();
     }}
     className={cx(
-      "grid size-5 shrink-0 place-items-center text-ink-tertiary transition-colors duration-100 hover:bg-surface-sunken hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-action",
+      "grid size-5 shrink-0 place-items-center rounded-full text-ink-tertiary transition-colors duration-100 hover:bg-surface-sunken hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-action",
       active && "bg-track-voice text-track-voice-strong",
     )}
   >
@@ -218,14 +215,14 @@ export const TrackRail = ({
           aria-expanded={pickerOpen}
           onClick={() => setPickerOpen((open) => !open)}
           className={cx(
-            "grid size-5 place-items-center text-ink-tertiary transition-colors duration-100 hover:bg-surface-sunken hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-action",
+            "grid size-5 place-items-center rounded-full text-ink-tertiary transition-colors duration-100 hover:bg-surface-sunken hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-action",
             pickerOpen && "bg-action-soft text-action",
           )}
         >
           {pickerOpen ? <X size={12} /> : <Plus size={12} />}
         </button>
         {pickerOpen ? (
-          <div className="absolute left-2 right-2 top-7 z-[80] border border-line-strong bg-surface-raised p-1 shadow-float">
+          <div className="absolute left-2 right-2 top-7 z-[80] rounded-xl border border-line-strong bg-surface-raised p-1 shadow-float">
             {trackChoices.map(({ Icon, ...choice }) => (
               <button
                 key={`${choice.kind}-${choice.role ?? "plain"}`}
@@ -234,7 +231,7 @@ export const TrackRail = ({
                   onAddTrack(choice);
                   setPickerOpen(false);
                 }}
-                className="flex h-7 w-full items-center gap-2 px-2 text-left text-[10px] text-ink-secondary hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-action"
+                className="flex h-7 w-full items-center gap-2 rounded-lg px-2 text-left text-[10px] text-ink-secondary hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-action"
               >
                 <Icon size={12} className="text-action" />
                 {choice.name}
@@ -310,7 +307,7 @@ export const TrackRail = ({
                   if (name && name !== track.name) onRenameTrack(track, name);
                   setRenamingTrackId(null);
                 }}
-                className="h-5 min-w-0 flex-1 border border-action bg-surface-raised px-1 text-[9px] text-ink outline-none"
+                className="h-5 min-w-0 flex-1 rounded-md border border-action bg-surface-raised px-1 text-[9px] text-ink outline-none"
               />
             ) : (
               <span
@@ -325,79 +322,25 @@ export const TrackRail = ({
               </span>
             )}
             {track.kind === "audio" ? (
-              <>
-                <RailAction
-                  active={track.muted}
-                  label={
-                    track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`
-                  }
-                  onClick={() =>
-                    onChangeAudioTrack(
-                      track,
-                      {
-                        muted: !track.muted,
-                        solo: track.solo,
-                        export_enabled: track.export_enabled,
-                      },
-                      track.muted
-                        ? `Unmute ${track.name}`
-                        : `Mute ${track.name}`,
-                    )
-                  }
-                >
-                  {track.muted ? <VolumeX size={10} /> : <Volume2 size={10} />}
-                </RailAction>
-                <RailAction
-                  active={track.solo}
-                  label={
-                    track.solo
-                      ? `Turn solo off for ${track.name}`
-                      : `Solo ${track.name}`
-                  }
-                  onClick={() =>
-                    onChangeAudioTrack(
-                      track,
-                      {
-                        muted: track.muted,
-                        solo: !track.solo,
-                        export_enabled: track.export_enabled,
-                      },
-                      track.solo
-                        ? `Turn solo off for ${track.name}`
-                        : `Solo ${track.name}`,
-                    )
-                  }
-                >
-                  <Headphones size={10} />
-                </RailAction>
-                <RailAction
-                  active={!track.export_enabled}
-                  label={
-                    track.export_enabled
-                      ? `Exclude ${track.name} from export`
-                      : `Include ${track.name} in export`
-                  }
-                  onClick={() =>
-                    onChangeAudioTrack(
-                      track,
-                      {
-                        muted: track.muted,
-                        solo: track.solo,
-                        export_enabled: !track.export_enabled,
-                      },
-                      track.export_enabled
-                        ? `Exclude ${track.name} from export`
-                        : `Include ${track.name} in export`,
-                    )
-                  }
-                >
-                  {track.export_enabled ? (
-                    <PackageCheck size={10} />
-                  ) : (
-                    <PackageX size={10} />
-                  )}
-                </RailAction>
-              </>
+              <RailAction
+                active={track.muted}
+                label={
+                  track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`
+                }
+                onClick={() =>
+                  onChangeAudioTrack(
+                    track,
+                    {
+                      muted: !track.muted,
+                      solo: track.solo,
+                      export_enabled: track.export_enabled,
+                    },
+                    track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`,
+                  )
+                }
+              >
+                {track.muted ? <VolumeX size={10} /> : <Volume2 size={10} />}
+              </RailAction>
             ) : null}
             {!track.protected ? (
               <RailAction
@@ -415,7 +358,7 @@ export const TrackRail = ({
         ? createPortal(
             <div
               className={cx(
-                "pointer-events-none fixed z-[100] flex h-8 max-w-[230px] items-center gap-2 border bg-surface-raised px-2.5 text-[11px] font-medium text-ink shadow-float",
+                "pointer-events-none fixed z-[100] flex h-8 max-w-[230px] items-center gap-2 rounded-lg border bg-surface-raised px-2.5 text-[11px] font-medium text-ink shadow-float",
                 dragPreview.overProducer
                   ? "border-action bg-action-soft"
                   : "border-line-strong",
