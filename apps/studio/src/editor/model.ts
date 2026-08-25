@@ -38,6 +38,22 @@ export const sceneAtTimelineTime = (
     return seconds >= start && seconds < start + scene.duration_seconds;
   }) ?? null;
 
+export const trackOperationSceneIds = (
+  operations: EditorPatchOperation[],
+): string[] => [
+  ...new Set(
+    operations.flatMap((operation) => {
+      if (operation.type === "upsert_audio_track") {
+        return operation.track.clips.map((clip) => clip.scene_id);
+      }
+      if (operation.type === "upsert_localized_track") {
+        return [operation.track.scene_id];
+      }
+      return [];
+    }),
+  ),
+];
+
 export const videoItemId = videoTimelineItemId;
 export const captionItemId = captionTimelineItemId;
 export const audioItemId = audioTimelineItemId;

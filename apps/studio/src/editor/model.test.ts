@@ -1,4 +1,9 @@
-import type { Artifact, ContentPackage } from "@greenlight/contracts";
+import {
+  applyEditorPatch,
+  effectiveAudioTracks,
+  type Artifact,
+  type ContentPackage,
+} from "@greenlight/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -14,6 +19,7 @@ import {
   sceneTimelineDuration,
   splitSceneAtPlayhead,
   timelineTicks,
+  trackOperationSceneIds,
   totalDuration,
 } from "./model.js";
 
@@ -182,6 +188,33 @@ describe("editor selection", () => {
     expect(selection.scene_ids).toEqual([]);
     expect(selection.track_ids).toEqual(["track_narration"]);
     expect(selection.time_range_seconds).toBeNull();
+  });
+
+  it("authorizes a whole-track mute across every clip on that track", () => {
+    const narration = effectiveAudioTracks(content)[0]!;
+    const operation = {
+      type: "upsert_audio_track" as const,
+      track: { ...narration, muted: true },
+    };
+    const selection = createSelection({
+      projectId: content.project_id,
+      contentArtifactId: "artifact_content",
+      content,
+      sceneIds: trackOperationSceneIds([operation]),
+      trackIds: ["voice", narration.id],
+      sourceLedgerArtifact: null,
+    });
+
+    const revised = applyEditorPatch(content, {
+      selection,
+      instruction_summary: "Mute Narration",
+      operations: [operation],
+    });
+
+    expect(selection.scene_ids).toEqual(
+      narration.clips.map((clip) => clip.scene_id),
+    );
+    expect(effectiveAudioTracks(revised)[0]?.muted).toBe(true);
   });
 
   it("uses the persisted track order instead of rebuilding lane order", () => {

@@ -56,6 +56,7 @@ import {
   sceneAtTimelineTime,
   sceneOffset,
   splitSceneAtPlayhead,
+  trackOperationSceneIds,
   totalDuration,
 } from "./editor/model.js";
 import type { ProducerDraftIntent } from "./editor/producer-draft.js";
@@ -672,6 +673,7 @@ export const App = () => {
           projectId: projectId!,
           contentArtifactId: editorArtifactId!,
           content: editorContent!,
+          sceneIds: trackOperationSceneIds(operations),
           trackIds,
           playheadSeconds: media.currentTime,
           sourceLedgerArtifact: evidenceArtifact,
