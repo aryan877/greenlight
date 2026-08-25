@@ -13,9 +13,6 @@ const rootProviderName =
 const rootProviderBaseUrl = (
   process.env.GREENLIGHT_ROOT_BASE_URL ?? "https://openrouter.ai/api/v1"
 ).replace(/\/$/, "");
-const rootApiKey =
-  process.env.GREENLIGHT_ROOT_API_KEY?.trim() ||
-  process.env.OPENROUTER_API_KEY?.trim();
 const mcpAuthToken = process.env.GREENLIGHT_MCP_AUTH_TOKEN;
 const upstreamModel =
   process.env.GREENLIGHT_ROOT_MODEL ?? "google/gemini-3.7-flash";
@@ -72,6 +69,12 @@ if (
     "GREENLIGHT_ROOT_BASE_URL must be an HTTP(S) URL without embedded credentials.",
   );
 }
+const isOpenRouter =
+  parsedRootProviderUrl.origin === "https://openrouter.ai" &&
+  parsedRootProviderUrl.pathname.replace(/\/+$/, "") === "/api/v1";
+const rootApiKey =
+  process.env.GREENLIGHT_ROOT_API_KEY?.trim() ||
+  (isOpenRouter ? process.env.OPENROUTER_API_KEY?.trim() : undefined);
 if (!rootApiKey) {
   throw new Error(
     "GREENLIGHT_ROOT_API_KEY is required. Put it in ignored .env and rerun the command.",
