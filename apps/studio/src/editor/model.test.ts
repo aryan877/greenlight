@@ -5,6 +5,7 @@ import {
   changeSceneSpeed,
   createSelection,
   createTimelineContext,
+  gapItemId,
   timelineItems,
   timelineTracks,
   formatRulerTime,
@@ -107,7 +108,6 @@ describe("editor selection", () => {
       "caption",
       "voice",
       "transcript",
-      "release",
     ]);
     expect(selection.artifact_ids).toContain("transcript_004");
     expect(selection.artifact_ids).toContain(sourceLedger.id);
@@ -170,7 +170,7 @@ describe("editor selection", () => {
 
     expect(selection.item_ids).toEqual([]);
     expect(selection.scene_ids).toEqual([]);
-    expect(selection.track_ids).toEqual(["track_narration", "release"]);
+    expect(selection.track_ids).toEqual(["track_narration"]);
     expect(selection.time_range_seconds).toBeNull();
   });
 
@@ -260,13 +260,13 @@ describe("editor selection", () => {
       projectId: withGap.project_id,
       contentArtifactId: "artifact_content",
       content: withGap,
-      sceneIds: [withGap.scenes[0]!.id],
-      gapAfterSceneIds: [withGap.scenes[0]!.id],
+      gapIds: [gapItemId(withGap.scenes[0]!.id)],
       sourceLedgerArtifact: null,
     });
 
-    expect(selection.track_ids).toContain("gap_after_scene_000");
-    expect(selection.time_range_seconds).toEqual({ start: 0, end: 5 });
+    expect(selection.gap_ids).toEqual([gapItemId("scene_000")]);
+    expect(selection.item_ids).toEqual([]);
+    expect(selection.time_range_seconds).toEqual({ start: 2, end: 5 });
   });
 
   it("records the exact playhead and builds a frame-accurate direct cut", () => {

@@ -7,24 +7,77 @@ export const useMediaController = () => {
   const [volume, setVolume] = useState(0.82);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const currentTimeRef = useRef(0);
+  const playingRef = useRef(false);
+  const animationFrame = useRef<number | null>(null);
   const scrubbing = useRef(false);
   const playbackWindow = useRef<{ start: number; end: number } | null>(null);
   const playbackRate = useRef(1);
 
-  const togglePlay = useCallback(async () => {
-    const media = mediaRef.current;
-    if (!media) return;
-    const window = playbackWindow.current;
-    if (
-      window &&
-      (media.currentTime < window.start || media.currentTime >= window.end)
-    ) {
-      media.currentTime = window.start;
-      setCurrentTime(window.start);
-    }
-    if (media.paused) await media.play();
-    else media.pause();
+  const updateCurrentTime = useCallback((seconds: number) => {
+    currentTimeRef.current = seconds;
+    setCurrentTime(seconds);
   }, []);
+
+  const stopVirtualPlayback = useCallback(() => {
+    playingRef.current = false;
+    setPlaying(false);
+    if (animationFrame.current !== null) {
+      cancelAnimationFrame(animationFrame.current);
+      animationFrame.current = null;
+    }
+  }, []);
+
+  useEffect(() => stopVirtualPlayback, [stopVirtualPlayback]);
+
+  const togglePlay = useCallback(
+    async (timelineDuration = 0) => {
+      const media = mediaRef.current;
+      if (!media) {
+        if (timelineDuration <= 0) return;
+        if (playingRef.current) {
+          stopVirtualPlayback();
+          return;
+        }
+        setDuration(timelineDuration);
+        const window = playbackWindow.current;
+        const start = window?.start ?? 0;
+        const end = Math.min(window?.end ?? timelineDuration, timelineDuration);
+        if (currentTimeRef.current < start || currentTimeRef.current >= end) {
+          updateCurrentTime(start);
+        }
+        playingRef.current = true;
+        setPlaying(true);
+        let previous = performance.now();
+        const advance = (now: number) => {
+          if (!playingRef.current) return;
+          const elapsedSeconds =
+            ((now - previous) / 1000) * playbackRate.current;
+          previous = now;
+          const next = Math.min(end, currentTimeRef.current + elapsedSeconds);
+          updateCurrentTime(next);
+          if (next >= end) {
+            stopVirtualPlayback();
+            return;
+          }
+          animationFrame.current = requestAnimationFrame(advance);
+        };
+        animationFrame.current = requestAnimationFrame(advance);
+        return;
+      }
+      const window = playbackWindow.current;
+      if (
+        window &&
+        (media.currentTime < window.start || media.currentTime >= window.end)
+      ) {
+        media.currentTime = window.start;
+        updateCurrentTime(window.start);
+      }
+      if (media.paused) await media.play();
+      else media.pause();
+    },
+    [stopVirtualPlayback, updateCurrentTime],
+  );
 
   const clampTime = useCallback(
     (seconds: number) => {
@@ -38,10 +91,10 @@ export const useMediaController = () => {
   const seek = useCallback(
     (seconds: number) => {
       const next = clampTime(seconds);
-      setCurrentTime(next);
+      updateCurrentTime(next);
       if (mediaRef.current) mediaRef.current.currentTime = next;
     },
-    [clampTime],
+    [clampTime, updateCurrentTime],
   );
 
   const beginScrub = useCallback(() => {
@@ -51,10 +104,10 @@ export const useMediaController = () => {
   const previewSeek = useCallback(
     (seconds: number) => {
       const next = clampTime(seconds);
-      setCurrentTime(next);
+      updateCurrentTime(next);
       if (mediaRef.current) mediaRef.current.currentTime = next;
     },
-    [clampTime],
+    [clampTime, updateCurrentTime],
   );
 
   const endScrub = useCallback(
@@ -113,8 +166,14 @@ export const useMediaController = () => {
     setPlaybackWindow,
     setPlaybackRate,
     mediaEvents: {
-      onPlay: () => setPlaying(true),
-      onPause: () => setPlaying(false),
+      onPlay: () => {
+        playingRef.current = true;
+        setPlaying(true);
+      },
+      onPause: () => {
+        playingRef.current = false;
+        setPlaying(false);
+      },
       onTimeUpdate: () => {
         const media = mediaRef.current;
         if (!media || scrubbing.current) return;
@@ -123,7 +182,7 @@ export const useMediaController = () => {
           media.pause();
           media.currentTime = window.start;
         }
-        setCurrentTime(media.currentTime);
+        updateCurrentTime(media.currentTime);
       },
       onLoadedMetadata: () => {
         const media = mediaRef.current;
@@ -133,7 +192,10 @@ export const useMediaController = () => {
         media.playbackRate = playbackRate.current;
         setDuration(media.duration);
       },
-      onEnded: () => setPlaying(false),
+      onEnded: () => {
+        playingRef.current = false;
+        setPlaying(false);
+      },
     },
   };
 };

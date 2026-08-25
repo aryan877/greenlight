@@ -83,6 +83,7 @@ describe("editor patch revisions", () => {
             item_ids: [],
             scene_ids: ["scene_open"],
             track_ids: ["visual", "voice", "caption", "transcript"],
+            gap_ids: [],
             artifact_ids: [],
             playhead_seconds: 0,
             time_range_seconds: { start: 0, end: 30 },

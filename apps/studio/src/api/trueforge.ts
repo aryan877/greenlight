@@ -139,13 +139,17 @@ export const creatorDecisionFromTurnInput = (
 type ProducerSendInput = {
   instruction: string;
   selection: EditorSelection | null;
+  references: EditorSelection | null;
   timeline: EditorTimelineContext | null;
   clientEventId?: string;
 };
 
 export const createProducerUserMessage = (
   projectId: string,
-  input: Pick<ProducerSendInput, "instruction" | "selection" | "timeline">,
+  input: Pick<
+    ProducerSendInput,
+    "instruction" | "selection" | "references" | "timeline"
+  >,
 ) => {
   const timelineContext = input.timeline
     ? `\n\nEDITOR_TIMELINE (complete current cut):\n${JSON.stringify(input.timeline)}`
@@ -153,7 +157,10 @@ export const createProducerUserMessage = (
   const selectionContext = input.selection
     ? `\n\nEDITOR_SELECTION (current emphasis):\n${JSON.stringify(input.selection)}`
     : "";
-  return `PROJECT_ID: ${projectId}\n\n${input.instruction}${timelineContext}${selectionContext}`;
+  const referenceContext = input.references
+    ? `\n\nEDITOR_REFERENCES (explicit creator attachments):\n${JSON.stringify(input.references)}`
+    : "";
+  return `PROJECT_ID: ${projectId}\n\n${input.instruction}${timelineContext}${selectionContext}${referenceContext}`;
 };
 
 type WireEvent = Record<string, unknown> & {
@@ -281,7 +288,7 @@ const visibleCreatorInstruction = (
   if (marker?.[1]?.trim() !== projectId) return null;
   const instruction = message
     .slice(marker[0].length)
-    .split(/\n\nEDITOR_(?:TIMELINE|SELECTION)/)[0]
+    .split(/\n\nEDITOR_(?:TIMELINE|SELECTION|REFERENCES)/)[0]
     ?.trim();
   if (!instruction || instruction.startsWith("GREENLIGHT_ARTIFACT_HANDOFF")) {
     return null;

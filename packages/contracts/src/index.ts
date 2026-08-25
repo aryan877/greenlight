@@ -949,6 +949,9 @@ const timelineItemId = (
   stableId: string,
 ) => `${timelineItemIdPrefix(kind)}${stableId.slice(-(79 - kind.length))}`;
 
+export const timelineGapId = (sceneId: string) =>
+  `gap_${sceneId.slice(-(79 - "gap".length))}`;
+
 export const videoTimelineItemId = (sceneId: string) =>
   timelineItemId(editorTimelineItemKindSchema.enum.video, sceneId);
 
@@ -998,6 +1001,31 @@ export const editorTimelineItemSchema = z
     }
   });
 
+export const editorTimelineGapSchema = z
+  .object({
+    id: idSchema,
+    after_scene_id: idSchema,
+    label: z.string().trim().min(1).max(160),
+    start_seconds: frameAlignedSecondsSchema.nonnegative(),
+    end_seconds: frameAlignedSecondsSchema.positive(),
+  })
+  .superRefine((gap, context) => {
+    if (!gap.id.startsWith("gap_")) {
+      context.addIssue({
+        code: "custom",
+        message: "Timeline gap ID must start with gap_",
+        path: ["id"],
+      });
+    }
+    if (gap.end_seconds <= gap.start_seconds) {
+      context.addIssue({
+        code: "custom",
+        message: "Timeline gap end must be after start",
+        path: ["end_seconds"],
+      });
+    }
+  });
+
 export const searchOpenMojiInputSchema = z.object({
   query: z.string().trim().min(2).max(100),
   limit: z.number().int().min(1).max(12).default(6),
@@ -1019,6 +1047,7 @@ export const editorSelectionSchema = z
     item_ids: z.array(idSchema).default([]),
     scene_ids: z.array(idSchema).default([]),
     track_ids: z.array(editorTrackIdSchema).default([]),
+    gap_ids: z.array(idSchema).default([]),
     artifact_ids: z.array(idSchema).default([]),
     playhead_seconds: frameAlignedSecondsSchema
       .nonnegative()
@@ -1053,6 +1082,7 @@ export const editorTimelineContextSchema = z.object({
   playhead_seconds: frameAlignedSecondsSchema.nonnegative(),
   tracks: z.array(editorTimelineTrackSchema),
   items: z.array(editorTimelineItemSchema),
+  gaps: z.array(editorTimelineGapSchema),
   scenes: z.array(
     z.object({
       id: idSchema,
@@ -1269,6 +1299,7 @@ export type EditorTimelineItemKind = z.infer<
   typeof editorTimelineItemKindSchema
 >;
 export type EditorTimelineItem = z.infer<typeof editorTimelineItemSchema>;
+export type EditorTimelineGap = z.infer<typeof editorTimelineGapSchema>;
 export type EditorTimelineTrack = z.infer<typeof editorTimelineTrackSchema>;
 export type EditorFocusInput = z.infer<typeof editorFocusInputSchema>;
 export type SearchOpenMojiInput = z.infer<typeof searchOpenMojiInputSchema>;

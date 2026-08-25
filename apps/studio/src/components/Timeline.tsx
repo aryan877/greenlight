@@ -6,6 +6,7 @@ import {
   VIDEO_FPS,
   type ContentPackage,
   type EditorPatchOperation,
+  type EditorTimelineGap,
   type EditorTimelineItem,
   type EditorTimelineItemKind,
   type EditorTimelineTrack,
@@ -36,10 +37,12 @@ import { createPortal } from "react-dom";
 import {
   formatRulerTime,
   formatTime,
+  gapItemId,
   sceneOffset,
   sceneTimelineDuration,
   snapToFrame,
   timelineItems,
+  timelineGaps,
   timelineTracks,
   timelineTicks,
   totalDuration,
@@ -83,6 +86,22 @@ type DragPreview = {
   overProducer: boolean;
 };
 
+type GapDrag = {
+  pointerId: number;
+  gapId: string;
+  startX: number;
+  startY: number;
+  additive: boolean;
+  moved: boolean;
+};
+
+type GapDragPreview = {
+  gaps: EditorTimelineGap[];
+  x: number;
+  y: number;
+  overProducer: boolean;
+};
+
 const RAIL_WIDTH = 156;
 const RULER_HEIGHT = 28;
 const LANE_HEIGHT = 32;
@@ -108,7 +127,7 @@ export const Timeline = ({
   content,
   selectedItemIds,
   selectedTrackIds,
-  selectedGapAfterSceneIds,
+  selectedGapIds,
   previewSceneIds,
   previewing,
   currentTime,
@@ -126,6 +145,7 @@ export const Timeline = ({
   onCutAtPlayhead,
   onAttachItemsToProducer,
   onAttachTracksToProducer,
+  onAttachGapsToProducer,
   onSelectGap,
   onSelectAll,
   onCollapse,
@@ -138,13 +158,13 @@ export const Timeline = ({
   content: ContentPackage;
   selectedItemIds: string[];
   selectedTrackIds: string[];
-  selectedGapAfterSceneIds: string[];
+  selectedGapIds: string[];
   previewSceneIds: string[];
   previewing: boolean;
   currentTime: number;
   onSelectItem: (itemId: string, additive: boolean) => void;
   onSelectTrack: (trackId: string, additive: boolean) => void;
-  onSelectMany: (itemIds: string[], gapAfterSceneIds?: string[]) => void;
+  onSelectMany: (itemIds: string[], gapIds?: string[]) => void;
   onSeek: (seconds: number) => void;
   onScrubStart: () => void;
   onScrub: (seconds: number) => void;
@@ -168,7 +188,8 @@ export const Timeline = ({
   onCutAtPlayhead: (sceneId: string) => void;
   onAttachItemsToProducer: (items: EditorTimelineItem[]) => void;
   onAttachTracksToProducer: (tracks: EditorTimelineTrack[]) => void;
-  onSelectGap: (sceneId: string, additive: boolean) => void;
+  onAttachGapsToProducer: (gaps: EditorTimelineGap[]) => void;
+  onSelectGap: (gapId: string, additive: boolean) => void;
   onSelectAll: () => void;
   onCollapse: () => void;
   canUndo: boolean;
@@ -180,6 +201,7 @@ export const Timeline = ({
   const duration = totalDuration(content);
   const audioTracks = effectiveAudioTracks(content);
   const items = useMemo(() => timelineItems(content), [content]);
+  const gaps = useMemo(() => timelineGaps(content), [content]);
   const tracks = useMemo(() => timelineTracks(content), [content]);
   const laneIndex = useMemo(
     () => new Map(tracks.map((track, index) => [track.id, index])),
@@ -191,6 +213,9 @@ export const Timeline = ({
   const [zoom, setZoom] = useState(1);
   const [trackWidth, setTrackWidth] = useState(1000);
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
+  const [gapDragPreview, setGapDragPreview] = useState<GapDragPreview | null>(
+    null,
+  );
   const [draggedItemIds, setDraggedItemIds] = useState<string[]>([]);
   const [dragTransform, setDragTransform] = useState<{
     deltaSeconds: number;
@@ -205,6 +230,7 @@ export const Timeline = ({
   const [marquee, setMarquee] = useState<Marquee | null>(null);
   const marqueeRef = useRef<Marquee | null>(null);
   const itemDragRef = useRef<ItemDrag | null>(null);
+  const gapDragRef = useRef<GapDrag | null>(null);
   const suppressClickRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const timeAxisRef = useRef<HTMLDivElement>(null);
@@ -387,7 +413,10 @@ export const Timeline = ({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    if (selectionRect.width < 4 && selectionRect.height < 4) return;
+    if (selectionRect.width < 4 && selectionRect.height < 4) {
+      if (!active.additive) onSelectMany([], []);
+      return;
+    }
 
     const hitItemIds = [
       ...event.currentTarget.querySelectorAll<HTMLElement>(
@@ -405,19 +434,18 @@ export const Timeline = ({
         "[data-timeline-gap]",
       ),
     ].flatMap((element) => {
-      const sceneId = element.dataset.timelineGap;
-      return sceneId &&
-        intersects(selectionRect, element.getBoundingClientRect())
-        ? [sceneId]
+      const gapId = element.dataset.timelineGap;
+      return gapId && intersects(selectionRect, element.getBoundingClientRect())
+        ? [gapId]
         : [];
     });
     const nextItemIds = active.additive
       ? [...new Set([...selectedItemIds, ...hitItemIds])]
       : hitItemIds;
     const nextGapIds = active.additive
-      ? [...new Set([...selectedGapAfterSceneIds, ...hitGapIds])]
+      ? [...new Set([...selectedGapIds, ...hitGapIds])]
       : hitGapIds;
-    if (nextItemIds.length > 0 || nextGapIds.length > 0) {
+    if (nextItemIds.length > 0 || nextGapIds.length > 0 || !active.additive) {
       onSelectMany(nextItemIds, nextGapIds);
     }
   };
@@ -616,6 +644,88 @@ export const Timeline = ({
     }
   };
 
+  const startGapDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    gapId: string,
+  ) => {
+    event.stopPropagation();
+    if (event.button !== 0 || previewing || editing) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    gapDragRef.current = {
+      pointerId: event.pointerId,
+      gapId,
+      startX: event.clientX,
+      startY: event.clientY,
+      additive: event.shiftKey || event.metaKey || event.ctrlKey,
+      moved: false,
+    };
+  };
+
+  const moveGapDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    gapId: string,
+  ) => {
+    const active = gapDragRef.current;
+    if (
+      !active ||
+      active.pointerId !== event.pointerId ||
+      active.gapId !== gapId
+    ) {
+      return;
+    }
+    const moved =
+      active.moved ||
+      Math.hypot(
+        event.clientX - active.startX,
+        event.clientY - active.startY,
+      ) >= 5;
+    if (!moved) return;
+    const draggedGapIds = selectedGapIds.includes(gapId)
+      ? selectedGapIds
+      : [gapId];
+    const draggedGaps = gaps.filter((gap) => draggedGapIds.includes(gap.id));
+    gapDragRef.current = { ...active, moved: true };
+    setGapDragPreview({
+      gaps: draggedGaps,
+      x: event.clientX,
+      y: event.clientY,
+      overProducer: pointInsideProducer(event.clientX, event.clientY),
+    });
+  };
+
+  const finishGapDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    gapId: string,
+  ) => {
+    const active = gapDragRef.current;
+    if (
+      !active ||
+      active.pointerId !== event.pointerId ||
+      active.gapId !== gapId
+    ) {
+      return;
+    }
+    gapDragRef.current = null;
+    setGapDragPreview(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (!active.moved) {
+      const gap = gaps.find((candidate) => candidate.id === gapId);
+      onSelectGap(gapId, active.additive);
+      if (gap) onSeek(gap.start_seconds);
+      return;
+    }
+    if (!pointInsideProducer(event.clientX, event.clientY)) return;
+    const draggedGapIds = selectedGapIds.includes(gapId)
+      ? selectedGapIds
+      : [gapId];
+    onAttachGapsToProducer(
+      gaps.filter((gap) => draggedGapIds.includes(gap.id)),
+    );
+  };
+
   return (
     <section className="isolate flex h-full min-h-0 flex-col bg-surface">
       <div className="flex h-10 shrink-0 items-center border-b border-line-subtle px-2.5">
@@ -637,9 +747,11 @@ export const Timeline = ({
           {formatTime(duration)} · {VIDEO_FPS} fps
         </span>
         <span className="ml-3 text-[9px] text-ink-tertiary">
-          {selectedItemIds.length === items.length
+          {selectedItemIds.length === items.length &&
+          selectedTrackIds.length === 0 &&
+          selectedGapIds.length === 0
             ? "Full cut"
-            : `${selectedItemIds.length} selected`}
+            : `${selectedItemIds.length + selectedTrackIds.length + selectedGapIds.length} selected`}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
           <ZoomOut size={12} className="shrink-0 text-ink-caption" />
@@ -870,6 +982,7 @@ export const Timeline = ({
                       ? scene.duration_seconds - trim.duration
                       : 0);
                   if (gap <= 0) return null;
+                  const gapId = gapItemId(scene.id);
                   const left =
                     ((sceneOffset(content.scenes, index) + displayedDuration) /
                       duration) *
@@ -877,22 +990,21 @@ export const Timeline = ({
                   return (
                     <button
                       type="button"
-                      key={`${scene.id}-gap`}
-                      data-timeline-gap={scene.id}
-                      aria-pressed={selectedGapAfterSceneIds.includes(scene.id)}
+                      key={gapId}
+                      data-timeline-gap={gapId}
+                      aria-pressed={selectedGapIds.includes(gapId)}
                       aria-label={`Select ${formatTime(gap)} gap after ${scene.title}`}
-                      title="Select this empty range"
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onSelectGap(
-                          scene.id,
-                          event.shiftKey || event.metaKey || event.ctrlKey,
-                        );
+                      title="Select or drag this gap to AI Producer"
+                      onPointerDown={(event) => startGapDrag(event, gapId)}
+                      onPointerMove={(event) => moveGapDrag(event, gapId)}
+                      onPointerUp={(event) => finishGapDrag(event, gapId)}
+                      onPointerCancel={() => {
+                        gapDragRef.current = null;
+                        setGapDragPreview(null);
                       }}
                       className={cx(
-                        "preview-hatch absolute bottom-0 top-0 z-[1] grid place-items-center border-x text-[8px] font-medium text-warning focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-warning",
-                        selectedGapAfterSceneIds.includes(scene.id)
+                        "preview-hatch absolute bottom-0 top-0 z-[1] grid touch-none place-items-center border-x text-[8px] font-medium text-warning focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-warning",
+                        selectedGapIds.includes(gapId)
                           ? "border-warning bg-warning/15 ring-1 ring-inset ring-warning"
                           : "border-warning/40 hover:bg-warning/10",
                       )}
@@ -1207,6 +1319,35 @@ export const Timeline = ({
                   : `${dragPreview.items.length} timeline items`}
               </span>
               {dragPreview.overProducer ? (
+                <span className="shrink-0 font-mono text-[8px] uppercase tracking-[0.08em] text-action">
+                  Attach
+                </span>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
+      {gapDragPreview
+        ? createPortal(
+            <div
+              className={cx(
+                "pointer-events-none fixed z-[100] flex h-9 max-w-[260px] select-none items-center gap-2 rounded-lg border bg-surface-raised px-3 text-[12px] font-medium text-ink shadow-float",
+                gapDragPreview.overProducer
+                  ? "border-action bg-action-soft"
+                  : "border-line-strong",
+              )}
+              style={{
+                left: gapDragPreview.x + 14,
+                top: gapDragPreview.y + 14,
+              }}
+            >
+              <Split size={12} className="shrink-0 text-warning" />
+              <span className="truncate">
+                {gapDragPreview.gaps.length === 1
+                  ? gapDragPreview.gaps[0]!.label
+                  : `${gapDragPreview.gaps.length} gaps`}
+              </span>
+              {gapDragPreview.overProducer ? (
                 <span className="shrink-0 font-mono text-[8px] uppercase tracking-[0.08em] text-action">
                   Attach
                 </span>

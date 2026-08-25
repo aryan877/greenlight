@@ -171,8 +171,8 @@ export const ProgramMonitor = ({
         <IconButton
           Icon={media.playing ? Pause : Play}
           label={media.playing ? "Pause" : "Play"}
-          disabled={!video}
-          onClick={() => void media.togglePlay()}
+          disabled={!scene || duration <= 0}
+          onClick={() => void media.togglePlay(duration)}
         />
         <span className="w-20 font-mono text-[10px] text-ink-secondary">
           {formatTime(media.currentTime)}

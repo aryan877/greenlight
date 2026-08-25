@@ -34,7 +34,10 @@ import {
 } from "./brand-icons.js";
 import { IconButton, ResizeHandle, cx } from "./components/controls.js";
 import { InspectorPanel } from "./components/InspectorPanel.js";
-import { ProducerPanel } from "./components/ProducerPanel.js";
+import {
+  ProducerPanel,
+  type ProducerReference,
+} from "./components/ProducerPanel.js";
 import { ProgramMonitor } from "./components/ProgramMonitor.js";
 import { ProjectSwitcher } from "./components/ProjectSwitcher.js";
 import { MediaBrowser } from "./components/MediaBrowser.js";
@@ -45,6 +48,7 @@ import {
   changeSceneSpeed,
   createSelection,
   createTimelineContext,
+  timelineGaps,
   timelineItems,
   timelineTracks,
   videoItemId,
@@ -53,6 +57,11 @@ import {
   totalDuration,
 } from "./editor/model.js";
 import type { ProducerDraftIntent } from "./editor/producer-draft.js";
+import {
+  appendProducerReferences,
+  removeProducerReference,
+  type ProducerReferenceId,
+} from "./editor/producer-references.js";
 import { useMediaController } from "./editor/use-media-controller.js";
 import { useWorkspaceLayout } from "./editor/use-workspace-layout.js";
 
@@ -69,15 +78,15 @@ type HistoryEntry = {
   summary: string;
 };
 
+const emptyProducerReferences = (): ProducerReferenceId[] => [];
+
 export const App = () => {
   const projects = useProjects();
   const createProject = useCreateProject();
   const [projectId, setProjectId] = useState<string | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [selectedTrackIds, setSelectedTrackIds] = useState<string[]>([]);
-  const [selectedGapAfterSceneIds, setSelectedGapAfterSceneIds] = useState<
-    string[]
-  >([]);
+  const [selectedGapIds, setSelectedGapIds] = useState<string[]>([]);
   const [directRevision, setDirectRevision] = useState<DirectRevision | null>(
     null,
   );
@@ -90,6 +99,9 @@ export const App = () => {
     "producer",
   );
   const [attachedArtifactIds, setAttachedArtifactIds] = useState<string[]>([]);
+  const [producerReferences, setProducerReferences] = useState<
+    ProducerReferenceId[]
+  >(emptyProducerReferences);
   const [importError, setImportError] = useState<string | null>(null);
   const [draftIntent, setDraftIntent] = useState<ProducerDraftIntent | null>(
     null,
@@ -150,15 +162,74 @@ export const App = () => {
     () => (editorContent ? timelineTracks(editorContent) : []),
     [editorContent],
   );
+  const editorGaps = useMemo(
+    () => (editorContent ? timelineGaps(editorContent) : []),
+    [editorContent],
+  );
+  const resolvedProducerReferences = useMemo(
+    () =>
+      producerReferences.flatMap<ProducerReference>((reference) => {
+        if (reference.type === "item") {
+          const item = editorItems.find(
+            (candidate) => candidate.id === reference.id,
+          );
+          return item ? [{ type: "item", value: item }] : [];
+        }
+        if (reference.type === "gap") {
+          const gap = editorGaps.find(
+            (candidate) => candidate.id === reference.id,
+          );
+          return gap ? [{ type: "gap", value: gap }] : [];
+        }
+        const track = editorTracks.find(
+          (candidate) => candidate.id === reference.id,
+        );
+        return track ? [{ type: "track", value: track }] : [];
+      }),
+    [editorGaps, editorItems, editorTracks, producerReferences],
+  );
+  const liveSelection = useMemo<ProducerReference[]>(
+    () => [
+      ...editorItems
+        .filter((item) => selectedItemIds.includes(item.id))
+        .map((item) => ({ type: "item" as const, value: item })),
+      ...editorTracks
+        .filter((track) => selectedTrackIds.includes(track.id))
+        .map((track) => ({ type: "track" as const, value: track })),
+      ...editorGaps
+        .filter((gap) => selectedGapIds.includes(gap.id))
+        .map((gap) => ({ type: "gap" as const, value: gap })),
+    ],
+    [
+      editorGaps,
+      editorItems,
+      editorTracks,
+      selectedGapIds,
+      selectedItemIds,
+      selectedTrackIds,
+    ],
+  );
+  const producerReferencedItems = resolvedProducerReferences.flatMap(
+    (reference) => (reference.type === "item" ? [reference.value] : []),
+  );
+  const producerReferencedTracks = resolvedProducerReferences.flatMap(
+    (reference) => (reference.type === "track" ? [reference.value] : []),
+  );
+  const producerReferencedGaps = resolvedProducerReferences.flatMap(
+    (reference) => (reference.type === "gap" ? [reference.value] : []),
+  );
   const selectedSceneIds = useMemo(
     () => [
-      ...new Set(
-        editorItems
+      ...new Set([
+        ...editorItems
           .filter((item) => selectedItemIds.includes(item.id))
           .map((item) => item.scene_id),
-      ),
+        ...editorGaps
+          .filter((gap) => selectedGapIds.includes(gap.id))
+          .map((gap) => gap.after_scene_id),
+      ]),
     ],
-    [editorItems, selectedItemIds],
+    [editorGaps, editorItems, selectedGapIds, selectedItemIds],
   );
   const releaseThumbnailArtifact =
     project.data?.artifacts.find(
@@ -195,15 +266,29 @@ export const App = () => {
 
   useEffect(() => {
     if (
-      editorContent?.scenes[0] &&
-      ((selectedItemIds.length === 0 && selectedTrackIds.length === 0) ||
-        selectedItemIds.some(
-          (itemId) => !editorItems.some((item) => item.id === itemId),
-        ))
+      selectedItemIds.some(
+        (itemId) => !editorItems.some((item) => item.id === itemId),
+      )
     ) {
-      setSelectedItemIds([videoItemId(editorContent.scenes[0].id)]);
+      setSelectedItemIds((current) =>
+        current.filter((itemId) =>
+          editorItems.some((item) => item.id === itemId),
+        ),
+      );
     }
-  }, [editorContent, editorItems, selectedItemIds, selectedTrackIds]);
+  }, [editorItems, selectedItemIds]);
+
+  useEffect(() => {
+    if (
+      selectedGapIds.some(
+        (gapId) => !editorGaps.some((gap) => gap.id === gapId),
+      )
+    ) {
+      setSelectedGapIds((current) =>
+        current.filter((gapId) => editorGaps.some((gap) => gap.id === gapId)),
+      );
+    }
+  }, [editorGaps, selectedGapIds]);
 
   const selectedScene =
     editorContent?.scenes.find(
@@ -218,7 +303,9 @@ export const App = () => {
       !projectId ||
       !editorArtifactId ||
       !editorContent ||
-      (selectedItemIds.length === 0 && selectedTrackIds.length === 0)
+      (selectedItemIds.length === 0 &&
+        selectedTrackIds.length === 0 &&
+        selectedGapIds.length === 0)
     ) {
       return null;
     }
@@ -228,7 +315,7 @@ export const App = () => {
       content: editorContent,
       itemIds: selectedItemIds,
       trackIds: selectedTrackIds,
-      gapAfterSceneIds: selectedGapAfterSceneIds,
+      gapIds: selectedGapIds,
       playheadSeconds: media.currentTime,
       sourceLedgerArtifact: evidenceArtifact,
       extraArtifactIds: attachedArtifactIds,
@@ -240,7 +327,7 @@ export const App = () => {
     projectId,
     selectedItemIds,
     selectedTrackIds,
-    selectedGapAfterSceneIds,
+    selectedGapIds,
     attachedArtifactIds,
     media.currentTime,
   ]);
@@ -255,8 +342,43 @@ export const App = () => {
     });
   }, [editorArtifactId, editorContent, media.currentTime, projectId]);
 
+  const producerReferenceSelection = useMemo<EditorSelection | null>(() => {
+    if (
+      !projectId ||
+      !editorArtifactId ||
+      !editorContent ||
+      (producerReferencedItems.length === 0 &&
+        producerReferencedTracks.length === 0 &&
+        producerReferencedGaps.length === 0)
+    ) {
+      return null;
+    }
+    return createSelection({
+      projectId,
+      contentArtifactId: editorArtifactId,
+      content: editorContent,
+      itemIds: producerReferencedItems.map((item) => item.id),
+      trackIds: producerReferencedTracks.map((track) => track.id),
+      gapIds: producerReferencedGaps.map((gap) => gap.id),
+      playheadSeconds: media.currentTime,
+      sourceLedgerArtifact: evidenceArtifact,
+      extraArtifactIds: attachedArtifactIds,
+    });
+  }, [
+    attachedArtifactIds,
+    editorArtifactId,
+    editorContent,
+    evidenceArtifact,
+    media.currentTime,
+    producerReferencedItems,
+    producerReferencedGaps,
+    producerReferencedTracks,
+    projectId,
+  ]);
+
   useEffect(() => {
     setAttachedArtifactIds([]);
+    setProducerReferences(emptyProducerReferences());
     setImportError(null);
   }, [projectId]);
 
@@ -273,36 +395,65 @@ export const App = () => {
       if (
         focus.selection.project_id !== projectId ||
         !editorContent ||
-        (!focus.selection.item_ids[0] && !focus.selection.scene_ids[0])
+        (!focus.selection.item_ids[0] &&
+          !focus.selection.scene_ids[0] &&
+          !focus.selection.track_ids[0] &&
+          !focus.selection.gap_ids[0])
       ) {
         return;
       }
-      const sceneIndex = editorContent.scenes.findIndex(
-        (scene) => scene.id === focus.selection.scene_ids[0],
-      );
-      if (sceneIndex < 0) return;
       const validSceneIds = focus.selection.scene_ids.filter((sceneId) =>
         editorContent.scenes.some((scene) => scene.id === sceneId),
       );
-      if (validSceneIds.length === 0) return;
+      const validGapIds = focus.selection.gap_ids.filter((gapId) =>
+        editorGaps.some((gap) => gap.id === gapId),
+      );
+      const validTrackIds = focus.selection.track_ids.filter((trackId) =>
+        editorTracks.some((track) => track.id === trackId),
+      );
       const validItemIds =
         focus.selection.item_ids.length > 0
           ? focus.selection.item_ids.filter((itemId) =>
               editorItems.some((item) => item.id === itemId),
             )
-          : editorItems
-              .filter((item) => validSceneIds.includes(item.scene_id))
-              .map((item) => item.id);
-      if (validItemIds.length === 0) return;
+          : validGapIds.length === 0
+            ? editorItems
+                .filter((item) => validSceneIds.includes(item.scene_id))
+                .map((item) => item.id)
+            : [];
+      if (
+        validItemIds.length === 0 &&
+        validTrackIds.length === 0 &&
+        validGapIds.length === 0
+      ) {
+        return;
+      }
       setSelectedItemIds(validItemIds);
+      setSelectedTrackIds(validTrackIds);
+      setSelectedGapIds(validGapIds);
       setRightTab("producer");
       layout.setRightOpen(true);
-      media.seek(
-        focus.selection.playhead_seconds ??
-          sceneOffset(editorContent.scenes, sceneIndex),
+      const firstGap = editorGaps.find((gap) => validGapIds.includes(gap.id));
+      const firstSceneIndex = editorContent.scenes.findIndex((scene) =>
+        validSceneIds.includes(scene.id),
       );
+      const nextTime =
+        focus.selection.playhead_seconds ??
+        firstGap?.start_seconds ??
+        (firstSceneIndex >= 0
+          ? sceneOffset(editorContent.scenes, firstSceneIndex)
+          : media.currentTime);
+      media.seek(nextTime);
     },
-    [editorContent, editorItems, layout, media, projectId],
+    [
+      editorContent,
+      editorGaps,
+      editorItems,
+      editorTracks,
+      layout,
+      media,
+      projectId,
+    ],
   );
 
   const producer = useProducerAgent(projectId, focusFromAgent);
@@ -318,7 +469,7 @@ export const App = () => {
   const previewPatch = agentPreviewPatch;
 
   useEffect(() => {
-    setSelectedGapAfterSceneIds([]);
+    setSelectedGapIds([]);
     setSelectedTrackIds([]);
     undoStack.current = [];
     redoStack.current = [];
@@ -486,7 +637,7 @@ export const App = () => {
           contentArtifactId: editorArtifactId!,
           content: editorContent!,
           sceneIds,
-          gapAfterSceneIds: selectedGapAfterSceneIds,
+          gapIds: selectedGapIds,
           playheadSeconds: media.currentTime,
           sourceLedgerArtifact: evidenceArtifact,
         }),
@@ -502,7 +653,7 @@ export const App = () => {
       media.currentTime,
       persistDirectOperations,
       projectId,
-      selectedGapAfterSceneIds,
+      selectedGapIds,
     ],
   );
 
@@ -580,6 +731,7 @@ export const App = () => {
           item_ids: [],
           scene_ids: [],
           track_ids: ["release"],
+          gap_ids: [],
           artifact_ids: thumbnailId ? [thumbnailId] : [],
           playhead_seconds: media.currentTime,
           time_range_seconds: null,
@@ -707,7 +859,7 @@ export const App = () => {
         .map((candidate) => candidate.id);
     });
     if (!additive) {
-      setSelectedGapAfterSceneIds([]);
+      setSelectedGapIds([]);
       setSelectedTrackIds([]);
     }
     media.seek(item.start_seconds);
@@ -717,17 +869,15 @@ export const App = () => {
     const ordered = editorItems
       .filter((item) => itemIds.includes(item.id))
       .map((item) => item.id);
-    if (ordered.length === 0) return;
+    if (ordered.length === 0) {
+      setSelectedItemIds([]);
+      setSelectedTrackIds([]);
+      setSelectedGapIds([]);
+      return;
+    }
     setSelectedItemIds(ordered);
     setSelectedTrackIds([]);
-    const selectedScenes = new Set(
-      editorItems
-        .filter((item) => ordered.includes(item.id))
-        .map((item) => item.scene_id),
-    );
-    setSelectedGapAfterSceneIds((current) =>
-      current.filter((sceneId) => selectedScenes.has(sceneId)),
-    );
+    setSelectedGapIds([]);
     const first = editorItems.find((item) => item.id === ordered[0]);
     if (first) media.seek(first.start_seconds);
   };
@@ -745,33 +895,31 @@ export const App = () => {
     });
     if (!additive) {
       setSelectedItemIds([]);
-      setSelectedGapAfterSceneIds([]);
+      setSelectedGapIds([]);
     }
   };
 
-  const selectGap = (sceneId: string, additive = false) => {
+  const selectGap = (gapId: string, additive = false) => {
     if (!editorContent) return;
+    const gap = editorGaps.find((candidate) => candidate.id === gapId);
+    if (!gap) return;
     const index = editorContent.scenes.findIndex(
-      (scene) => scene.id === sceneId,
+      (scene) => scene.id === gap.after_scene_id,
     );
     const scene = editorContent.scenes[index];
     if (!scene?.gap_after_seconds) return;
-    const itemId = videoItemId(sceneId);
-    setSelectedItemIds((current) =>
-      additive ? [...new Set([...current, itemId])] : [itemId],
-    );
-    setSelectedGapAfterSceneIds((current) =>
+    if (!additive) {
+      setSelectedItemIds([]);
+      setSelectedTrackIds([]);
+    }
+    setSelectedGapIds((current) =>
       additive
-        ? current.includes(sceneId)
-          ? current.filter((id) => id !== sceneId)
-          : [...current, sceneId]
-        : [sceneId],
+        ? current.includes(gapId)
+          ? current.filter((id) => id !== gapId)
+          : [...current, gapId]
+        : [gapId],
     );
-    media.seek(
-      sceneOffset(editorContent.scenes, index) + scene.duration_seconds,
-    );
-    setRightTab("producer");
-    layout.setRightOpen(true);
+    media.seek(gap.start_seconds);
   };
 
   const selectArtifact = (artifactId: string) => {
@@ -954,18 +1102,15 @@ export const App = () => {
                     content={visibleContent ?? editorContent}
                     selectedItemIds={selectedItemIds}
                     selectedTrackIds={selectedTrackIds}
-                    selectedGapAfterSceneIds={selectedGapAfterSceneIds}
+                    selectedGapIds={selectedGapIds}
                     previewSceneIds={previewSceneIds}
                     previewing={Boolean(previewContent)}
                     currentTime={media.currentTime}
                     onSelectItem={selectItem}
                     onSelectTrack={selectTrack}
                     onSelectMany={(itemIds, gapIds = []) => {
-                      const requiredItemIds = [
-                        ...new Set([...itemIds, ...gapIds.map(videoItemId)]),
-                      ];
-                      selectItems(requiredItemIds);
-                      setSelectedGapAfterSceneIds(gapIds);
+                      selectItems(itemIds);
+                      setSelectedGapIds(gapIds);
                     }}
                     onSeek={media.seek}
                     onScrubStart={media.beginScrub}
@@ -978,23 +1123,49 @@ export const App = () => {
                     onCutAtPlayhead={cutAtPlayhead}
                     onAttachItemsToProducer={(items) => {
                       if (items.length === 0) return;
-                      setSelectedItemIds(items.map((item) => item.id));
-                      media.seek(
-                        Math.min(...items.map((item) => item.start_seconds)),
+                      setProducerReferences((current) =>
+                        appendProducerReferences(
+                          current,
+                          items.map((item) => ({
+                            type: "item",
+                            id: item.id,
+                          })),
+                        ),
                       );
                       setRightTab("producer");
                       layout.setRightOpen(true);
                     }}
                     onAttachTracksToProducer={(tracks) => {
-                      setSelectedTrackIds(tracks.map((track) => track.id));
-                      setSelectedItemIds([]);
-                      setSelectedGapAfterSceneIds([]);
+                      if (tracks.length === 0) return;
+                      setProducerReferences((current) =>
+                        appendProducerReferences(
+                          current,
+                          tracks.map((track) => ({
+                            type: "track",
+                            id: track.id,
+                          })),
+                        ),
+                      );
+                      setRightTab("producer");
+                      layout.setRightOpen(true);
+                    }}
+                    onAttachGapsToProducer={(gaps) => {
+                      if (gaps.length === 0) return;
+                      setProducerReferences((current) =>
+                        appendProducerReferences(
+                          current,
+                          gaps.map((gap) => ({
+                            type: "gap",
+                            id: gap.id,
+                          })),
+                        ),
+                      );
                       setRightTab("producer");
                       layout.setRightOpen(true);
                     }}
                     onSelectGap={selectGap}
                     onSelectAll={() =>
-                      setSelectedItemIds(editorItems.map((item) => item.id))
+                      selectItems(editorItems.map((item) => item.id))
                     }
                     onCollapse={() => layout.setTimelineOpen(false)}
                     canUndo={historySize.undo > 0}
@@ -1060,6 +1231,8 @@ export const App = () => {
                     content={editorContent}
                     artifacts={project.data?.artifacts ?? []}
                     selection={selection}
+                    liveSelection={liveSelection}
+                    references={resolvedProducerReferences}
                     contextArtifacts={(project.data?.artifacts ?? []).filter(
                       (artifact) => attachedArtifactIds.includes(artifact.id),
                     )}
@@ -1068,10 +1241,6 @@ export const App = () => {
                     activity={producer.activity}
                     pendingApprovals={producer.pendingApprovals}
                     pendingQuestions={producer.pendingQuestions}
-                    selectedGapAfterSceneIds={selectedGapAfterSceneIds}
-                    selectedTracks={editorTracks.filter((track) =>
-                      selectedTrackIds.includes(track.id),
-                    )}
                     isSending={producer.isSending}
                     isApproving={producer.isApproving}
                     isAnswering={producer.isAnswering}
@@ -1079,6 +1248,7 @@ export const App = () => {
                       producer.send({
                         instruction,
                         selection,
+                        references: producerReferenceSelection,
                         timeline: timelineContext,
                       })
                     }
@@ -1091,14 +1261,27 @@ export const App = () => {
                     }
                     onCancelQuestion={producer.cancelQuestion}
                     onRemoveItem={(itemId) =>
-                      setSelectedItemIds((current) => {
-                        const next = current.filter((id) => id !== itemId);
-                        return next.length > 0 ? next : current;
-                      })
+                      setProducerReferences((current) =>
+                        removeProducerReference(current, {
+                          type: "item",
+                          id: itemId,
+                        }),
+                      )
                     }
                     onRemoveTrack={(trackId) =>
-                      setSelectedTrackIds((current) =>
-                        current.filter((id) => id !== trackId),
+                      setProducerReferences((current) =>
+                        removeProducerReference(current, {
+                          type: "track",
+                          id: trackId,
+                        }),
+                      )
+                    }
+                    onRemoveGap={(gapId) =>
+                      setProducerReferences((current) =>
+                        removeProducerReference(current, {
+                          type: "gap",
+                          id: gapId,
+                        }),
                       )
                     }
                     onRemoveArtifact={(artifactId) =>
@@ -1106,6 +1289,10 @@ export const App = () => {
                         current.filter((id) => id !== artifactId),
                       )
                     }
+                    onClearReferences={() => {
+                      setProducerReferences(emptyProducerReferences());
+                      setAttachedArtifactIds([]);
+                    }}
                     onAttachArtifact={selectArtifact}
                     onImportFiles={importMedia}
                     importing={uploadAsset.isPending}

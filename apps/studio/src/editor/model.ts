@@ -9,6 +9,7 @@ import {
   productionDurationSeconds,
   scenePresentationDurationSeconds,
   sceneStartSeconds,
+  timelineGapId,
   videoTimelineItemId,
   VIDEO_FPS,
   type Artifact,
@@ -16,6 +17,7 @@ import {
   type EditorPatchOperation,
   type EditorSelection,
   type EditorTimelineItem,
+  type EditorTimelineGap,
   type EditorTimelineTrack,
   type EditorTimelineContext,
   type Scene,
@@ -30,6 +32,7 @@ export const totalDuration = (content: ContentPackage) =>
 export const videoItemId = videoTimelineItemId;
 export const captionItemId = captionTimelineItemId;
 export const audioItemId = audioTimelineItemId;
+export const gapItemId = timelineGapId;
 
 export const timelineItems = (
   content: ContentPackage,
@@ -107,6 +110,24 @@ export const timelineItems = (
   return [...videoItems, ...audioItems, ...captionItems];
 };
 
+export const timelineGaps = (content: ContentPackage): EditorTimelineGap[] =>
+  content.scenes.flatMap((scene, index) => {
+    const duration = snapToFrame(scene.gap_after_seconds ?? 0);
+    if (duration <= 0) return [];
+    const start = snapToFrame(
+      sceneOffset(content.scenes, index) + scene.duration_seconds,
+    );
+    return [
+      {
+        id: gapItemId(scene.id),
+        after_scene_id: scene.id,
+        label: `Gap after ${scene.title}`,
+        start_seconds: start,
+        end_seconds: snapToFrame(start + duration),
+      },
+    ];
+  });
+
 export const timelineTracks = (
   content: ContentPackage,
 ): EditorTimelineTrack[] => {
@@ -166,6 +187,7 @@ export const createTimelineContext = (input: {
   playhead_seconds: snapToFrame(Math.max(0, input.playheadSeconds)),
   tracks: timelineTracks(input.content),
   items: timelineItems(input.content),
+  gaps: timelineGaps(input.content),
   scenes: input.content.scenes.map((scene, index) => {
     const start = snapToFrame(sceneOffset(input.content.scenes, index));
     return {
@@ -311,7 +333,7 @@ export const createSelection = (input: {
   itemIds?: string[];
   sceneIds?: string[];
   trackIds?: string[];
-  gapAfterSceneIds?: string[];
+  gapIds?: string[];
   playheadSeconds?: number;
   sourceLedgerArtifact: Artifact | null;
   extraArtifactIds?: string[];
@@ -319,6 +341,9 @@ export const createSelection = (input: {
   const allItems = timelineItems(input.content);
   const requestedItemIds = new Set(input.itemIds ?? []);
   const requestedSceneIds = new Set(input.sceneIds ?? []);
+  const allGaps = timelineGaps(input.content);
+  const requestedGapIds = new Set(input.gapIds ?? []);
+  const selectedGaps = allGaps.filter((gap) => requestedGapIds.has(gap.id));
   const selectedItems = allItems.filter((item) =>
     requestedItemIds.size > 0
       ? requestedItemIds.has(item.id)
@@ -327,17 +352,32 @@ export const createSelection = (input: {
   const selectedSceneIds = new Set([
     ...requestedSceneIds,
     ...selectedItems.map((item) => item.scene_id),
+    ...selectedGaps.map((gap) => gap.after_scene_id),
   ]);
   const selected = input.content.scenes
     .map((scene, index) => ({ scene, index }))
     .filter(({ scene }) => selectedSceneIds.has(scene.id));
   const requestedTrackIds = new Set(input.trackIds ?? []);
-  if (selected.length === 0 && requestedTrackIds.size === 0) {
+  if (
+    selected.length === 0 &&
+    requestedTrackIds.size === 0 &&
+    selectedGaps.length === 0
+  ) {
     throw new Error("scene_or_track_not_found");
   }
 
   const first = selected[0];
   const last = selected.at(-1);
+  const selectedRanges = [
+    ...selectedItems.map((item) => ({
+      start: item.start_seconds,
+      end: item.end_seconds,
+    })),
+    ...selectedGaps.map((gap) => ({
+      start: gap.start_seconds,
+      end: gap.end_seconds,
+    })),
+  ];
   const artifactIds = [
     ...new Set([
       ...selectedItems.flatMap((item) => item.artifact_ids),
@@ -351,7 +391,6 @@ export const createSelection = (input: {
     artifactIds.push(input.sourceLedgerArtifact.id);
   }
 
-  const selectedGapIds = new Set(input.gapAfterSceneIds ?? []);
   return {
     project_id: input.projectId,
     base_content_package_artifact_id: input.contentArtifactId,
@@ -374,33 +413,26 @@ export const createSelection = (input: {
       )
         ? (["transcript"] as const)
         : []),
-      "release",
-      ...[...selectedGapIds].map((sceneId) => `gap_after_${sceneId}`),
     ],
+    gap_ids: selectedGaps.map((gap) => gap.id),
     artifact_ids: artifactIds,
     playhead_seconds:
       input.playheadSeconds === undefined
         ? null
         : snapToFrame(Math.max(0, input.playheadSeconds)),
     time_range_seconds:
-      first && last
+      selectedRanges.length > 0
         ? {
-            start:
-              selectedItems.length > 0
-                ? Math.min(...selectedItems.map((item) => item.start_seconds))
-                : sceneOffset(input.content.scenes, first.index),
-            end: Math.max(
-              selectedItems.length > 0
-                ? Math.max(...selectedItems.map((item) => item.end_seconds))
-                : sceneOffset(input.content.scenes, last.index) +
-                    last.scene.duration_seconds,
-              sceneOffset(input.content.scenes, last.index) +
-                last.scene.duration_seconds +
-                (selectedGapIds.has(last.scene.id)
-                  ? (last.scene.gap_after_seconds ?? 0)
-                  : 0),
-            ),
+            start: Math.min(...selectedRanges.map((range) => range.start)),
+            end: Math.max(...selectedRanges.map((range) => range.end)),
           }
-        : null,
+        : first && last
+          ? {
+              start: sceneOffset(input.content.scenes, first.index),
+              end:
+                sceneOffset(input.content.scenes, last.index) +
+                last.scene.duration_seconds,
+            }
+          : null,
   };
 };

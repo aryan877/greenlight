@@ -142,6 +142,7 @@ describe("Producer event projection", () => {
         playhead_seconds: 1,
         tracks: [],
         items: [],
+        gaps: [],
         scenes: [
           {
             id: "scene_one",
@@ -167,9 +168,21 @@ describe("Producer event projection", () => {
         item_ids: [],
         scene_ids: ["scene_one"],
         track_ids: ["visual", "voice", "caption", "transcript"],
+        gap_ids: [],
         artifact_ids: [],
         playhead_seconds: 1,
         time_range_seconds: { start: 0, end: 2 },
+      },
+      references: {
+        project_id: "project_greenlight",
+        base_content_package_artifact_id: "artifact_content",
+        item_ids: ["caption_scene_two"],
+        scene_ids: ["scene_two"],
+        track_ids: ["track_captions", "caption"],
+        gap_ids: [],
+        artifact_ids: [],
+        playhead_seconds: 1,
+        time_range_seconds: { start: 2, end: 4 },
       },
     });
 
@@ -178,6 +191,10 @@ describe("Producer event projection", () => {
     );
     expect(message).toContain('"id":"scene_two"');
     expect(message).toContain("EDITOR_SELECTION (current emphasis)");
+    expect(message).toContain(
+      "EDITOR_REFERENCES (explicit creator attachments)",
+    );
+    expect(message).toContain('"item_ids":["caption_scene_two"]');
   });
 
   it("keeps creator cancellation explicit when resuming a paused question", async () => {

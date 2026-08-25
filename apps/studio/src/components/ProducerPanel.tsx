@@ -2,6 +2,8 @@ import type {
   Artifact,
   ContentPackage,
   EditorSelection,
+  EditorTimelineGap,
+  EditorTimelineItem,
   EditorTimelineTrack,
 } from "@greenlight/contracts";
 import {
@@ -14,12 +16,12 @@ import {
   Layers3,
   LoaderCircle,
   Mic2,
-  MousePointer2,
   Paperclip,
   Play,
   RotateCcw,
   Search,
   SlidersHorizontal,
+  Split,
   Sparkles,
   FileText,
   X,
@@ -36,7 +38,6 @@ import type {
   StudioReviewDocument,
 } from "../api/trueforge.js";
 import { MEDIA_ACCEPT, MEDIA_ARTIFACT_MIME } from "../editor/media-transfer.js";
-import { timelineItems } from "../editor/model.js";
 import { shouldSubmitProducerInstruction } from "../editor/producer-composer.js";
 import type { ProducerDraftIntent } from "../editor/producer-draft.js";
 import { cx } from "./controls.js";
@@ -59,6 +60,68 @@ const AgentMark = ({ thinking = false }: { thinking?: boolean }) => (
     />
   </span>
 );
+
+type TimelineReferenceKind = EditorTimelineItem["kind"] | "gap";
+
+const referenceAppearance = {
+  video: {
+    Icon: Layers3,
+    className:
+      "border-track-video-strong/30 bg-track-video text-track-video-strong",
+  },
+  audio: {
+    Icon: Mic2,
+    className:
+      "border-track-voice-strong/30 bg-track-voice text-track-voice-strong",
+  },
+  caption: {
+    Icon: Captions,
+    className:
+      "border-track-caption-strong/30 bg-track-caption text-track-caption-strong",
+  },
+  gap: {
+    Icon: Split,
+    className: "border-line bg-surface-sunken text-ink-secondary",
+  },
+} satisfies Record<
+  TimelineReferenceKind,
+  { Icon: typeof Layers3; className: string }
+>;
+
+const ReferenceToken = ({
+  kind,
+  label,
+  removeLabel,
+  onRemove,
+}: {
+  kind: TimelineReferenceKind;
+  label: string;
+  removeLabel?: string;
+  onRemove?: () => void;
+}) => {
+  const { Icon, className } = referenceAppearance[kind];
+  return (
+    <span
+      className={cx(
+        "flex h-7 min-w-0 max-w-[220px] items-center gap-1.5 rounded-lg border px-2 text-[10px]",
+        className,
+      )}
+    >
+      <Icon size={11} className="shrink-0" />
+      <span className="truncate">{label}</span>
+      {onRemove ? (
+        <button
+          type="button"
+          aria-label={removeLabel}
+          onClick={onRemove}
+          className="-mr-1 grid size-5 shrink-0 place-items-center rounded-full opacity-70 hover:bg-surface/60 hover:opacity-100"
+        >
+          <X size={11} />
+        </button>
+      ) : null}
+    </span>
+  );
+};
 
 const quickIntents = [
   {
@@ -581,19 +644,24 @@ const VoicePickerCard = ({
   );
 };
 
+export type ProducerReference =
+  | { type: "item"; value: EditorTimelineItem }
+  | { type: "track"; value: EditorTimelineTrack }
+  | { type: "gap"; value: EditorTimelineGap };
+
 export const ProducerPanel = ({
   projectId,
   content,
   artifacts,
   selection,
+  liveSelection,
+  references,
   contextArtifacts,
   draftIntent,
   events,
   activity,
   pendingApprovals,
   pendingQuestions,
-  selectedGapAfterSceneIds,
-  selectedTracks,
   isSending,
   isApproving,
   isAnswering,
@@ -604,7 +672,9 @@ export const ProducerPanel = ({
   onCancelQuestion,
   onRemoveItem,
   onRemoveTrack,
+  onRemoveGap,
   onRemoveArtifact,
+  onClearReferences,
   onAttachArtifact,
   onImportFiles,
   importing,
@@ -613,14 +683,14 @@ export const ProducerPanel = ({
   content: ContentPackage | null;
   artifacts: Artifact[];
   selection: EditorSelection | null;
+  liveSelection: ProducerReference[];
+  references: ProducerReference[];
   contextArtifacts: Artifact[];
   draftIntent: ProducerDraftIntent | null;
   events: StudioAgentEvent[];
   activity: string | null;
   pendingApprovals: PendingToolApproval[];
   pendingQuestions: PendingQuestion[];
-  selectedGapAfterSceneIds: string[];
-  selectedTracks: EditorTimelineTrack[];
   isSending: boolean;
   isApproving: boolean;
   isAnswering: boolean;
@@ -635,7 +705,9 @@ export const ProducerPanel = ({
   onCancelQuestion: (pending: PendingQuestion) => void;
   onRemoveItem: (itemId: string) => void;
   onRemoveTrack: (trackId: string) => void;
+  onRemoveGap: (gapId: string) => void;
   onRemoveArtifact: (artifactId: string) => void;
+  onClearReferences: () => void;
   onAttachArtifact: (artifactId: string) => void;
   onImportFiles: (files: File[]) => Promise<string[]>;
   importing: boolean;
@@ -687,11 +759,6 @@ export const ProducerPanel = ({
   ]);
   const conversationPaused =
     pendingQuestions.length > 0 || pendingApprovals.length > 0;
-  const selectedItems = content
-    ? timelineItems(content).filter((item) =>
-        selection?.item_ids.includes(item.id),
-      )
-    : [];
   const sampleScript =
     selection?.scene_ids
       .map((sceneId) =>
@@ -913,139 +980,36 @@ export const ProducerPanel = ({
           if (!next || isSending || conversationPaused) return;
           onSend(next);
           setInstruction("");
+          onClearReferences();
         }}
       >
-        {selection && content ? (
-          <div className="flex flex-wrap gap-1.5 border-b border-line-subtle px-3 pb-2 pt-2.5">
-            <span className="flex h-6 shrink-0 items-center gap-1 text-[9px] text-ink-caption">
-              <MousePointer2 size={11} className="text-action" />
-              {selectedItems.length + selectedTracks.length}
+        {liveSelection.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-line-subtle px-3 py-2">
+            <span className="font-mono text-[9px] text-ink-caption">
+              {liveSelection.length} selected
             </span>
-            {selectedItems.slice(0, 3).map((item) => {
-              const ItemIcon =
-                item.kind === "audio"
-                  ? Mic2
-                  : item.kind === "caption"
-                    ? Captions
-                    : Layers3;
-              return (
-                <span
-                  key={item.id}
-                  className="flex h-6 min-w-0 max-w-[190px] items-center gap-1.5 rounded-md bg-action-soft px-2 text-[9px] text-ink-secondary"
-                >
-                  <ItemIcon size={10} className="shrink-0 text-action" />
-                  <span className="truncate">{item.label}</span>
-                  <button
-                    type="button"
-                    aria-label={`Detach ${item.label}`}
-                    onClick={() => onRemoveItem(item.id)}
-                    className="shrink-0 text-ink-caption hover:text-ink"
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
-              );
-            })}
-            {selectedItems.length > 3 ? (
-              <span className="flex h-6 shrink-0 items-center rounded-md bg-action-soft px-2 font-mono text-[8px] text-ink-secondary">
-                +{selectedItems.length - 3}
-              </span>
-            ) : null}
-            {selectedTracks.map((track) => {
-              const TrackIcon =
-                track.kind === "audio"
-                  ? Mic2
-                  : track.kind === "caption"
-                    ? Captions
-                    : Layers3;
-              return (
-                <span
-                  key={track.id}
-                  className="flex h-6 min-w-0 max-w-[190px] items-center gap-1.5 rounded-md bg-action-soft px-2 text-[9px] text-ink-secondary"
-                >
-                  <TrackIcon size={10} className="shrink-0 text-action" />
-                  <span className="truncate">{track.name}</span>
-                  <button
-                    type="button"
-                    aria-label={`Detach ${track.name} track`}
-                    onClick={() => onRemoveTrack(track.id)}
-                    className="shrink-0 text-ink-caption hover:text-ink"
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
-              );
-            })}
-            {selectedGapAfterSceneIds.slice(0, 2).map((sceneId) => {
-              const scene = content.scenes.find(
-                (candidate) => candidate.id === sceneId,
-              );
-              if (!scene?.gap_after_seconds) return null;
-              return (
-                <span
-                  key={`${sceneId}-gap`}
-                  className="flex h-6 min-w-0 max-w-[220px] items-center gap-1.5 rounded-md bg-warning-soft px-2 text-[9px] text-ink-secondary"
-                >
-                  <span className="truncate">
-                    {scene.gap_after_seconds.toFixed(1)}s gap after{" "}
-                    {scene.title}
-                  </span>
-                </span>
-              );
-            })}
-            {selectedGapAfterSceneIds.length > 2 ? (
-              <span className="flex h-6 shrink-0 items-center rounded-md bg-warning-soft px-2 font-mono text-[8px] text-ink-secondary">
-                +{selectedGapAfterSceneIds.length - 2} gaps
-              </span>
-            ) : null}
-            {contextArtifacts.slice(0, 3).map((artifact) => {
-              const original = artifact.provenance.original_filename;
+            {liveSelection.map((reference) => {
               const label =
-                typeof original === "string" ? original : artifact.kind;
+                reference.type === "item"
+                  ? reference.value.label
+                  : reference.type === "track"
+                    ? reference.value.name
+                    : reference.value.label;
+              const kind =
+                reference.type === "gap" ? "gap" : reference.value.kind;
               return (
-                <span
-                  key={artifact.id}
-                  className="flex h-7 min-w-0 max-w-[210px] items-center gap-1.5 rounded-md border border-line bg-surface p-1 pr-2 text-[9px] text-ink-secondary"
-                >
-                  <span className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-sm bg-surface-sunken text-ink-caption">
-                    {artifact.kind === "image" ? (
-                      <img
-                        src={greenlightApi.artifactUrl(artifact.id)}
-                        alt=""
-                        className="size-full object-cover"
-                      />
-                    ) : artifact.kind === "video" ? (
-                      <Film size={10} />
-                    ) : artifact.kind === "narration" ? (
-                      <Mic2 size={10} />
-                    ) : artifact.kind === "caption" ? (
-                      <Captions size={10} />
-                    ) : (
-                      <ImageIcon size={10} />
-                    )}
-                  </span>
-                  <span className="truncate">{label}</span>
-                  <button
-                    type="button"
-                    aria-label={`Remove ${label}`}
-                    onClick={() => onRemoveArtifact(artifact.id)}
-                    className="shrink-0 text-ink-caption hover:text-ink"
-                  >
-                    <X size={10} />
-                  </button>
-                </span>
+                <ReferenceToken
+                  key={`selection:${reference.type}:${reference.value.id}`}
+                  kind={kind}
+                  label={label}
+                />
               );
             })}
-            {contextArtifacts.length > 3 ? (
-              <span className="flex h-6 shrink-0 items-center rounded-md border border-line bg-surface px-2 font-mono text-[8px] text-ink-secondary">
-                +{contextArtifacts.length - 3} files
-              </span>
-            ) : null}
           </div>
         ) : null}
         {!conversationPaused ? (
           <div className="no-scrollbar flex gap-1.5 overflow-x-auto border-b border-line-subtle px-3 py-2">
-            {selectedGapAfterSceneIds.length > 0 ? (
+            {liveSelection.some((reference) => reference.type === "gap") ? (
               <button
                 type="button"
                 onClick={() =>
@@ -1053,7 +1017,7 @@ export const ProducerPanel = ({
                     "Fill the selected gap with the best available material and show me the plan first.",
                   )
                 }
-                className="shrink-0 rounded-lg border border-warning/25 bg-warning-soft px-2.5 py-1.5 text-[10px] font-medium text-ink-secondary hover:border-warning hover:text-ink"
+                className="shrink-0 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[10px] font-medium text-ink-secondary hover:border-action hover:text-ink"
               >
                 Fill this gap
               </button>
@@ -1070,7 +1034,83 @@ export const ProducerPanel = ({
             ))}
           </div>
         ) : null}
-        <div className="flex min-h-[88px] flex-wrap content-start items-start gap-1.5 px-3 pt-3">
+        <div className="flex min-h-[88px] flex-col gap-2 px-3 pt-3">
+          {references.length > 0 || contextArtifacts.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {references.map((reference) => {
+                const label =
+                  reference.type === "item"
+                    ? reference.value.label
+                    : reference.type === "track"
+                      ? reference.value.name
+                      : reference.value.label;
+                const kind =
+                  reference.type === "gap" ? "gap" : reference.value.kind;
+                return (
+                  <ReferenceToken
+                    key={`${reference.type}:${reference.value.id}`}
+                    kind={kind}
+                    label={label}
+                    removeLabel={`Remove ${label}${reference.type === "track" ? " track" : ""}`}
+                    onRemove={() =>
+                      reference.type === "item"
+                        ? onRemoveItem(reference.value.id)
+                        : reference.type === "track"
+                          ? onRemoveTrack(reference.value.id)
+                          : onRemoveGap(reference.value.id)
+                    }
+                  />
+                );
+              })}
+              {contextArtifacts.map((artifact) => {
+                const original = artifact.provenance.original_filename;
+                const label =
+                  typeof original === "string" ? original : artifact.kind;
+                return (
+                  <span
+                    key={artifact.id}
+                    className="flex h-7 min-w-0 max-w-[220px] items-center gap-1.5 rounded-lg border border-line bg-surface px-1.5 text-[10px] text-ink-secondary"
+                  >
+                    <span className="grid size-5 shrink-0 place-items-center overflow-hidden rounded-md bg-surface-sunken text-ink-caption">
+                      {artifact.kind === "image" ? (
+                        <img
+                          src={greenlightApi.artifactUrl(artifact.id)}
+                          alt=""
+                          className="size-full object-cover"
+                        />
+                      ) : artifact.kind === "video" ? (
+                        <Film size={11} />
+                      ) : artifact.kind === "narration" ? (
+                        <Mic2 size={11} />
+                      ) : artifact.kind === "caption" ? (
+                        <Captions size={11} />
+                      ) : (
+                        <ImageIcon size={11} />
+                      )}
+                    </span>
+                    <span className="truncate">{label}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${label}`}
+                      onClick={() => onRemoveArtifact(artifact.id)}
+                      className="-mr-1 grid size-5 shrink-0 place-items-center rounded-full text-ink-caption hover:bg-hover hover:text-ink"
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                );
+              })}
+              {references.length + contextArtifacts.length > 1 ? (
+                <button
+                  type="button"
+                  onClick={onClearReferences}
+                  className="h-7 shrink-0 rounded-lg px-2 text-[10px] text-ink-tertiary hover:bg-hover hover:text-ink"
+                >
+                  Clear all
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <textarea
             value={instruction}
             onChange={(event) => setInstruction(event.target.value)}
