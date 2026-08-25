@@ -37,6 +37,12 @@ export type VoiceCapabilities = {
   voices: VoiceOption[];
 };
 
+export type YouTubeConnection = {
+  connected: boolean;
+  channel_title: string | null;
+  custom_url: string | null;
+};
+
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(`/greenlight-api${path}`, {
     ...init,
@@ -71,6 +77,7 @@ export const greenlightApi = {
   getProject: (projectId: string) =>
     request<ProjectDetail>(`/projects/${encodeURIComponent(projectId)}`),
   getVoiceCapabilities: () => request<VoiceCapabilities>("/voice"),
+  getYouTubeConnection: () => request<YouTubeConnection>("/youtube"),
   createVoiceSample: (
     projectId: string,
     input: { locale?: string; script: string; voice_id: string },

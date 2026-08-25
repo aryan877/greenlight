@@ -231,7 +231,7 @@ export const Timeline = ({
           />
           <IconButton
             Icon={Plus}
-            label="Add a scene with Producer"
+            label="Add a scene with AI"
             size="sm"
             onClick={() =>
               onIntent(
@@ -783,7 +783,7 @@ export const Timeline = ({
                     key={`${scene.id}-gap`}
                     aria-pressed={selectedGapAfterSceneIds.includes(scene.id)}
                     aria-label={`Select ${formatTime(gap)} gap after ${scene.title}`}
-                    title="Select this gap and ask Producer what should fill it"
+                    title="Select this gap and ask AI what should fill it"
                     onPointerDown={(event) => {
                       event.stopPropagation();
                     }}

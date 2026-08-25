@@ -36,6 +36,11 @@ const base: ContentPackage = {
     scene("scene_003", "Third"),
   ],
   localized_narration_tracks: [],
+  release: {
+    thumbnail_artifact_id: null,
+    destination: "unlisted",
+    publish_at: null,
+  },
   metadata: {
     title: "The last responsible moment",
     description: "A concise production about safe agent release controls.",
@@ -66,6 +71,46 @@ const patch = (
 });
 
 describe("applyEditorPatch", () => {
+  it("updates YouTube packaging through the release track", () => {
+    const revised = applyEditorPatch(base, {
+      selection: {
+        project_id: base.project_id,
+        base_content_package_artifact_id: "artifact_base001",
+        scene_ids: [],
+        track_ids: ["release"],
+        artifact_ids: [],
+        playhead_seconds: 0,
+        time_range_seconds: null,
+      },
+      instruction_summary: "Prepare an unlisted YouTube release",
+      operations: [
+        {
+          type: "update_release",
+          metadata: { title: "A sharper YouTube title" },
+          release: { destination: "public" },
+        },
+      ],
+    });
+
+    expect(revised.metadata.title).toBe("A sharper YouTube title");
+    expect(revised.release.destination).toBe("public");
+    expect(revised.scenes).toEqual(base.scenes);
+  });
+
+  it("rejects release changes outside the release track", () => {
+    expect(() =>
+      applyEditorPatch(
+        base,
+        patch([
+          {
+            type: "update_release",
+            metadata: { title: "Not in scope" },
+          },
+        ]),
+      ),
+    ).toThrow("track_outside_selection:release");
+  });
+
   it("changes only the selected scene", () => {
     const revised = applyEditorPatch(
       base,

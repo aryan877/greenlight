@@ -51,6 +51,11 @@ describe("editor patch revisions", () => {
           },
         ],
         localized_narration_tracks: [],
+        release: {
+          thumbnail_artifact_id: null,
+          destination: "unlisted",
+          publish_at: null,
+        },
         metadata: {
           title: "One clean cut",
           description: "A direct-edit test.",

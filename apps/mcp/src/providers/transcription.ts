@@ -262,29 +262,3 @@ export class DisabledTranscriptionProvider implements TranscriptionProvider {
     throw new Error("transcription_provider_disabled");
   }
 }
-
-const comparable = (value: string) =>
-  value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
-
-export const findSpokenPhrase = (words: TranscriptWord[], phrase: string) => {
-  const target = phrase.split(/\s+/).map(comparable).filter(Boolean);
-  if (target.length === 0) throw new Error("empty_spoken_phrase");
-  const source = words.map((word) => comparable(word.text));
-  for (let start = 0; start <= source.length - target.length; start += 1) {
-    if (target.every((word, offset) => source[start + offset] === word)) {
-      const first = words[start]!;
-      const last = words[start + target.length - 1]!;
-      return {
-        start_seconds: first.start_seconds,
-        end_seconds: last.end_seconds,
-        start_word_index: first.index,
-        end_word_index: last.index,
-        matched_text: words
-          .slice(start, start + target.length)
-          .map((word) => word.text)
-          .join(" "),
-      };
-    }
-  }
-  throw new Error("spoken_phrase_not_found");
-};

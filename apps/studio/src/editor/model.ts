@@ -219,6 +219,7 @@ export const createSelection = (input: {
       "voice",
       "caption",
       "transcript",
+      "release",
       ...[...selectedGapIds].map((sceneId) => `gap_after_${sceneId}`),
       ...effectiveAudioTracks(input.content).map((track) => track.id),
     ],

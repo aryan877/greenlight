@@ -95,6 +95,23 @@ app.get("/api/voice", (_request, response) => {
   response.json(voice.describe());
 });
 
+app.get("/api/youtube", async (_request, response) => {
+  try {
+    const channel = await youtube.identity();
+    response.json({
+      connected: true,
+      channel_title: channel.title,
+      custom_url: channel.custom_url ?? null,
+    });
+  } catch {
+    response.json({
+      connected: false,
+      channel_title: null,
+      custom_url: null,
+    });
+  }
+});
+
 const studioProject = (project: Project, artifactCount: number) => ({
   ...project,
   artifact_count: artifactCount,

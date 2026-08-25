@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  findSpokenPhrase,
   OpenRouterTranscriptionProvider,
   parseWhisperWords,
 } from "../src/providers/transcription.js";
@@ -97,23 +96,6 @@ describe("transcription", () => {
         prompt: null,
       }),
     ).rejects.toThrow("transcription_provider_not_configured");
-  });
-
-  it("finds a phrase using exact measured word boundaries", () => {
-    const match = findSpokenPhrase(
-      [
-        { index: 0, text: "Cut", start_seconds: 0.1, end_seconds: 0.3 },
-        { index: 1, text: "after", start_seconds: 0.31, end_seconds: 0.6 },
-        { index: 2, text: "this", start_seconds: 0.61, end_seconds: 0.8 },
-      ],
-      "after this",
-    );
-    expect(match).toMatchObject({
-      start_seconds: 0.31,
-      end_seconds: 0.8,
-      start_word_index: 1,
-      end_word_index: 2,
-    });
   });
 
   it("keeps sub-millisecond measured words valid as caption cues", () => {

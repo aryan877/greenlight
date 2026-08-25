@@ -273,6 +273,24 @@ export const youtubeMetadataSchema = z.object({
   contains_synthetic_media: z.boolean().default(true),
 });
 
+const releasePlanFieldsSchema = z.object({
+  thumbnail_artifact_id: idSchema.nullable().default(null),
+  destination: z.enum(["unlisted", "public", "scheduled"]).default("unlisted"),
+  publish_at: z.string().datetime().nullable().default(null),
+});
+
+export const releasePlanSchema = releasePlanFieldsSchema.superRefine(
+  (plan, context) => {
+    if (plan.destination === "scheduled" && !plan.publish_at) {
+      context.addIssue({
+        code: "custom",
+        message: "Scheduled release requires a publish time",
+        path: ["publish_at"],
+      });
+    }
+  },
+);
+
 export const contentPackageSchema = z
   .object({
     version: z.literal(1),
@@ -285,6 +303,11 @@ export const contentPackageSchema = z
       .optional(),
     audio_tracks: z.array(audioTrackSchema).optional(),
     metadata: youtubeMetadataSchema,
+    release: releasePlanSchema.default(() => ({
+      thumbnail_artifact_id: null,
+      destination: "unlisted" as const,
+      publish_at: null,
+    })),
   })
   .superRefine(({ scenes, audio_tracks: audioTracks }, context) => {
     const seconds = productionDurationSeconds(scenes);
@@ -636,12 +659,6 @@ export const transcribeAudioInputSchema = z.object({
   prompt: z.string().trim().max(500).nullable().default(null),
 });
 
-export const findSpokenPhraseInputSchema = z.object({
-  project_id: idSchema,
-  transcript_artifact_id: idSchema,
-  phrase: z.string().trim().min(1).max(500),
-});
-
 export const correctTranscriptInputSchema = z.object({
   project_id: idSchema,
   transcript_artifact_id: idSchema,
@@ -676,7 +693,6 @@ export const qualityCheckInputSchema = z.object({
 });
 
 export const stageVideoInputSchema = qualityCheckInputSchema.extend({
-  thumbnail_artifact_id: idSchema.nullable().default(null),
   quality_report_artifact_id: idSchema,
   idempotency_key: z.string().min(16).max(160),
 });
@@ -838,6 +854,17 @@ export const editorPatchOperationSchema = z.discriminatedUnion("type", [
     type: z.literal("remove_audio_track"),
     track_id: idSchema,
   }),
+  z
+    .object({
+      type: z.literal("update_release"),
+      metadata: youtubeMetadataSchema.partial().optional(),
+      release: releasePlanFieldsSchema.partial().optional(),
+    })
+    .refine(
+      ({ type: _type, ...patch }) =>
+        Object.values(patch).some((value) => value !== undefined),
+      { message: "Release patch must change at least one field" },
+    ),
 ]);
 
 export const editorPatchInputSchema = z.object({
@@ -860,6 +887,7 @@ export type LocalizedNarrationTrack = z.infer<
 export type AudioTrackRole = z.infer<typeof audioTrackRoleSchema>;
 export type AudioTrackClip = z.infer<typeof audioTrackClipSchema>;
 export type YoutubeMetadata = z.infer<typeof youtubeMetadataSchema>;
+export type ReleasePlan = z.infer<typeof releasePlanSchema>;
 export type ArtifactKind = z.infer<typeof artifactKindSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
 export type QualityReport = z.infer<typeof qualityReportSchema>;
@@ -874,7 +902,6 @@ export type Transcript = z.infer<typeof transcriptSchema>;
 export type CaptionCue = z.infer<typeof captionCueSchema>;
 export type CaptionTrack = z.infer<typeof captionTrackSchema>;
 export type TranscribeAudioInput = z.infer<typeof transcribeAudioInputSchema>;
-export type FindSpokenPhraseInput = z.infer<typeof findSpokenPhraseInputSchema>;
 export type CorrectTranscriptInput = z.infer<
   typeof correctTranscriptInputSchema
 >;
@@ -1230,6 +1257,16 @@ export const applyEditorPatch = (
           requireSelectedScene(selectedSceneIds, clip.scene_id);
         }
         next.audio_tracks.splice(index, 1);
+        break;
+      }
+      case "update_release": {
+        requireTrack("release");
+        if (operation.metadata) {
+          next.metadata = { ...next.metadata, ...operation.metadata };
+        }
+        if (operation.release) {
+          next.release = { ...next.release, ...operation.release };
+        }
         break;
       }
     }

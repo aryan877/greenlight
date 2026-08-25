@@ -1,69 +1,124 @@
 # Greenlight
 
-Greenlight is a TrueForge-native production agent inside a real, scene-based video editor. It researches and verifies a short YouTube story, creates editable media, renders it with Remotion, stages it as unlisted, and stops for a human before anything becomes public.
+**An AI production crew inside a real video editor. It can research, write, edit, render, and prepare a YouTube release. It cannot publish behind your back.**
 
-The editor is the product surface. The Producer receives a compact map of the complete current cut on every turn; selected scenes, gaps, and imported media are the creator's current emphasis. Manual controls edit immediately and stay undoable. Producer-authored changes highlight their target in the real timeline and use TrueForge's native approval event. Both persist through the same validated patch service.
+Most video agents end at a generated file. Greenlight keeps going, but keeps the creator in control.
 
-## What works
+You edit on a normal timeline. The AI Producer sees the complete current cut, can focus the exact scenes it means, and can operate the same editing system when asked. It researches through TrueForge, delegates independent questions to subagents, builds editable scene bundles, renders with Remotion, and stages the result on YouTube as unlisted. Public or scheduled release pauses for your approval.
 
-- TrueForge root agent with typed MCP tools, sandbox, dynamic subagents, streamed turns, and resumable approvals
-- Immutable projects and artifacts in SQLite plus content-addressed local files
-- Scene-bundle selection with no arbitrary selection or scene-count cap
-- Click, Shift/Cmd, and marquee multi-select across scene bundles and real gaps; immediate local reorder, trim, speed, split, track controls, and undo/redo; timeline zoom, playback, mute, volume, and resizable/collapsible panes
-- Project history and new-project creation backed by the saved SQLite workspace, with managed paths and artifact counts
-- A creator-media bin with measured size, duration, dimensions and codecs; full image/audio/video viewers; signature-checked import; click/drag attachment; and direct file drop into Producer
-- Agent-driven Studio focus through `focus_editor_selection`, plus readable scene references dragged directly into the composer
-- One shared Zod patch contract, reducer, and revision service for direct Studio edits and Producer proposals
-- Frame-aligned, edge-to-edge video, named audio, and caption lanes with explicit gaps, source handles, adaptive ruler ticks, and a continuous zoom range
-- Scene-sized primary narration, dub, music, and effects clips with track names, BCP-47 locales, gain, mute, solo, and export inclusion; Remotion mixes only the enabled tracks
-- Producer proposals preview trims, splits, speed changes, ranges, captions, and gaps on Program and the real timeline; chat stays concise with Apply, Refine, and Cancel
-- OpenMoji search and attachment with licensed SVG provenance
-- Optional bounded Codex-subscription image generation; GPT Image API routes stay disabled
-- Per-scene multilingual voice through one production route—OpenRouter to Gemini TTS—with an in-chat voice audition card and complete model, voice, locale, and artifact provenance
-- Core timed transcription: OpenRouter `gpt-4o-mini-transcribe` reference text plus local `whisper.cpp` word boundaries, exact phrase lookup, immutable corrections, and typed active-word captions derived from measured timing
-- Native TrueForge sandbox-output import: derived files are downloaded by exact session and turn, signature-checked, content-addressed, deduplicated, and handed back to the Producer only by artifact ID
-- Deterministic Remotion render and thumbnail, best-effort cross-platform hardware encoding with safe software fallback, FFprobe-backed quality checks, and playback-rate support
-- Local YouTube OAuth wrapper, unlisted-first staging, immutable release snapshots, and approval-gated publish/schedule tools
+```text
+Topic
+  → sourced research
+  → editable scenes
+  → voice, timed captions, and media
+  → checked render
+  → unlisted YouTube review
+  → your greenlight
+```
 
-No paid transcription or image API call, YouTube upload, or public release is performed during setup or tests.
+## The product loop
+
+1. Ask for a short video about a topic.
+2. The AI Producer searches the current web with Exa and can send separate questions to TrueForge subagents.
+3. Research becomes a claim-level evidence ledger, script, and editable storyboard.
+4. Every scene arrives on a real timeline with its visual, voice, timed transcript, captions, source range, and duration kept together.
+5. Trim, split, reorder, change speed, mute tracks, edit metadata, or undo directly. These normal editor actions happen immediately without calling the model.
+6. Ask the AI Producer for a change. It focuses the intended range, previews the real result in Program and Timeline, and uses TrueForge approval before a consequential tool runs.
+7. Render the exact revision, run deterministic checks, and upload it as unlisted.
+8. Review the thumbnail, title, description, tags, disclosure, and release plan in the Release workspace.
+9. Approve the exact locked snapshot before it becomes public or scheduled.
+
+The human using the editor is the **creator**. The AI running in TrueForge is the **AI Producer**.
+
+## Why TrueForge matters
+
+Greenlight does not use TrueForge as a chat box around a separate workflow. TrueForge is the agent runtime.
+
+| TrueForge capability  | What Greenlight uses it for                                                              |
+| --------------------- | ---------------------------------------------------------------------------------------- |
+| Models                | Runs the root AI Producer through the configured OpenRouter model                        |
+| MCP connectors        | Greenlight production tools plus deferred Exa web search and page retrieval              |
+| Dynamic subagents     | Independent research and verification that return compact sourced findings               |
+| Skills                | Editorial writing, evidence work, release packaging, and transcript-aware edit decisions |
+| Sandbox and Code Mode | Safe calculations, transcript work, and FFmpeg on sandbox copies                         |
+| Durable sessions      | Reconnects to the latest turn, question, or approval after a refresh                     |
+| Context compaction    | Uses a threshold derived from the selected model's advertised context window             |
+| Native approvals      | Pauses exact edit, render, upload, publish, and schedule tool calls                      |
+
+Exa comes from TrueForge's connector catalog and needs no API key. It stays deferred, so its tool schemas enter context only when research needs them.
+
+## Editor capabilities
+
+- Square, borderless 16:9 Program monitor with playback, seek, volume, mute, and fullscreen
+- Resizable and collapsible media, timeline, and AI panels
+- Frame-aligned timeline with continuous zoom, adaptive ruler ticks, marquee selection, gaps, and one playhead
+- Scene bundles with separate video, named audio, and caption lanes
+- Immediate drag reorder, trim, split, speed, mute, solo, export inclusion, undo, and redo
+- Any-size multi-selection with scene and gap context that can be dragged into the AI composer
+- Signature-checked local media import with real preview, size, duration, dimensions, and codec details
+- AI focus that can highlight the scenes or gap it believes the creator means before acting
+- One typed patch and revision system shared by direct edits and AI proposals
+- A first-class YouTube Release workspace controlled by both the creator and AI Producer
+
+## Media pipeline
+
+- **Visuals:** OpenMoji with license provenance, creator media, and an optional bounded Codex subscription image route
+- **Voice:** OpenRouter to Gemini TTS, one production provider with configurable model, voice, and locale
+- **Transcription:** OpenRouter `gpt-4o-mini-transcribe` for reference text and local `whisper.cpp` for measured word boundaries
+- **Captions:** Derived from measured words, never character-count timing
+- **Render:** Remotion with best-effort hardware encoding and safe software fallback
+- **Quality:** Contract, evidence, duration, frame, audio, and FFprobe checks
+- **Release:** Existing local YouTube OAuth profile, unlisted-first upload, and immutable release snapshots
+
+Direct GPT Image API routes are disabled by default. Setup and tests do not make paid media calls, upload to YouTube, or publish anything.
 
 ## Architecture
 
 ```text
 Creator
-  ↕ selects scenes / directs edits / approves
-Greenlight Studio (React + Tailwind + TanStack Query)
+  ↕ direct editing and approvals
+Greenlight Studio
   ↕ TrueForge SDK event stream
-TrueForge root Producer
-  ↕ typed MCP calls
-Greenlight MCP
-  ├─ Zod contracts + shared patch reducer
-  ├─ SQLite project index + immutable artifact store
-  ├─ OpenMoji / Codex image / voice / transcription adapters
-  ├─ Remotion renderer + quality checks
-  └─ YouTube uploader boundary
+TrueForge AI Producer
+  ├─ Exa web research
+  ├─ bounded subagents
+  ├─ skills and sandbox
+  └─ typed Greenlight MCP calls
+       ├─ Zod contracts and patch reducer
+       ├─ SQLite and immutable artifacts
+       ├─ media providers and Remotion
+       └─ YouTube uploader
 ```
+
+TrueForge owns turns, subagents, tool discovery, sandbox work, reconnect, compaction, and approvals. Greenlight owns production state and constrained side effects. The model receives artifact IDs and project-relative references, never host paths, OAuth files, or API keys.
 
 
 ## Run locally
 
-Requirements: Node 22+, pnpm 9+, FFmpeg/FFprobe, `whisper-cli`, a local Whisper model, and a local TrueForge server. Greenlight defaults to `~/.cache/greenlight/models/ggml-base.bin`; override `GREENLIGHT_WHISPER_MODEL` for a larger multilingual model.
+Requirements:
+
+- Node.js 22+
+- pnpm 9+
+- FFmpeg and FFprobe
+- `whisper-cli` plus a local Whisper model
+- TrueForge
+- an OpenRouter API key
 
 ```bash
 pnpm install
 cp .env.example .env
-openssl rand -hex 32 # paste as GREENLIGHT_MCP_AUTH_TOKEN
+openssl rand -hex 32
 ```
 
-Put provider keys only in `.env`. The current root model, voice, and reference transcription use `OPENROUTER_API_KEY`. Precise word timing runs locally through `whisper.cpp`; no separate OpenAI key is needed. Never commit `.env`.
+Put the generated value in `GREENLIGHT_MCP_AUTH_TOKEN`. Put provider credentials only in the ignored `.env` file.
 
-Start TrueForge in one terminal:
+Start TrueForge:
 
 ```bash
 npx @truefoundry/trueforge
 ```
 
-Start Greenlight and configure its TrueForge provider, MCP server, and agent:
+Start Greenlight, then configure TrueForge:
 
 ```bash
 pnpm dev
@@ -72,44 +127,60 @@ pnpm trueforge:configure
 
 Open [http://127.0.0.1:4173](http://127.0.0.1:4173).
 
-The optional Remotion authoring view runs with:
+Greenlight imports its four custom skills from Git because that is TrueForge's skill boundary. The repository must be publicly cloneable before sandbox skill loading can work. Keep it private during owner-only development; make it public for the hackathon submission, then rerun `pnpm trueforge:configure`. Never put a GitHub token in a skill URL.
+
+The optional Remotion authoring view is:
 
 ```bash
 pnpm dev:render
 ```
 
-## Verify
+## Connect YouTube
+
+Greenlight wraps the existing uploader at `GREENLIGHT_YOUTUBE_UPLOADER` and uses the profile named by `GREENLIGHT_YOUTUBE_PROFILE`.
+
+Authenticate that profile with the uploader, then set `GREENLIGHT_YOUTUBE_CHANNEL_ID` to the only channel Greenlight may use. The Studio shows the connected channel but never receives the OAuth credential path or token.
+
+Uploads are always unlisted first. Publishing and scheduling are separate TrueForge-approved actions. Greenlight exposes no delete-video tool.
+
+## Verify without spending money
 
 ```bash
 pnpm verify
 ```
 
-The suite covers contracts, scoped patch safety, storage, voice conversion, transcription timing and phrase lookup, YouTube invocation, and render duration. Provider tests use fake responses and do not spend money.
+The gate runs formatting, lint, type checks, unit tests, and production builds. Provider tests inject fake responses. They do not call paid APIs or YouTube.
 
-## Safety boundaries
+## Safety model
 
-- Models receive artifact IDs, never host paths or OAuth credentials.
-- Creator media is copied into content-addressed project storage; the original stays untouched and no external symlink enters the workspace.
-- Visual, narration, caption, transcript, timing, and source context move as one scene bundle.
-- Local edits create immutable revisions; the base cut is never overwritten.
-- Shortening keeps removed time as an explicit gap unless a separate structural edit intentionally resolves it; extension requires recorded unused source frames.
-- Sandbox-derived files cross the TrueForge download boundary and Greenlight media validator; no host path enters model context.
-- Generated narration is never given estimated word timing.
-- YouTube uploads are unlisted first.
-- TrueForge authenticates to the MCP service with a private header; the Studio never receives that credential.
-- Agent calls to `apply_editor_patch`, render, upload, publish, and schedule are TrueForge approval-gated. Direct timeline edits commit immediately into local undo history and never invoke the model.
-- Publish and schedule atomically claim an unlisted release before contacting YouTube, preventing concurrent release attempts.
-- Public release rechecks the exact immutable snapshot and configured channel allowlist.
-- There is no delete-video tool.
+- Imported media is copied into content-addressed project storage. Originals stay untouched.
+- Every edit creates an immutable content revision.
+- Creator gestures save immediately and remain undoable.
+- AI edits preview against the same reducer that will persist them.
+- Generated files cross TrueForge's sandbox download boundary and Greenlight's media validator.
+- Word-accurate cuts require measured transcript timing. Missing timing fails instead of guessing.
+- Upload, publication, and scheduling are idempotent and channel-allowlisted.
+- A changed video or metadata snapshot requires fresh approval.
+- No credential, arbitrary host path, or raw chain-of-thought is shown to the model or creator UI.
 
 ## Repository map
 
-- `apps/studio` — agentic editor and sanitized TrueForge event presentation
-- `apps/mcp` — typed production tools, providers, storage, render and YouTube boundaries
-- `apps/render` — Remotion composition and deterministic render entrypoint
-- `packages/contracts` — canonical schemas, types, and patch reducer
-- `agents/producer` — TrueForge agent manifest and instructions
-- `research` — dated hackathon, TrueForge, provider, Remotion, and design references
+- `apps/studio`: React, Tailwind, TanStack Query, timeline, Program, AI, and Release surfaces
+- `apps/mcp`: production tools, read API, providers, artifacts, rendering, and YouTube boundary
+- `apps/render`: Remotion composition and render entrypoint
+- `packages/contracts`: canonical Zod schemas, derived types, and pure patch reducer
+- `agents/producer`: TrueForge manifest and root instructions
+- `agents/skills`: four small Greenlight-specific TrueForge skills
+- `research`: dated hackathon, TrueForge, provider, Remotion, and design references
+
+## Honest limits
+
+- Greenlight targets 30 to 120 second evidence-led videos, not multi-hour productions.
+- It does not promise views, revenue, or autonomous channel growth.
+- Custom TrueForge skills require a public Git source at runtime.
+- The YouTube OAuth profile must be connected manually on the trusted host.
+- Codex subscription image generation is a trusted-machine capability, not a hosted multi-tenant provider.
+- The final paid transcription, unlisted upload, and release rehearsal remain manual pre-submission gates.
 
 ## Attribution and disclosure
 

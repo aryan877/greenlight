@@ -98,17 +98,17 @@ const turnDoneState = (event: WireEvent): TurnDoneState | null =>
 export const terminalFailureMessage = (event: WireEvent): string | null => {
   const state = turnDoneState(event);
   if (state?.status === "error") {
-    return "Producer couldn’t finish that reply. Check the model connection and retry.";
+    return "AI Producer couldn’t finish that reply. Check the model connection and retry.";
   }
   if (state?.status === "cancelled") {
-    return "Producer stopped before answering. Retry when you’re ready.";
+    return "AI Producer stopped before answering. Retry when you’re ready.";
   }
   return null;
 };
 
 const requestFailureMessage = (error: Error) => {
   if (/fetch|network|502|503|connect|proxy/i.test(error.message)) {
-    return "Producer is offline. Start TrueForge, then retry.";
+    return "AI Producer is offline. Start TrueForge, then retry.";
   }
   return terminalFailureMessage({
     type: "turn.done",
@@ -318,7 +318,6 @@ const toolPresentation = (
     attach_openmoji: { kind: "artifact", label: "Added a visual" },
     generate_voice: { kind: "artifact", label: "Created the voice track" },
     transcribe_audio: { kind: "artifact", label: "Timed every spoken word" },
-    find_spoken_phrase: { kind: "tool", label: "Found the exact words" },
     correct_transcript: { kind: "artifact", label: "Corrected the transcript" },
     generate_image: { kind: "artifact", label: "Created a visual" },
     run_quality_checks: { kind: "tool", label: "Checked the finished cut" },
@@ -565,7 +564,6 @@ export const useProducerAgent = (
             get_artifact: "Reading the selected media…",
             apply_editor_patch: "Preparing the preview…",
             transcribe_audio: "Timing the words…",
-            find_spoken_phrase: "Finding the exact words…",
             generate_voice: "Generating the voice…",
             generate_image: "Creating the visual…",
             render_video: "Rendering the video…",
@@ -751,7 +749,7 @@ export const useProducerAgent = (
         }
         if (!sawTerminalEvent) {
           throw new Error(
-            "Producer connection ended before the reply was complete.",
+            "AI Producer connection ended before the reply was complete.",
           );
         }
         if (!turnId || references.length === 0 || !sessionId.current) return;
@@ -776,7 +774,7 @@ export const useProducerAgent = (
           id: `sandbox-handoff-limit-${streamProjectId}`,
           kind: "message",
           label: "The edit produced too many chained files.",
-          detail: "Ask Producer to continue from the latest imported media.",
+          detail: "Ask AI Producer to continue from the latest imported media.",
           sceneIds: [],
         },
       ]);
@@ -917,7 +915,7 @@ export const useProducerAgent = (
         {
           id: "producer-restore-error",
           kind: "message",
-          label: "Couldn’t reconnect to the previous Producer session.",
+          label: "Couldn’t reconnect to the previous AI Producer session.",
           detail: "Your next instruction will start a fresh session.",
           sceneIds: [],
         },

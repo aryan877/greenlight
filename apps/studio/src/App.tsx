@@ -24,6 +24,7 @@ import {
   useProjects,
   useRestoreContentRevision,
   useUploadAsset,
+  useYouTubeConnection,
 } from "./api/queries.js";
 import {
   GeminiIcon,
@@ -37,6 +38,7 @@ import { ProducerPanel } from "./components/ProducerPanel.js";
 import { ProgramMonitor } from "./components/ProgramMonitor.js";
 import { ProjectSwitcher } from "./components/ProjectSwitcher.js";
 import { MediaBrowser } from "./components/MediaBrowser.js";
+import { ReleasePanel } from "./components/ReleasePanel.js";
 import { Timeline } from "./components/Timeline.js";
 import {
   changeSceneSpeed,
@@ -79,7 +81,9 @@ export const App = () => {
   const lastDirectArtifactId = useRef<string | null>(null);
   const previousContentArtifactId = useRef<string | null>(null);
   const [historySize, setHistorySize] = useState({ undo: 0, redo: 0 });
-  const [rightTab, setRightTab] = useState<"producer" | "details">("producer");
+  const [rightTab, setRightTab] = useState<"producer" | "details" | "release">(
+    "producer",
+  );
   const [attachedArtifactIds, setAttachedArtifactIds] = useState<string[]>([]);
   const [importError, setImportError] = useState<string | null>(null);
   const [draftIntent, setDraftIntent] = useState<ProducerDraftIntent | null>(
@@ -93,6 +97,7 @@ export const App = () => {
   }, [projectId, projects.data]);
 
   const project = useProject(projectId);
+  const youtubeConnection = useYouTubeConnection();
   const uploadAsset = useUploadAsset(projectId);
   const applyDirectPatch = useApplyEditorPatch(projectId);
   const restoreRevision = useRestoreContentRevision(projectId);
@@ -132,6 +137,11 @@ export const App = () => {
   const editorArtifactId =
     directRevision?.artifactId ?? contentArtifact?.id ?? null;
   const editorContent = directRevision?.content ?? content.data ?? null;
+  const releaseThumbnailArtifact =
+    project.data?.artifacts.find(
+      (artifact) =>
+        artifact.id === editorContent?.release.thumbnail_artifact_id,
+    ) ?? thumbnailArtifact;
 
   const updateHistorySize = useCallback(() => {
     setHistorySize({
@@ -225,6 +235,14 @@ export const App = () => {
 
   const focusFromAgent = useCallback(
     (focus: EditorFocusInput) => {
+      if (
+        focus.selection.project_id === projectId &&
+        focus.selection.track_ids.includes("release")
+      ) {
+        setRightTab("release");
+        layout.setRightOpen(true);
+        return;
+      }
       if (
         focus.selection.project_id !== projectId ||
         !editorContent ||
@@ -364,8 +382,7 @@ export const App = () => {
 
   const persistDirectOperations = useCallback(
     async (input: {
-      sceneIds: string[];
-      gapAfterSceneIds: string[];
+      selection: EditorSelection;
       operations: EditorPatchOperation[];
       summary: string;
       recordHistory: boolean;
@@ -379,19 +396,10 @@ export const App = () => {
       ) {
         return false;
       }
-      const selection = createSelection({
-        projectId,
-        contentArtifactId: editorArtifactId,
-        content: editorContent,
-        sceneIds: input.sceneIds,
-        gapAfterSceneIds: input.gapAfterSceneIds,
-        playheadSeconds: media.currentTime,
-        sourceLedgerArtifact: evidenceArtifact,
-      });
       const patch = editorPatchInputSchema.parse({
         instruction_summary: input.summary,
         operations: input.operations,
-        selection,
+        selection: input.selection,
       });
       const revised = applyEditorPatch(editorContent, patch);
       const previousRevision = directRevision;
@@ -423,8 +431,6 @@ export const App = () => {
       directRevision,
       editorArtifactId,
       editorContent,
-      evidenceArtifact,
-      media.currentTime,
       previewPatch,
       projectId,
       updateHistorySize,
@@ -438,14 +444,60 @@ export const App = () => {
       summary: string,
     ) => {
       void persistDirectOperations({
-        sceneIds,
-        gapAfterSceneIds: selectedGapAfterSceneIds,
+        selection: createSelection({
+          projectId: projectId!,
+          contentArtifactId: editorArtifactId!,
+          content: editorContent!,
+          sceneIds,
+          gapAfterSceneIds: selectedGapAfterSceneIds,
+          playheadSeconds: media.currentTime,
+          sourceLedgerArtifact: evidenceArtifact,
+        }),
         operations,
         summary,
         recordHistory: true,
       });
     },
-    [persistDirectOperations, selectedGapAfterSceneIds],
+    [
+      editorArtifactId,
+      editorContent,
+      evidenceArtifact,
+      media.currentTime,
+      persistDirectOperations,
+      projectId,
+      selectedGapAfterSceneIds,
+    ],
+  );
+
+  const updateRelease = useCallback(
+    (
+      operation: Extract<EditorPatchOperation, { type: "update_release" }>,
+      summary: string,
+    ) => {
+      if (!projectId || !editorArtifactId || !editorContent) return;
+      const thumbnailId = operation.release?.thumbnail_artifact_id;
+      void persistDirectOperations({
+        selection: {
+          project_id: projectId,
+          base_content_package_artifact_id: editorArtifactId,
+          scene_ids: [],
+          track_ids: ["release"],
+          artifact_ids: thumbnailId ? [thumbnailId] : [],
+          playhead_seconds: media.currentTime,
+          time_range_seconds: null,
+        },
+        operations: [operation],
+        summary,
+        recordHistory: true,
+      });
+    },
+    [
+      editorArtifactId,
+      editorContent,
+      media.currentTime,
+      persistDirectOperations,
+      projectId,
+    ],
   );
 
   const cutAtPlayhead = useCallback(
@@ -676,7 +728,24 @@ export const App = () => {
           }}
         />
 
-        <div className="ml-auto flex items-center gap-1.5 rounded-full border border-line-subtle px-2 py-1 text-ink-tertiary">
+        <button
+          type="button"
+          onClick={() => {
+            setRightTab("release");
+            layout.setRightOpen(true);
+          }}
+          className={cx(
+            "ml-auto flex h-8 items-center gap-2 border border-line-subtle px-3 text-[10px] font-medium text-ink-secondary hover:border-ink-caption hover:text-ink",
+            rightTab === "release" && "border-action text-action",
+          )}
+        >
+          <YouTubeIcon className="size-4" />
+          Release
+          <span className="capitalize text-ink-caption">
+            {project.data?.release?.privacy ?? "draft"}
+          </span>
+        </button>
+        <div className="ml-1.5 flex items-center gap-1.5 rounded-full border border-line-subtle px-2 py-1 text-ink-tertiary">
           <TrueForgeIcon className="size-4" />
           <GeminiIcon className="size-4" />
           <RemotionIcon className="size-4" />
@@ -845,7 +914,7 @@ export const App = () => {
           {layout.rightOpen ? (
             <aside className="flex h-full min-h-0 flex-col bg-surface">
               <div className="flex h-10 shrink-0 items-end border-b border-line-subtle px-2">
-                {(["producer", "details"] as const).map((tab) => (
+                {(["producer", "details", "release"] as const).map((tab) => (
                   <button
                     type="button"
                     key={tab}
@@ -856,13 +925,17 @@ export const App = () => {
                         "font-medium text-ink after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-action",
                     )}
                   >
-                    {tab}
+                    {tab === "producer"
+                      ? "AI Producer"
+                      : tab === "details"
+                        ? "Details"
+                        : "Release"}
                   </button>
                 ))}
                 <div className="ml-auto mb-1.5">
                   <IconButton
                     Icon={PanelRightClose}
-                    label="Collapse producer panel"
+                    label="Collapse AI Producer panel"
                     size="sm"
                     onClick={() => layout.setRightOpen(false)}
                   />
@@ -924,6 +997,44 @@ export const App = () => {
                 </div>
                 <div
                   className={
+                    rightTab === "release" ? "h-full" : "hidden h-full"
+                  }
+                >
+                  {visibleContent ? (
+                    <ReleasePanel
+                      artifacts={project.data?.artifacts ?? []}
+                      busy={
+                        applyDirectPatch.isPending ||
+                        producer.isSending ||
+                        Boolean(previewPatch)
+                      }
+                      connection={youtubeConnection.data ?? null}
+                      content={visibleContent}
+                      latestThumbnail={releaseThumbnailArtifact}
+                      releasePrivacy={project.data?.release?.privacy ?? null}
+                      releaseStudioUrl={
+                        project.data?.release?.snapshot.youtube_video_id
+                          ? `https://studio.youtube.com/video/${encodeURIComponent(project.data.release.snapshot.youtube_video_id)}/edit`
+                          : null
+                      }
+                      onChange={updateRelease}
+                      onPrepare={() => {
+                        setRightTab("producer");
+                        directProducer(
+                          project.data?.release?.privacy === "unlisted"
+                            ? visibleContent.release.destination === "scheduled"
+                              ? "Prepare the current unlisted release for its scheduled time. Check the locked snapshot and stop for approval before scheduling it."
+                              : visibleContent.release.destination === "public"
+                                ? "Prepare the current unlisted release for public publication. Check the locked snapshot and stop for approval before publishing it."
+                                : "Open the current unlisted review and tell me what still needs attention."
+                            : "Prepare this cut for an unlisted YouTube review. Run only missing quality or render steps and stop for approval before upload.",
+                        );
+                      }}
+                    />
+                  ) : null}
+                </div>
+                <div
+                  className={
                     rightTab === "details" ? "h-full" : "hidden h-full"
                   }
                 >
@@ -946,7 +1057,7 @@ export const App = () => {
             <div className="flex h-full justify-center bg-surface pt-2">
               <IconButton
                 Icon={PanelRightOpen}
-                label="Open producer panel"
+                label="Open AI Producer panel"
                 onClick={() => layout.setRightOpen(true)}
               />
             </div>

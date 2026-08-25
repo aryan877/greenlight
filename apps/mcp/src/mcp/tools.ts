@@ -6,7 +6,6 @@ import {
   editorFocusInputSchema,
   editorPatchInputSchema,
   evidenceLedgerSchema,
-  findSpokenPhraseInputSchema,
   generateImageInputSchema,
   generateVoiceInputSchema,
   getArtifactInputSchema,
@@ -30,10 +29,7 @@ import type { CodexImageProvider } from "../providers/codex-image.js";
 import type { QualityInspector } from "../providers/quality.js";
 import type { OpenMojiToolkit } from "../providers/openmoji.js";
 import type { RemotionRenderer } from "../providers/render.js";
-import {
-  findSpokenPhrase,
-  type TranscriptionProvider,
-} from "../providers/transcription.js";
+import type { TranscriptionProvider } from "../providers/transcription.js";
 import type { VoiceProvider } from "../providers/voice.js";
 import type { YouTubeUploader } from "../providers/youtube.js";
 import type { ArtifactStore } from "../storage/artifacts.js";
@@ -534,38 +530,6 @@ export const buildMcpServer = ({
   );
 
   server.registerTool(
-    "find_spoken_phrase",
-    {
-      title: "Locate words in timed narration",
-      description:
-        "Resolve an exact spoken phrase to its real word timestamps so an editor patch can split or trim at the requested words.",
-      inputSchema: findSpokenPhraseInputSchema.shape,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (input) => {
-      const request = findSpokenPhraseInputSchema.parse(input);
-      const resolved = artifacts.resolveArtifact(
-        request.transcript_artifact_id,
-      );
-      if (
-        resolved.artifact.project_id !== request.project_id ||
-        resolved.artifact.kind !== "transcript"
-      ) {
-        throw new Error("invalid_transcript_artifact");
-      }
-      const transcript = transcriptSchema.parse(
-        await artifacts.readJson(request.transcript_artifact_id),
-      );
-      return result(findSpokenPhrase(transcript.words, request.phrase));
-    },
-  );
-
-  server.registerTool(
     "correct_transcript",
     {
       title: "Correct transcript words",
@@ -803,13 +767,15 @@ export const buildMcpServer = ({
       const contentPackage = contentPackageSchema.parse(
         await artifacts.readJson(request.content_package_artifact_id),
       );
-      const thumbnail = request.thumbnail_artifact_id
-        ? artifacts.resolveArtifact(request.thumbnail_artifact_id)
-        : null;
+      if (!contentPackage.release.thumbnail_artifact_id) {
+        throw new Error("release_thumbnail_required");
+      }
+      const thumbnail = artifacts.resolveArtifact(
+        contentPackage.release.thumbnail_artifact_id,
+      );
       if (
-        thumbnail &&
-        (thumbnail.artifact.project_id !== request.project_id ||
-          thumbnail.artifact.kind !== "thumbnail")
+        thumbnail.artifact.project_id !== request.project_id ||
+        thumbnail.artifact.kind !== "thumbnail"
       ) {
         throw new Error("invalid_thumbnail_artifact");
       }
@@ -827,7 +793,7 @@ export const buildMcpServer = ({
       try {
         const uploaded = await youtube.uploadUnlisted({
           videoPath: video.absolutePath,
-          thumbnailPath: thumbnail?.absolutePath ?? null,
+          thumbnailPath: thumbnail.absolutePath,
           metadata: contentPackage.metadata,
         });
         const releaseId = createId("release");

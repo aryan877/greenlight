@@ -264,7 +264,7 @@ const MediaViewer = ({
                 )}
               >
                 {attached ? <Check size={13} /> : <Plus size={13} />}
-                {attached ? "Added to Producer" : "Add to Producer"}
+                {attached ? "Added to AI" : "Add to AI"}
               </button>
               <a
                 href={greenlightApi.artifactUrl(artifact.id)}
@@ -435,7 +435,7 @@ export const MediaBrowser = ({
                       )}
                     >
                       {attached ? <Check size={11} /> : <Plus size={11} />}
-                      {attached ? "Added to Producer" : "Add to Producer"}
+                      {attached ? "Added to AI" : "Add to AI"}
                     </button>
                   </div>
                 </article>

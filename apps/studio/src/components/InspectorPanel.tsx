@@ -127,7 +127,7 @@ export const InspectorPanel = ({
             }
             className="mt-5 flex h-8 items-center gap-1.5 rounded-md border border-line px-2.5 text-[10px] font-medium text-ink-secondary hover:border-line-strong hover:bg-hover hover:text-ink"
           >
-            <WandSparkles size={12} /> Revise with Producer
+            <WandSparkles size={12} /> Revise with AI
           </button>
         </div>
       ) : (

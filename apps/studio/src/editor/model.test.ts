@@ -37,6 +37,11 @@ const content: ContentPackage = {
     },
   })),
   localized_narration_tracks: [],
+  release: {
+    thumbnail_artifact_id: null,
+    destination: "unlisted",
+    publish_at: null,
+  },
   metadata: {
     title: "A precise production",
     description: "Selection model fixture.",
@@ -96,6 +101,7 @@ describe("editor selection", () => {
       "voice",
       "caption",
       "transcript",
+      "release",
       "track_primary_voice",
     ]);
     expect(selection.artifact_ids).toContain("transcript_004");

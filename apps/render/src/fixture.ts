@@ -121,6 +121,11 @@ export const fixturePackage: ContentPackage = {
       },
     },
   ],
+  release: {
+    thumbnail_artifact_id: null,
+    destination: "unlisted",
+    publish_at: null,
+  },
   metadata: {
     title: "The last responsible moment for an AI agent",
     description:

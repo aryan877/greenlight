@@ -108,7 +108,7 @@ const QuestionCard = ({
         <button
           type="submit"
           disabled={!answer.trim() || busy}
-          aria-label="Answer Producer"
+          aria-label="Answer AI Producer"
           className="grid size-7 place-items-center rounded-md bg-ink text-white disabled:opacity-30"
         >
           <ArrowUp size={13} strokeWidth={2.2} />
@@ -140,6 +140,9 @@ const approvalCopy = (
       return scene ? [scene.title] : [];
     });
     const fields = new Set<string>();
+    const updatesRelease = operations.some(
+      (operation) => operation.type === "update_release",
+    );
     for (const operation of operations) {
       if (operation.title !== undefined) fields.add("title");
       if (operation.claim_ids !== undefined) fields.add("sources");
@@ -153,6 +156,8 @@ const approvalCopy = (
       if (operation.source_clip !== undefined) fields.add("source range");
       if (operation.playback_rate !== undefined) fields.add("speed");
       if (operation.visual !== undefined) fields.add("visual");
+      if (operation.metadata !== undefined) fields.add("YouTube details");
+      if (operation.release !== undefined) fields.add("release plan");
       if (operation.type === "split_scene") fields.add("structure");
       if (
         operation.type === "upsert_audio_track" ||
@@ -161,8 +166,11 @@ const approvalCopy = (
         fields.add("audio track");
       }
     }
-    const target =
-      names.length > 0 ? `“${names.join("”, “")}”` : "the selected scene";
+    const target = updatesRelease
+      ? "the YouTube release"
+      : names.length > 0
+        ? `“${names.join("”, “")}”`
+        : "the selected scene";
     const changes = fields.size > 0 ? [...fields].join(", ") : "scene content";
     return {
       title: `Update ${target}`,
@@ -641,7 +649,7 @@ export const ProducerPanel = ({
                       {event.delivery === "failed" ? (
                         <div className="mt-2 border-t border-warning/20 pt-2">
                           <p className="text-[12px] leading-5 text-ink-secondary">
-                            {event.detail || "Producer couldn’t answer."}
+                            {event.detail || "The AI couldn’t answer."}
                           </p>
                           <button
                             type="button"

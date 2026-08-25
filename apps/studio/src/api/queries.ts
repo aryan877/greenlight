@@ -11,6 +11,7 @@ export const greenlightKeys = {
   artifact: (artifactId: string) =>
     [...greenlightKeys.all, "artifacts", artifactId] as const,
   voice: () => [...greenlightKeys.all, "voice"] as const,
+  youtube: () => [...greenlightKeys.all, "youtube"] as const,
 };
 
 export const useProjects = () =>
@@ -50,6 +51,14 @@ export const useVoiceCapabilities = () =>
     queryKey: greenlightKeys.voice(),
     queryFn: greenlightApi.getVoiceCapabilities,
     staleTime: 60_000,
+  });
+
+export const useYouTubeConnection = () =>
+  useQuery({
+    queryKey: greenlightKeys.youtube(),
+    queryFn: greenlightApi.getYouTubeConnection,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
   });
 
 export const useVoiceSample = (projectId: string) =>

@@ -8,6 +8,8 @@ Greenlight is an agentic YouTube production editor. A creator gives it a topic, 
 
 Greenlight is not a prompt-to-video slot machine, a generic chat UI, or a promise of views. It improves controllable inputs—research, story, pacing, editability, packaging, and release discipline.
 
+The **creator** is the person using the editor. The **AI Producer** is the root agent running in TrueForge.
+
 ## Primary user and job
 
 An ambitious creator producing evidence-led short explainers wants to turn a defensible idea into a finished, reviewable YouTube release without coordinating many disconnected tools.
@@ -34,7 +36,7 @@ Success means one 30–120 second production can move from brief to unlisted rev
 - Left: creator-imported project media only, with real previews and direct attachment to Producer
 - Center: resizable 16:9 Program monitor with working playback, seek, mute, volume, and fullscreen
 - Bottom: collapsible and vertically resizable bundled-scene timeline with synchronized zoom and one playhead
-- Right: concise Producer activity or scene Inspector
+- Right: concise AI Producer activity, scene Details, or the YouTube Release workspace
 - All side panes collapse and resize; the canvas never overlaps the timeline
 
 The visual language is a distinct light editorial system: Archivo plus IBM Plex Mono, quiet borders, restrained radii, real data, and color used for state and media relationships. It borrows the density and pane discipline of DeepSeek Harness and the spatial logic of a professional NLE without copying either product.
@@ -79,7 +81,7 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 ## Production workflow
 
 1. Create a brief: topic, audience, goal, duration, tone, and channel.
-2. Delegate bounded research and verification to TrueForge subagents.
+2. Search and retrieve current sources through TrueForge's deferred Exa connector, then delegate bounded research and verification to subagents.
 3. Save a source ledger of sources and supported/conflicted claims.
 4. Author a content package: headline, scenes, narration, visual direction, metadata, locale tracks, and claim IDs.
 5. Attach license-compatible OpenMoji or explicitly selected generated/user media.
@@ -106,13 +108,16 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 - Voice provider/model/voice are configuration, not hardcoded pricing logic.
 - Current voice route: OpenRouter `google/gemini-3.1-flash-tts-preview`, voice `Kore`.
 - Current transcription route: OpenRouter `openai/gpt-4o-mini-transcribe` for reference text and local `whisper.cpp` for measured word timestamps.
-- `find_spoken_phrase` returns exact start/end word boundaries for commands such as “cut after this phrase.”
+- The edit-decision skill resolves spoken phrases against measured transcript words before proposing a cut.
 - `correct_transcript` creates a new immutable revision while preserving measured timestamps.
 - Captions are grouped from measured words; TTS duration is never distributed by character count.
 
 ## TrueForge requirements
 
 - TrueForge runs the user-facing root Producer and owns turns, session durability, subagents, sandbox/Code Mode, MCP calls, and approval events.
+- Exa is configured from TrueForge's own MCP catalog without a separate API key and stays deferred until research needs it.
+- Four small Git-backed skills own editorial copy, evidence method, release packaging, and transcript-aware edit decisions. They stay procedural; project state and side effects remain typed MCP tools.
+- Context compaction is enabled at a conservative threshold derived from the configured root model's advertised context window.
 - The root Producer is the only agent that asks the user questions.
 - Subagents are bounded, cannot spawn nested agents, and return work to the root.
 - Greenlight exposes small typed domain tools, never a one-shot `make_video` function.
@@ -141,7 +146,7 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 - A trim preserves removed frames as a visible gap, a split preserves duration, and source-backed extension cannot exceed recorded handles.
 - A sandbox-derived media output is imported once with session/turn provenance and the Producer receives only its immutable artifact ID.
 - Deny leaves the base revision byte-for-byte unchanged; Apply writes a patch artifact and one new content package.
-- Drag reorder and manual end trim travel through TrueForge, not a parallel local mutation path.
+- Drag reorder and manual end trim commit immediately through the same revision service as AI edits, without creating a model turn.
 - A phrase can be resolved to real timed words; a missing phrase fails instead of guessing.
 - Remotion uses scene-authored data and playback rate, not duplicated editorial constants.
 - Quality checks fail honestly when an input or capability is missing.
@@ -153,6 +158,6 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 - Guaranteed views, revenue, or autonomous trend farming
 - Long-form multi-hour editing
 - Collaborative multi-user conflict resolution
-- Arbitrary shell access for the agent
+- Host shell access; deterministic file work stays inside the TrueForge sandbox
 - Automatic public posting or subscriber-facing actions
 - Deleting existing YouTube content
