@@ -46,7 +46,7 @@ export const ResizeHandle = ({
     aria-orientation={direction === "vertical" ? "vertical" : "horizontal"}
     onPointerDown={onPointerDown}
     className={cx(
-      "group relative z-30 shrink-0 touch-none bg-line-subtle",
+      "group relative z-[80] shrink-0 touch-none bg-line-subtle",
       direction === "vertical"
         ? "w-px cursor-col-resize"
         : "h-px cursor-row-resize",

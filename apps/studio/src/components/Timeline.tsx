@@ -620,7 +620,7 @@ export const Timeline = ({
   };
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-surface">
+    <section className="isolate flex h-full min-h-0 flex-col bg-surface">
       <div className="flex h-10 shrink-0 items-center border-b border-line-subtle px-2.5">
         <IconButton
           Icon={ChevronDown}

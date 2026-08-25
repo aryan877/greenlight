@@ -19,7 +19,13 @@ import { greenlightKeys } from "./queries.js";
 export type StudioAgentEvent = {
   id: string;
   kind:
-    "reasoning" | "tool" | "artifact" | "approval" | "message" | "instruction";
+    | "reasoning"
+    | "tool"
+    | "artifact"
+    | "approval"
+    | "message"
+    | "instruction"
+    | "system";
   label: string;
   detail: string;
   sceneIds: string[];
@@ -35,6 +41,15 @@ export type StudioReviewDocument = {
     title: string;
     lines: string[];
   }>;
+};
+
+export const appendUniqueStudioEvents = (
+  current: StudioAgentEvent[],
+  incoming: StudioAgentEvent[],
+): StudioAgentEvent[] => {
+  if (incoming.length === 0) return current;
+  const ids = new Set(current.map((item) => item.id));
+  return [...current, ...incoming.filter((item) => !ids.has(item.id))];
 };
 
 export type PendingToolApproval = {
@@ -248,6 +263,83 @@ const textContent = (content: unknown): string => {
     )
     .join("\n");
 };
+
+const turnInputOf = (event: WireEvent): unknown[] =>
+  Array.isArray(event.input) ? event.input : [];
+
+const toolCallIdOfInput = (input: Record<string, unknown>): string | null => {
+  const value = input.toolCallId ?? input.tool_call_id;
+  return typeof value === "string" ? value : null;
+};
+
+const visibleCreatorInstruction = (
+  content: unknown,
+  projectId: string,
+): string | null => {
+  const message = textContent(content);
+  const marker = /^PROJECT_ID:\s*([^\n]+)\n\n/.exec(message);
+  if (marker?.[1]?.trim() !== projectId) return null;
+  const instruction = message
+    .slice(marker[0].length)
+    .split(/\n\nEDITOR_(?:TIMELINE|SELECTION)/)[0]
+    ?.trim();
+  if (!instruction || instruction.startsWith("GREENLIGHT_ARTIFACT_HANDOFF")) {
+    return null;
+  }
+  return instruction;
+};
+
+export const describeTurnInput = (
+  event: WireEvent,
+  turnId: string,
+  projectId: string,
+): StudioAgentEvent[] =>
+  turnInputOf(event).flatMap((candidate, index) => {
+    if (!candidate || typeof candidate !== "object") return [];
+    const input = candidate as Record<string, unknown>;
+    if (input.type === "user.message") {
+      const instruction = visibleCreatorInstruction(input.content, projectId);
+      return instruction
+        ? [
+            {
+              id: `turn-input-${turnId}-${index}`,
+              kind: "instruction" as const,
+              label: instruction,
+              detail: "",
+              sceneIds: [],
+              delivery: "sent" as const,
+            },
+          ]
+        : [];
+    }
+    const decision = creatorDecisionFromTurnInput([input]);
+    return decision
+      ? [
+          {
+            id: `turn-input-${turnId}-${index}`,
+            kind: "instruction" as const,
+            label: decision,
+            detail: "",
+            sceneIds: [],
+            delivery: "sent" as const,
+          },
+        ]
+      : [];
+  });
+
+const resolvedToolCallIds = (event: WireEvent): string[] =>
+  turnInputOf(event).flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object") return [];
+    const input = candidate as Record<string, unknown>;
+    if (
+      input.type !== "user.tool_approval" &&
+      input.type !== "user.tool_response"
+    ) {
+      return [];
+    }
+    const toolCallId = toolCallIdOfInput(input);
+    return toolCallId ? [toolCallId] : [];
+  });
 
 export const parseSandboxArtifactReferences = (
   content: unknown,
@@ -499,6 +591,17 @@ const creatorFacingSentence = (value: string): string | null => {
 
 export const describeEvent = (event: WireEvent): StudioAgentEvent[] => {
   const type = String(event.type ?? "agent.event");
+  if (type === "agent.context.overwrite" && event.reason === "compaction") {
+    return [
+      {
+        id: String(event.id ?? crypto.randomUUID()),
+        kind: "system",
+        label: "Context compacted",
+        detail: "Earlier messages remain available in this history.",
+        sceneIds: [],
+      },
+    ];
+  }
   if (type === "turn.done") {
     const failure = terminalFailureMessage(event);
     return failure
@@ -563,6 +666,7 @@ export const useProducerAgent = (
     [],
   );
   const [activity, setActivity] = useState<string | null>(null);
+  const [isRestoring, setIsRestoring] = useState(false);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -571,21 +675,15 @@ export const useProducerAgent = (
 
   const appendEvents = useCallback((described: StudioAgentEvent[]) => {
     if (described.length === 0) return;
-    setEvents((current) => {
-      const ids = new Set(current.map((item) => item.id));
-      const fresh = described.filter((item) => !ids.has(item.id));
-      const compact = [...current];
-      for (const item of fresh) {
-        const last = compact.at(-1);
-        if (last?.label === item.label && last.kind === item.kind) continue;
-        compact.push(item);
-      }
-      return compact.slice(-40);
-    });
+    setEvents((current) => appendUniqueStudioEvents(current, described));
   }, []);
 
   const ingest = useCallback(
-    (incoming: WireEvent, sourceTurnId: string | null) => {
+    (
+      incoming: WireEvent,
+      sourceTurnId: string | null,
+      options: { historical?: boolean } = {},
+    ) => {
       let event = incoming;
       const terminal = turnDoneState(incoming);
       if (terminal) {
@@ -610,6 +708,18 @@ export const useProducerAgent = (
       }
       if (event.id) eventStore.current.set(event.id, event);
 
+      if (event.type === "turn.created") {
+        const resolved = new Set(resolvedToolCallIds(event));
+        if (resolved.size > 0) {
+          setPendingApprovals((current) =>
+            current.filter((item) => !resolved.has(item.toolCallId)),
+          );
+          setPendingQuestions((current) =>
+            current.filter((item) => !resolved.has(item.toolCallId)),
+          );
+        }
+      }
+
       if (
         event.type === "model.message" &&
         !event.content &&
@@ -620,7 +730,7 @@ export const useProducerAgent = (
         return null;
       }
 
-      if (event.type === "model.message") {
+      if (event.type === "model.message" && !options.historical) {
         for (const call of toolCallsOf(event)) {
           const nextActivity: Record<string, string> = {
             get_project: "Checking the current cut…",
@@ -698,6 +808,38 @@ export const useProducerAgent = (
       return event;
     },
     [appendEvents],
+  );
+
+  const replaySessionHistory = useCallback(
+    async (historySessionId: string, historyProjectId: string) => {
+      const page = await trueforge.sessions.listEvents(historySessionId, {
+        limit: 100,
+      });
+      const history: Array<{ turnId: string; event: WireEvent }> = [];
+      for await (const item of page) {
+        history.push({
+          turnId: item.turnId,
+          event: item.event as unknown as WireEvent,
+        });
+      }
+      history.reverse();
+      if (activeProjectId.current !== historyProjectId) return [];
+
+      eventStore.current.clear();
+      setEvents([]);
+      setPendingApprovals([]);
+      setPendingQuestions([]);
+      for (const item of history) {
+        if (item.event.type === "turn.created") {
+          appendEvents(
+            describeTurnInput(item.event, item.turnId, historyProjectId),
+          );
+        }
+        ingest(item.event, item.turnId, { historical: true });
+      }
+      return history;
+    },
+    [appendEvents, ingest],
   );
 
   const importSandboxOutputs = useCallback(
@@ -854,9 +996,11 @@ export const useProducerAgent = (
     setPendingApprovals([]);
     setPendingQuestions([]);
     setActivity(null);
+    setIsRestoring(Boolean(projectId));
     if (!projectId) return;
 
     let cancelled = false;
+    const restoreController = new AbortController();
     const storageKey = `greenlight:producer-session:${projectId}`;
     const restore = async () => {
       let restoredSessionId: string | null = null;
@@ -912,65 +1056,48 @@ export const useProducerAgent = (
       } catch {
         // The in-memory session still works when persistence is unavailable.
       }
-      const restoredInstruction = (latestTurn.input ?? []).find((item) => {
-        const value = item as unknown as Record<string, unknown>;
-        return (
-          value.type === "user.message" && typeof value.content === "string"
-        );
-      }) as { content?: string } | undefined;
-      const instruction = restoredInstruction?.content
-        ?.replace(/^PROJECT_ID:[^\n]+\n\n/, "")
-        .split(/\n\nEDITOR_(?:TIMELINE|SELECTION)/)[0]
-        ?.trim();
-      if (
-        instruction &&
-        !instruction.startsWith("GREENLIGHT_ARTIFACT_HANDOFF")
-      ) {
-        appendEvents([
-          {
-            id: `instruction-${latestTurn.id}`,
-            kind: "instruction",
-            label: instruction,
-            detail: "",
-            sceneIds: [],
-            delivery: "sent",
-          },
-        ]);
-      }
-      const restoredDecision = creatorDecisionFromTurnInput(latestTurn.input);
-      if (restoredDecision) {
-        appendEvents([
-          {
-            id: `decision-${latestTurn.id}`,
-            kind: "instruction",
-            label: restoredDecision,
-            detail: "",
-            sceneIds: [],
-            delivery: "sent",
-          },
-        ]);
-      }
-      const persisted = await trueforge.sessions.listTurnEvents(
+      const persisted = await replaySessionHistory(
         restoredSessionId,
-        latestTurn.id,
-        { limit: 100, order: "asc" },
-      );
-      const sandboxReferences: SandboxArtifactReference[] = [];
-      for await (const stored of persisted) {
-        if (cancelled || activeProjectId.current !== projectId) return;
-        const event = ingest(stored as unknown as WireEvent, latestTurn.id);
-        if (event?.type === "model.message") {
-          sandboxReferences.push(
-            ...parseSandboxArtifactReferences(event.content),
-          );
-        }
-      }
-      const imported = await importSandboxOutputs(
-        restoredSessionId,
-        latestTurn.id,
-        sandboxReferences,
         projectId,
       );
+      if (latestTurn.state.status === "running") {
+        setActivity("Thinking…");
+        const stream = await trueforge.sessions.subscribeToTurn(
+          restoredSessionId,
+          latestTurn.id,
+          { afterSequenceNumber: 0 },
+          { abortSignal: restoreController.signal },
+        );
+        await consume(stream, projectId);
+        await replaySessionHistory(restoredSessionId, projectId);
+        return;
+      }
+      const sandboxReferences = new Map<string, SandboxArtifactReference[]>();
+      for await (const stored of persisted) {
+        if (cancelled || activeProjectId.current !== projectId) return;
+        if (stored.event.type === "model.message") {
+          const references = [
+            ...parseSandboxArtifactReferences(stored.event.content),
+          ];
+          if (references.length > 0) {
+            sandboxReferences.set(stored.turnId, [
+              ...(sandboxReferences.get(stored.turnId) ?? []),
+              ...references,
+            ]);
+          }
+        }
+      }
+      const imported: ImportedSandboxOutput[] = [];
+      for (const [turnId, references] of sandboxReferences) {
+        imported.push(
+          ...(await importSandboxOutputs(
+            restoredSessionId,
+            turnId,
+            references,
+            projectId,
+          )),
+        );
+      }
       if (imported.length > 0 && !cancelled) {
         const handoff = await trueforge.sessions.createTurnStream(
           restoredSessionId,
@@ -986,21 +1113,35 @@ export const useProducerAgent = (
         await consume(handoff, projectId);
       }
     };
-    void restore().catch(() => {
-      appendEvents([
-        {
-          id: "producer-restore-error",
-          kind: "message",
-          label: "Couldn’t reconnect to the previous AI Producer session.",
-          detail: "Your next instruction will start a fresh session.",
-          sceneIds: [],
-        },
-      ]);
-    });
+    void restore()
+      .catch(() => {
+        if (cancelled) return;
+        appendEvents([
+          {
+            id: "producer-restore-error",
+            kind: "message",
+            label: "Couldn’t reconnect to the previous AI Producer session.",
+            detail: "Your next instruction will start a fresh session.",
+            sceneIds: [],
+          },
+        ]);
+      })
+      .finally(() => {
+        if (!cancelled && activeProjectId.current === projectId) {
+          setIsRestoring(false);
+        }
+      });
     return () => {
       cancelled = true;
+      restoreController.abort();
     };
-  }, [appendEvents, consume, importSandboxOutputs, ingest, projectId]);
+  }, [
+    appendEvents,
+    consume,
+    importSandboxOutputs,
+    projectId,
+    replaySessionHistory,
+  ]);
 
   const send = useMutation<void, Error, ProducerSendInput, { eventId: string }>(
     {
@@ -1051,7 +1192,7 @@ export const useProducerAgent = (
             delivery: "sending",
           };
           const existing = current.findIndex((item) => item.id === eventId);
-          if (existing < 0) return [...current, event].slice(-40);
+          if (existing < 0) return [...current, event];
           return current.map((item) => (item.id === eventId ? event : item));
         });
         return { eventId };
@@ -1072,6 +1213,9 @@ export const useProducerAgent = (
         );
       },
       onSuccess: async () => {
+        if (sessionId.current && projectId) {
+          await replaySessionHistory(sessionId.current, projectId);
+        }
         if (projectId) {
           await queryClient.invalidateQueries({
             queryKey: greenlightKeys.project(projectId),
@@ -1162,6 +1306,9 @@ export const useProducerAgent = (
         return { eventId };
       },
       onSuccess: async (_data, _input, context) => {
+        if (sessionId.current && projectId) {
+          await replaySessionHistory(sessionId.current, projectId);
+        }
         setEvents((current) =>
           current.map((item) =>
             item.id === context?.eventId
@@ -1237,6 +1384,9 @@ export const useProducerAgent = (
         return { eventId };
       },
       onSuccess: async (_data, _input, context) => {
+        if (sessionId.current && projectId) {
+          await replaySessionHistory(sessionId.current, projectId);
+        }
         setEvents((current) =>
           current.map((item) =>
             item.id === context?.eventId
@@ -1269,6 +1419,7 @@ export const useProducerAgent = (
   const sendInstruction = useCallback(
     (input: ProducerSendInput) => {
       if (
+        isRestoring ||
         send.isPending ||
         pendingApprovals.length > 0 ||
         pendingQuestions.length > 0
@@ -1277,7 +1428,7 @@ export const useProducerAgent = (
       }
       send.mutate(input);
     },
-    [pendingApprovals.length, pendingQuestions.length, send],
+    [isRestoring, pendingApprovals.length, pendingQuestions.length, send],
   );
 
   return {
@@ -1288,7 +1439,7 @@ export const useProducerAgent = (
     sessionId: sessionId.current,
     send: sendInstruction,
     retryInstruction,
-    isSending: send.isPending,
+    isSending: send.isPending || isRestoring,
     decideApproval: approval.mutate,
     isApproving: approval.isPending,
     answerQuestion: question.mutate,

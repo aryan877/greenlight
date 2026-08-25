@@ -37,6 +37,7 @@ import type {
 } from "../api/trueforge.js";
 import { MEDIA_ACCEPT, MEDIA_ARTIFACT_MIME } from "../editor/media-transfer.js";
 import { timelineItems } from "../editor/model.js";
+import { shouldSubmitProducerInstruction } from "../editor/producer-composer.js";
 import type { ProducerDraftIntent } from "../editor/producer-draft.js";
 import { cx } from "./controls.js";
 
@@ -49,9 +50,13 @@ const eventIcon: Partial<
   approval: CircleDot,
 };
 
-const AgentMark = () => (
+const AgentMark = ({ thinking = false }: { thinking?: boolean }) => (
   <span className="mt-1 grid size-5 shrink-0 place-items-center text-action">
-    <GreenlightMark size={16} strokeWidth={1.9} />
+    <GreenlightMark
+      size={16}
+      strokeWidth={1.9}
+      className={cx(thinking && "motion-safe:animate-spin")}
+    />
   </span>
 );
 
@@ -703,6 +708,19 @@ export const ProducerPanel = ({
                   </div>
                 );
               }
+              if (event.kind === "system") {
+                return (
+                  <div
+                    key={event.id}
+                    className="flex items-center gap-2 py-1 text-[10px] text-ink-caption"
+                    title={event.detail}
+                  >
+                    <span className="h-px flex-1 bg-line-subtle" />
+                    <span>{event.label}</span>
+                    <span className="h-px flex-1 bg-line-subtle" />
+                  </div>
+                );
+              }
               const Icon = eventIcon[event.kind];
               const eventArtifact = event.artifactId
                 ? artifacts.find((artifact) => artifact.id === event.artifactId)
@@ -774,7 +792,7 @@ export const ProducerPanel = ({
         )}
         {activity ? (
           <div className="mx-auto grid w-full max-w-[680px] grid-cols-[20px_minmax(0,1fr)] gap-3 py-2 text-[13px]">
-            <AgentMark />
+            <AgentMark thinking />
             <span className="agent-thinking pt-0.5">{activity}</span>
           </div>
         ) : null}
@@ -1009,6 +1027,19 @@ export const ProducerPanel = ({
           <textarea
             value={instruction}
             onChange={(event) => setInstruction(event.target.value)}
+            onKeyDown={(event) => {
+              if (
+                !shouldSubmitProducerInstruction({
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  isComposing: event.nativeEvent.isComposing,
+                })
+              ) {
+                return;
+              }
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }}
             placeholder={
               pendingQuestions.length > 0
                 ? "Answer the question above…"

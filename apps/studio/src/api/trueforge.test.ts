@@ -9,6 +9,127 @@ afterAll(() => {
 });
 
 describe("Producer event projection", () => {
+  it("restores creator instructions without leaking editor context", async () => {
+    const { describeTurnInput } = await import("./trueforge.js");
+
+    expect(
+      describeTurnInput(
+        {
+          type: "turn.created",
+          input: [
+            {
+              type: "user.message",
+              content: [
+                "PROJECT_ID: project_greenlight",
+                "",
+                "Tighten the opening hook.",
+                "",
+                'EDITOR_TIMELINE (complete current cut):\n{"items":[]}',
+                "",
+                'EDITOR_SELECTION (current emphasis):\n{"item_ids":[]}',
+              ].join("\n"),
+            },
+          ],
+        },
+        "turn_one",
+        "project_greenlight",
+      ),
+    ).toEqual([
+      {
+        id: "turn-input-turn_one-0",
+        kind: "instruction",
+        label: "Tighten the opening hook.",
+        detail: "",
+        sceneIds: [],
+        delivery: "sent",
+      },
+    ]);
+  });
+
+  it("restores creator decisions and hides internal artifact handoffs", async () => {
+    const { describeTurnInput } = await import("./trueforge.js");
+
+    expect(
+      describeTurnInput(
+        {
+          type: "turn.created",
+          input: [
+            {
+              type: "user.message",
+              content:
+                "PROJECT_ID: project_greenlight\n\nGREENLIGHT_ARTIFACT_HANDOFF\ninternal",
+            },
+            {
+              type: "user.tool_response",
+              tool_call_id: "question_one",
+              content: "Use the shorter version",
+            },
+          ],
+        },
+        "turn_two",
+        "project_greenlight",
+      ),
+    ).toEqual([
+      {
+        id: "turn-input-turn_two-1",
+        kind: "instruction",
+        label: "Use the shorter version",
+        detail: "",
+        sceneIds: [],
+        delivery: "sent",
+      },
+    ]);
+  });
+
+  it("keeps the full durable history even when messages have the same text", async () => {
+    const { appendUniqueStudioEvents } = await import("./trueforge.js");
+    const history = Array.from({ length: 64 }, (_, index) => ({
+      id: `event_${index}`,
+      kind: "message" as const,
+      label: "Still working",
+      detail: "",
+      sceneIds: [],
+    }));
+
+    expect(appendUniqueStudioEvents([], history)).toHaveLength(64);
+    expect(
+      appendUniqueStudioEvents(history, [
+        history[0]!,
+        {
+          ...history[0]!,
+          id: "event_64",
+        },
+      ]),
+    ).toHaveLength(65);
+  });
+
+  it("shows a compaction milestone only when TrueForge emits one", async () => {
+    const { describeEvent } = await import("./trueforge.js");
+
+    expect(
+      describeEvent({
+        id: "context_compacted",
+        type: "agent.context.overwrite",
+        reason: "compaction",
+      }),
+    ).toEqual([
+      {
+        id: "context_compacted",
+        kind: "system",
+        label: "Context compacted",
+        detail: "Earlier messages remain available in this history.",
+        sceneIds: [],
+      },
+    ]);
+    expect(
+      describeEvent({
+        id: "context_replaced",
+        type: "agent.context.overwrite",
+        reason: "manual",
+      }),
+    ).toEqual([]);
+  });
+
   it("sends the whole cut and keeps the current selection as emphasis", async () => {
     const { createProducerUserMessage } = await import("./trueforge.js");
     const message = createProducerUserMessage("project_greenlight", {

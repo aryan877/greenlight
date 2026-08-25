@@ -916,7 +916,7 @@ export const App = () => {
           />
         ) : null}
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="relative isolate z-0 flex min-w-0 flex-1 flex-col">
           <ProgramMonitor
             scene={visibleScene}
             artifacts={project.data?.artifacts ?? []}
