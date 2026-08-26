@@ -337,7 +337,8 @@ const TIMELINE_TICK_FRAMES = [
 export const timelineTicks = (duration: number, width: number) => {
   const safeDuration = Math.max(duration, 1 / VIDEO_FPS);
   const pixelsPerSecond = Math.max(width, 1) / safeDuration;
-  const targetFrames = (72 / pixelsPerSecond) * VIDEO_FPS;
+  const minimumTickPixels = 72;
+  const targetFrames = (minimumTickPixels / pixelsPerSecond) * VIDEO_FPS;
   const stepFrames =
     TIMELINE_TICK_FRAMES.find((frames) => frames >= targetFrames) ??
     TIMELINE_TICK_FRAMES.at(-1)!;
@@ -346,7 +347,16 @@ export const timelineTicks = (duration: number, width: number) => {
     { length: Math.floor(safeDuration / stepSeconds) + 1 },
     (_, index) => Math.min(safeDuration, index * stepSeconds),
   );
-  if (ticks.at(-1)! < safeDuration - 1 / VIDEO_FPS) ticks.push(safeDuration);
+  if (ticks.at(-1)! < safeDuration - 1 / VIDEO_FPS) {
+    const previous = ticks.at(-1)!;
+    if (
+      ticks.length > 1 &&
+      (safeDuration - previous) * pixelsPerSecond < minimumTickPixels
+    ) {
+      ticks.pop();
+    }
+    ticks.push(safeDuration);
+  }
   return { stepSeconds, ticks };
 };
 

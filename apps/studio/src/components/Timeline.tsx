@@ -29,6 +29,7 @@ import {
 import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
   useEffect,
   useMemo,
   useRef,
@@ -110,6 +111,7 @@ const LANE_HEIGHT = 32;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 8;
 const ZOOM_STEP = 0.1;
+const ZOOM_SLIDER_STEP = 0.01;
 
 const intersects = (a: DOMRect, b: DOMRect) =>
   a.right >= b.left &&
@@ -236,7 +238,10 @@ export const Timeline = ({
   const gapDragRef = useRef<GapDrag | null>(null);
   const suppressClickRef = useRef<string | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const scrollViewportRef = useRef<HTMLDivElement>(null);
   const timeAxisRef = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef(zoom);
+  const zoomFrameRef = useRef<number | null>(null);
 
   const addTrack = (draft: TrackDraft) => {
     const id = `track_${draft.kind}_${crypto.randomUUID()}`;
@@ -368,6 +373,64 @@ export const Timeline = ({
     observer.observe(timeAxis);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(
+    () => () => {
+      if (zoomFrameRef.current !== null) {
+        cancelAnimationFrame(zoomFrameRef.current);
+      }
+    },
+    [],
+  );
+
+  const setTimelineZoom = (value: number, anchorClientX?: number) => {
+    const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, value));
+    if (Math.abs(next - zoomRef.current) < 0.001) return;
+
+    const viewport = scrollViewportRef.current;
+    const axis = timeAxisRef.current;
+    const axisBounds = axis?.getBoundingClientRect();
+    const anchor =
+      anchorClientX ??
+      (axisBounds ? axisBounds.left + axisBounds.width / 2 : null);
+    const anchorRatio =
+      axisBounds && anchor !== null
+        ? Math.max(
+            0,
+            Math.min(1, (anchor - axisBounds.left) / axisBounds.width),
+          )
+        : 0.5;
+
+    zoomRef.current = next;
+    setZoom(next);
+    if (!viewport || !axis || anchor === null) return;
+
+    if (zoomFrameRef.current !== null) {
+      cancelAnimationFrame(zoomFrameRef.current);
+    }
+    zoomFrameRef.current = requestAnimationFrame(() => {
+      const nextBounds = axis.getBoundingClientRect();
+      const anchoredPosition = nextBounds.left + anchorRatio * nextBounds.width;
+      viewport.scrollLeft += anchoredPosition - anchor;
+      zoomFrameRef.current = null;
+    });
+  };
+
+  const zoomByStep = (direction: -1 | 1) => {
+    setTimelineZoom(zoomRef.current + direction * ZOOM_STEP);
+  };
+
+  const handleTimelineWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    const verticalGesture = Math.abs(event.deltaY) >= Math.abs(event.deltaX);
+    if (!verticalGesture && !event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    const delta = event.deltaY === 0 ? event.deltaX : event.deltaY;
+    const sensitivity = event.ctrlKey || event.metaKey ? 0.01 : 0.0025;
+    setTimelineZoom(
+      zoomRef.current * Math.exp(-delta * sensitivity),
+      event.clientX,
+    );
+  };
 
   const ruler = useMemo(
     () => timelineTicks(duration, trackWidth),
@@ -798,15 +861,23 @@ export const Timeline = ({
             : `${selectedItemIds.length + selectedTrackIds.length + selectedGapIds.length} selected`}
         </span>
         <div className="ml-auto flex items-center gap-1.5">
-          <ZoomOut size={12} className="shrink-0 text-ink-caption" />
+          <IconButton
+            Icon={ZoomOut}
+            label="Zoom timeline out"
+            size="sm"
+            disabled={zoom <= MIN_ZOOM}
+            onClick={() => zoomByStep(-1)}
+          />
           <input
             aria-label="Timeline zoom"
             type="range"
             min={MIN_ZOOM}
             max={MAX_ZOOM}
-            step={ZOOM_STEP}
+            step={ZOOM_SLIDER_STEP}
             value={zoom}
-            onChange={(event) => setZoom(Number(event.currentTarget.value))}
+            onChange={(event) =>
+              setTimelineZoom(Number(event.currentTarget.value))
+            }
             style={
               {
                 "--range-progress": `${((zoom - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)) * 100}%`,
@@ -814,7 +885,13 @@ export const Timeline = ({
             }
             className="precision-range w-24"
           />
-          <ZoomIn size={12} className="shrink-0 text-ink-caption" />
+          <IconButton
+            Icon={ZoomIn}
+            label="Zoom timeline in"
+            size="sm"
+            disabled={zoom >= MAX_ZOOM}
+            onClick={() => zoomByStep(1)}
+          />
           <span className="w-10 text-right font-mono text-[8px] text-ink-caption">
             {Math.round(zoom * 100)}%
           </span>
@@ -854,7 +931,11 @@ export const Timeline = ({
         </div>
       </div>
 
-      <div className="scroll-stable min-h-0 flex-1 overflow-auto bg-surface-sunken">
+      <div
+        ref={scrollViewportRef}
+        className="scroll-stable min-h-0 flex-1 overflow-auto bg-surface-sunken"
+        onWheel={handleTimelineWheel}
+      >
         <div
           className="relative min-h-full"
           style={{

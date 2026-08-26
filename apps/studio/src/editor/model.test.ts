@@ -544,6 +544,18 @@ describe("editor selection", () => {
     expect(formatRulerTime(5.5, detailed.stepSeconds)).toContain("5.50");
   });
 
+  it("keeps the final ruler label from colliding with the previous tick", () => {
+    const compact = timelineTicks(32.4, 760);
+    const finalTick = compact.ticks.at(-1)!;
+    const previousTick = compact.ticks.at(-2)!;
+
+    expect(finalTick).toBe(32.4);
+    expect((finalTick - previousTick) * (760 / 32.4)).toBeGreaterThanOrEqual(
+      72,
+    );
+    expect(previousTick).toBe(25);
+  });
+
   it("rate-stretches a scene without inventing a gap", () => {
     const scene = content.scenes[0]!;
     const operation = changeSceneSpeed(scene, 2);
