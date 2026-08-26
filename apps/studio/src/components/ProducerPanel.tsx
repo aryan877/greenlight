@@ -53,6 +53,19 @@ const eventIcon: Partial<
   approval: CircleDot,
 };
 
+const formatReplyDuration = (durationMs: number) =>
+  `${(durationMs / 1_000).toFixed(1)}s`;
+
+const sessionCostFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 4,
+  maximumFractionDigits: 6,
+});
+
+const formatSessionCost = (costInUsd: number | null) =>
+  costInUsd === null ? "—" : sessionCostFormatter.format(costInUsd);
+
 const AgentMark = ({ thinking = false }: { thinking?: boolean }) => (
   <span className="mt-1 grid size-5 shrink-0 place-items-center text-action">
     <GreenlightMark
@@ -781,6 +794,7 @@ export const ProducerPanel = ({
   contextArtifacts,
   draftIntent,
   events,
+  sessionCostInUsd,
   activity,
   pendingApprovals,
   pendingQuestions,
@@ -810,6 +824,7 @@ export const ProducerPanel = ({
   contextArtifacts: Artifact[];
   draftIntent: ProducerDraftIntent | null;
   events: StudioAgentEvent[];
+  sessionCostInUsd: number | null;
   activity: string | null;
   pendingApprovals: PendingToolApproval[];
   pendingQuestions: PendingQuestion[];
@@ -968,9 +983,19 @@ export const ProducerPanel = ({
                     className="grid grid-cols-[20px_minmax(0,1fr)] gap-3 py-1"
                   >
                     <AgentMark />
-                    <p className="whitespace-pre-wrap text-[14px] leading-6 text-ink">
-                      {event.label}
-                    </p>
+                    <div className="min-w-0">
+                      <p className="whitespace-pre-wrap text-[14px] leading-6 text-ink">
+                        {event.label}
+                      </p>
+                      {event.durationMs === undefined ? null : (
+                        <span
+                          className="mt-1 block font-mono text-[10px] text-ink-secondary"
+                          title={`Completed in ${formatReplyDuration(event.durationMs)}`}
+                        >
+                          {formatReplyDuration(event.durationMs)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 );
               }
@@ -1272,7 +1297,13 @@ export const ProducerPanel = ({
             className="min-w-[180px] flex-1 resize-none border-0 bg-transparent px-1 text-[14px] leading-6 text-ink outline-none placeholder:text-ink-caption disabled:cursor-not-allowed disabled:bg-surface-sunken/40"
           />
         </div>
-        <div className="flex items-center justify-end px-3 pb-2.5 pt-1">
+        <div className="flex items-center px-3 pb-2.5 pt-1">
+          <span
+            className="mr-auto font-mono text-[10px] text-ink-secondary"
+            title="Provider-reported cost for this TrueForge session"
+          >
+            Session cost {formatSessionCost(sessionCostInUsd)}
+          </span>
           <input
             ref={fileInputRef}
             type="file"
@@ -1298,7 +1329,7 @@ export const ProducerPanel = ({
             type="submit"
             aria-label="Send instruction"
             disabled={!instruction.trim() || isSending || conversationPaused}
-            className="ml-auto grid size-8 place-items-center rounded-full bg-control text-control-ink transition-colors hover:bg-control-hover disabled:cursor-not-allowed disabled:opacity-30"
+            className="ml-1 grid size-8 place-items-center rounded-full bg-control text-control-ink transition-colors hover:bg-control-hover disabled:cursor-not-allowed disabled:opacity-30"
           >
             <ArrowUp size={15} strokeWidth={2.2} />
           </button>

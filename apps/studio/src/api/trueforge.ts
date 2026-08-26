@@ -35,6 +35,7 @@ export type StudioAgentEvent = {
   artifactId?: string;
   status?: "running" | "done" | "error";
   subagent?: StudioSubagentRun;
+  durationMs?: number;
 };
 
 export type StudioSubagentStep = {
@@ -222,12 +223,67 @@ type TurnDoneState = {
   output?: unknown;
   message?: unknown;
   reason?: unknown;
+  completedAt?: string;
+  completed_at?: string;
+  metrics?: Record<string, unknown>;
 };
 
 const turnDoneState = (event: WireEvent): TurnDoneState | null =>
   event.type === "turn.done" && event.state && typeof event.state === "object"
     ? (event.state as TurnDoneState)
     : null;
+
+const finiteNonNegativeNumber = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+
+export const turnCostInUsd = (event: WireEvent): number | null => {
+  const metrics = turnDoneState(event)?.metrics;
+  if (!metrics) return null;
+  return finiteNonNegativeNumber(
+    metrics.totalCostInUsd ?? metrics.total_cost_in_usd,
+  );
+};
+
+const eventTimestampMs = (event: WireEvent): number | null => {
+  const value = event.createdAt ?? event.created_at;
+  if (typeof value !== "string") return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+};
+
+export const turnDurationMs = (
+  createdEvent: WireEvent | null | undefined,
+  doneEvent: WireEvent,
+): number | null => {
+  if (createdEvent?.type !== "turn.created" || doneEvent.type !== "turn.done") {
+    return null;
+  }
+  const startedAt = eventTimestampMs(createdEvent);
+  const state = turnDoneState(doneEvent);
+  const completedValue = state?.completedAt ?? state?.completed_at;
+  const completedAt =
+    typeof completedValue === "string"
+      ? Date.parse(completedValue)
+      : eventTimestampMs(doneEvent);
+  if (
+    startedAt === null ||
+    completedAt === null ||
+    !Number.isFinite(completedAt) ||
+    completedAt < startedAt
+  ) {
+    return null;
+  }
+  return completedAt - startedAt;
+};
+
+export const totalSessionCostInUsd = (
+  costsByTurn: ReadonlyMap<string, number>,
+): number | null => {
+  if (costsByTurn.size === 0) return null;
+  return [...costsByTurn.values()].reduce((total, cost) => total + cost, 0);
+};
 
 export const terminalFailureMessage = (event: WireEvent): string | null => {
   const state = turnDoneState(event);
@@ -798,7 +854,10 @@ const creatorFacingSentence = (value: string): string | null => {
   );
 };
 
-export const describeEvent = (event: WireEvent): StudioAgentEvent[] => {
+export const describeEvent = (
+  event: WireEvent,
+  context: { durationMs?: number } = {},
+): StudioAgentEvent[] => {
   const type = String(event.type ?? "agent.event");
   const childEvent = describeSubagentEvent(event);
   if (childEvent) return childEvent;
@@ -842,6 +901,9 @@ export const describeEvent = (event: WireEvent): StudioAgentEvent[] => {
         label: humanSentence,
         detail: "",
         sceneIds: [],
+        ...(context.durationMs === undefined
+          ? {}
+          : { durationMs: context.durationMs }),
       });
     }
     return output;
@@ -857,6 +919,8 @@ export const useProducerAgent = (
   const activeProjectId = useRef(projectId);
   const onFocusRef = useRef(onFocus);
   const eventStore = useRef(new Map<string, WireEvent>());
+  const turnCreatedEvents = useRef(new Map<string, WireEvent>());
+  const turnCostsInUsd = useRef(new Map<string, number>());
   const outgoingStore = useRef(new Map<string, ProducerSendInput>());
   const [events, setEvents] = useState<StudioAgentEvent[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<
@@ -866,6 +930,7 @@ export const useProducerAgent = (
     [],
   );
   const [activity, setActivity] = useState<string | null>(null);
+  const [sessionCostInUsd, setSessionCostInUsd] = useState<number | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
   const queryClient = useQueryClient();
 
@@ -886,8 +951,24 @@ export const useProducerAgent = (
     ) => {
       let event = incoming;
       const terminal = turnDoneState(incoming);
+      let durationMs: number | undefined;
+      if (sourceTurnId && incoming.type === "turn.created") {
+        turnCreatedEvents.current.set(sourceTurnId, incoming);
+      }
       if (terminal) {
         setActivity(null);
+        if (sourceTurnId) {
+          const measuredDuration = turnDurationMs(
+            turnCreatedEvents.current.get(sourceTurnId),
+            incoming,
+          );
+          if (measuredDuration !== null) durationMs = measuredDuration;
+          const reportedCost = turnCostInUsd(incoming);
+          if (reportedCost !== null) {
+            turnCostsInUsd.current.set(sourceTurnId, reportedCost);
+            setSessionCostInUsd(totalSessionCostInUsd(turnCostsInUsd.current));
+          }
+        }
         if (
           terminal.status === "done" &&
           terminal.output &&
@@ -1004,7 +1085,7 @@ export const useProducerAgent = (
         }
       }
 
-      appendEvents(describeEvent(event));
+      appendEvents(describeEvent(event, { durationMs }));
       return event;
     },
     [appendEvents],
@@ -1026,9 +1107,12 @@ export const useProducerAgent = (
       if (activeProjectId.current !== historyProjectId) return [];
 
       eventStore.current.clear();
+      turnCreatedEvents.current.clear();
+      turnCostsInUsd.current.clear();
       setEvents([]);
       setPendingApprovals([]);
       setPendingQuestions([]);
+      setSessionCostInUsd(null);
       for (const item of history) {
         if (item.event.type === "turn.created") {
           appendEvents(
@@ -1191,11 +1275,14 @@ export const useProducerAgent = (
     activeProjectId.current = projectId;
     sessionId.current = null;
     eventStore.current.clear();
+    turnCreatedEvents.current.clear();
+    turnCostsInUsd.current.clear();
     outgoingStore.current.clear();
     setEvents([]);
     setPendingApprovals([]);
     setPendingQuestions([]);
     setActivity(null);
+    setSessionCostInUsd(null);
     setIsRestoring(Boolean(projectId));
     if (!projectId) return;
 
@@ -1636,6 +1723,7 @@ export const useProducerAgent = (
     events,
     pendingApprovals,
     pendingQuestions,
+    sessionCostInUsd,
     sessionId: sessionId.current,
     send: sendInstruction,
     retryInstruction,

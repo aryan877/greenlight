@@ -1733,6 +1733,7 @@ export const App = () => {
                     )}
                     draftIntent={draftIntent}
                     events={producer.events}
+                    sessionCostInUsd={producer.sessionCostInUsd}
                     activity={producer.activity}
                     pendingApprovals={producer.pendingApprovals}
                     pendingQuestions={producer.pendingQuestions}

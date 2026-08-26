@@ -15,6 +15,7 @@
     "dev:render": "pnpm --filter @greenlight/render studio",
     "dev:studio": "pnpm --filter @greenlight/studio dev",
     "studio:seed": "tsx scripts/seed-studio.ts",
+    "trueforge": "node --env-file-if-exists=.env node_modules/@truefoundry/trueforge/dist/cli.js",
     "trueforge:configure": "node --env-file=.env scripts/configure-trueforge.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -24,11 +25,17 @@
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {
+    "@truefoundry/trueforge": "0.1.4",
     "@types/node": "^22.15.30",
     "prettier": "^3.6.2",
     "tsx": "^4.20.5",
     "turbo": "^2.10.11",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@truefoundry/trueforge-core@0.1.4": "patches/@truefoundry__trueforge-core@0.1.4.patch"
+    }
   }
 }

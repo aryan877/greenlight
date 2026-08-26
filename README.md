@@ -147,8 +147,10 @@ The judged configuration uses OpenRouter, but TrueForge is not locked to it. Set
 Start TrueForge:
 
 ```bash
-npx @truefoundry/trueforge
+pnpm trueforge
 ```
+
+The project pins TrueForge so every machine uses the same runtime. A small checked-in package patch maps OpenRouter's provider-reported `usage.cost` into TrueForge's normal cost metric; Greenlight never estimates spend from token counts.
 
 Standalone TrueForge includes a local sandbox fallback on supported macOS and Linux hosts. Confirm it before a demo with `GET /api/v1/capabilities`; `sandbox.enabled` must be `true`. A cloud sandbox provider is optional for the local judged flow.
 

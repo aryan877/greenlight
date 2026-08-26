@@ -453,6 +453,84 @@ describe("Producer event projection", () => {
     ).toContain("stopped");
   });
 
+  it("derives durable reply duration from the TrueForge turn lifecycle", async () => {
+    const { describeEvent, turnDurationMs } = await import("./trueforge.js");
+    const created = {
+      id: "turn_created",
+      type: "turn.created",
+      createdAt: "2026-08-26T04:04:30.670Z",
+    };
+    const done = {
+      id: "turn_done",
+      type: "turn.done",
+      state: {
+        status: "done",
+        completedAt: "2026-08-26T04:04:34.905Z",
+      },
+    };
+
+    expect(turnDurationMs(created, done)).toBe(4_235);
+    expect(
+      describeEvent(
+        {
+          id: "reply",
+          type: "model.message",
+          content: "The opening is ready.",
+        },
+        { durationMs: 4_235 },
+      ),
+    ).toEqual([
+      {
+        id: "reply",
+        kind: "message",
+        label: "The opening is ready.",
+        detail: "",
+        sceneIds: [],
+        durationMs: 4_235,
+      },
+    ]);
+    expect(
+      turnDurationMs(created, {
+        ...done,
+        state: {
+          ...done.state,
+          completedAt: "2026-08-26T04:04:29.000Z",
+        },
+      }),
+    ).toBeNull();
+  });
+
+  it("deduplicates provider-reported cost by durable turn", async () => {
+    const { totalSessionCostInUsd, turnCostInUsd } =
+      await import("./trueforge.js");
+    const camelCost = turnCostInUsd({
+      type: "turn.done",
+      state: { metrics: { totalCostInUsd: 0.0042 } },
+    });
+    const snakeCost = turnCostInUsd({
+      type: "turn.done",
+      state: { metrics: { total_cost_in_usd: 0.0018 } },
+    });
+
+    expect(camelCost).toBe(0.0042);
+    expect(snakeCost).toBe(0.0018);
+    expect(
+      totalSessionCostInUsd(
+        new Map([
+          ["turn_one", camelCost!],
+          ["turn_two", snakeCost!],
+        ]),
+      ),
+    ).toBeCloseTo(0.006);
+    expect(totalSessionCostInUsd(new Map())).toBeNull();
+    expect(
+      turnCostInUsd({
+        type: "turn.done",
+        state: { metrics: { totalCostInUsd: -1 } },
+      }),
+    ).toBeNull();
+  });
+
   it("keeps runtime identifiers out without swallowing a valid reply", async () => {
     const { describeEvent } = await import("./trueforge.js");
     const message = (content: string) => ({
