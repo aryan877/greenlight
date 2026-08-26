@@ -1,5 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { EditorPatchInput } from "@greenlight/contracts";
+import type {
+  EditorPatchInput,
+  GenerateSoundEffectInput,
+  MediaLibraryResult,
+} from "@greenlight/contracts";
 
 import { greenlightApi } from "./greenlight.js";
 
@@ -12,6 +16,9 @@ export const greenlightKeys = {
     [...greenlightKeys.all, "artifacts", artifactId] as const,
   voice: () => [...greenlightKeys.all, "voice"] as const,
   youtube: () => [...greenlightKeys.all, "youtube"] as const,
+  mediaLibrary: () => [...greenlightKeys.all, "media-library"] as const,
+  mediaSearch: (query: string, use: string) =>
+    [...greenlightKeys.mediaLibrary(), "search", use, query] as const,
 };
 
 export const useProjects = () =>
@@ -42,7 +49,10 @@ export const useCreateProject = () => {
 export const useContentPackage = (artifactId: string | null) =>
   useQuery({
     queryKey: greenlightKeys.artifact(artifactId ?? "none"),
-    queryFn: () => greenlightApi.getContentPackage(artifactId!),
+    queryFn: async () => ({
+      artifactId: artifactId!,
+      content: await greenlightApi.getContentPackage(artifactId!),
+    }),
     enabled: Boolean(artifactId),
   });
 
@@ -60,6 +70,53 @@ export const useYouTubeConnection = () =>
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
+
+export const useMediaLibraryCapabilities = () =>
+  useQuery({
+    queryKey: greenlightKeys.mediaLibrary(),
+    queryFn: greenlightApi.getMediaLibraryCapabilities,
+    staleTime: 60_000,
+  });
+
+export const useMediaLibrarySearch = (
+  query: string,
+  use: "broll" | "music" | "sound_effect",
+  enabled = true,
+) =>
+  useQuery({
+    queryKey: greenlightKeys.mediaSearch(query, use),
+    queryFn: () => greenlightApi.searchMediaLibrary({ query, use, limit: 12 }),
+    enabled: enabled && query.trim().length >= 2,
+    staleTime: 60_000,
+  });
+
+export const useImportMediaLibraryAsset = (projectId: string | null) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (result: MediaLibraryResult) =>
+      greenlightApi.importMediaLibraryAsset(projectId!, result),
+    onSuccess: async () => {
+      if (!projectId) return;
+      await client.invalidateQueries({
+        queryKey: greenlightKeys.project(projectId),
+      });
+    },
+  });
+};
+
+export const useGenerateSoundEffect = (projectId: string | null) => {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Omit<GenerateSoundEffectInput, "project_id">) =>
+      greenlightApi.generateSoundEffect(projectId!, input),
+    onSuccess: async () => {
+      if (!projectId) return;
+      await client.invalidateQueries({
+        queryKey: greenlightKeys.project(projectId),
+      });
+    },
+  });
+};
 
 export const useVoiceSample = (projectId: string) =>
   useMutation({

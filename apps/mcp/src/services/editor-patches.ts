@@ -66,15 +66,26 @@ export const saveEditorPatch = async (input: {
   }
   for (const track of revised.audio_tracks ?? []) {
     for (const clip of track.clips) {
-      requireArtifactKind(clip.artifact_id, ["narration"]);
+      requireArtifactKind(clip.artifact_id, ["narration", "audio"]);
       requireArtifactKind(clip.captions_artifact_id, ["caption"]);
       requireArtifactKind(clip.transcript_artifact_id, ["transcript"]);
+    }
+  }
+  for (const track of revised.video_tracks ?? []) {
+    for (const clip of track.clips ?? []) {
+      requireArtifactKind(clip.artifact_id, ["video"]);
+      requireArtifactKind(clip.provenance_artifact_id, ["media_license"]);
     }
   }
   for (const track of revised.caption_tracks ?? []) {
     for (const clip of track.clips ?? []) {
       requireArtifactKind(clip.artifact_id, ["caption"]);
       requireArtifactKind(clip.transcript_artifact_id, ["transcript"]);
+    }
+  }
+  for (const track of revised.transition_tracks ?? []) {
+    for (const clip of track.clips) {
+      requireArtifactKind(clip.sound_artifact_id, ["audio", "narration"]);
     }
   }
   requireArtifactKind(revised.release.thumbnail_artifact_id, ["thumbnail"]);
@@ -120,10 +131,21 @@ export const saveEditorPatch = async (input: {
         requireArtifactScope(clip.transcript_artifact_id);
       }
     }
+    if (operation.type === "upsert_video_track") {
+      for (const clip of operation.track.clips ?? []) {
+        requireArtifactScope(clip.artifact_id);
+        requireArtifactScope(clip.provenance_artifact_id);
+      }
+    }
     if (operation.type === "upsert_caption_track") {
       for (const clip of operation.track.clips ?? []) {
         requireArtifactScope(clip.artifact_id);
         requireArtifactScope(clip.transcript_artifact_id);
+      }
+    }
+    if (operation.type === "upsert_transition_track") {
+      for (const clip of operation.track.clips) {
+        requireArtifactScope(clip.sound_artifact_id);
       }
     }
     if (

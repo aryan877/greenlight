@@ -306,6 +306,220 @@ const baseTimelineTrackSchema = z.object({
 
 export const videoTrackSchema = baseTimelineTrackSchema.extend({
   kind: z.literal("video"),
+  visible: z.boolean().default(true),
+  clips: z
+    .array(
+      z
+        .object({
+          id: audioClipIdSchema,
+          scene_id: idSchema,
+          label: z.string().trim().min(1).max(90),
+          artifact_id: idSchema,
+          timeline_start_seconds: frameAlignedSecondsSchema
+            .nonnegative()
+            .max(120),
+          source_in_seconds: z.number().nonnegative().default(0),
+          source_out_seconds: z.number().positive(),
+          source_duration_seconds: z.number().positive(),
+          duration_seconds: frameAlignedSecondsSchema
+            .min(1 / VIDEO_FPS)
+            .max(120),
+          playback_rate: z.number().min(0.25).max(4).default(1),
+          fit: z.enum(["cover", "contain"]).default("cover"),
+          opacity: z.number().min(0).max(1).default(1),
+          provenance_artifact_id: idSchema.nullable().default(null),
+        })
+        .superRefine((clip, context) => {
+          if (clip.source_out_seconds <= clip.source_in_seconds) {
+            context.addIssue({
+              code: "custom",
+              message: "Video source out must be after source in",
+              path: ["source_out_seconds"],
+            });
+          }
+          if (clip.source_out_seconds > clip.source_duration_seconds) {
+            context.addIssue({
+              code: "custom",
+              message: "Video source out exceeds available media",
+              path: ["source_out_seconds"],
+            });
+          }
+        }),
+    )
+    .optional(),
+});
+
+export const transitionPresetIds = [
+  "clean_cut",
+  "crossfade",
+  "dip_to_black",
+  "blur_dissolve",
+  "push",
+  "slide",
+  "zoom_through",
+  "whip",
+  "mask_reveal",
+  "glitch",
+  "light_flash",
+  "film_burn",
+] as const;
+
+export const transitionPresetIdSchema = z.enum(transitionPresetIds);
+
+export const transitionPresetRegistry = {
+  clean_cut: { label: "Clean cut", default_duration_seconds: 1 / VIDEO_FPS },
+  crossfade: { label: "Crossfade", default_duration_seconds: 12 / VIDEO_FPS },
+  dip_to_black: {
+    label: "Dip to black",
+    default_duration_seconds: 15 / VIDEO_FPS,
+  },
+  blur_dissolve: {
+    label: "Blur dissolve",
+    default_duration_seconds: 14 / VIDEO_FPS,
+  },
+  push: { label: "Push", default_duration_seconds: 10 / VIDEO_FPS },
+  slide: { label: "Slide", default_duration_seconds: 10 / VIDEO_FPS },
+  zoom_through: {
+    label: "Zoom through",
+    default_duration_seconds: 10 / VIDEO_FPS,
+  },
+  whip: { label: "Whip", default_duration_seconds: 8 / VIDEO_FPS },
+  mask_reveal: {
+    label: "Mask reveal",
+    default_duration_seconds: 14 / VIDEO_FPS,
+  },
+  glitch: { label: "Glitch", default_duration_seconds: 8 / VIDEO_FPS },
+  light_flash: {
+    label: "Light flash",
+    default_duration_seconds: 6 / VIDEO_FPS,
+  },
+  film_burn: {
+    label: "Film burn",
+    default_duration_seconds: 12 / VIDEO_FPS,
+  },
+} as const satisfies Record<
+  (typeof transitionPresetIds)[number],
+  { label: string; default_duration_seconds: number }
+>;
+
+export const soundEffectPresetIds = [
+  "whoosh",
+  "pop",
+  "impact",
+  "riser",
+  "drone",
+  "notification",
+  "glitch",
+  "transition_sweep",
+  "bass_hit",
+  "ambient_noise",
+] as const;
+
+export const soundEffectPresetIdSchema = z.enum(soundEffectPresetIds);
+
+export const soundEffectPresetRegistry = {
+  whoosh: { label: "Whoosh", default_duration_seconds: 0.65 },
+  pop: { label: "Pop", default_duration_seconds: 0.2 },
+  impact: { label: "Impact", default_duration_seconds: 0.8 },
+  riser: { label: "Riser", default_duration_seconds: 1.5 },
+  drone: { label: "Drone", default_duration_seconds: 3 },
+  notification: { label: "Notification", default_duration_seconds: 0.45 },
+  glitch: { label: "Glitch", default_duration_seconds: 0.35 },
+  transition_sweep: {
+    label: "Transition sweep",
+    default_duration_seconds: 0.75,
+  },
+  bass_hit: { label: "Bass hit", default_duration_seconds: 0.7 },
+  ambient_noise: { label: "Ambient noise", default_duration_seconds: 4 },
+} as const satisfies Record<
+  (typeof soundEffectPresetIds)[number],
+  { label: string; default_duration_seconds: number }
+>;
+
+export const generateSoundEffectInputSchema = z.object({
+  project_id: idSchema,
+  preset_id: soundEffectPresetIdSchema,
+  duration_seconds: frameAlignedSecondsSchema
+    .min(3 / VIDEO_FPS)
+    .max(10)
+    .optional(),
+  intensity: z.number().min(0.1).max(1).default(0.75),
+  variant: z.number().int().min(0).max(7).default(0),
+});
+
+export const transitionTimelineClipSchema = z.object({
+  id: audioClipIdSchema,
+  label: z.string().trim().min(1).max(90),
+  from_item_id: idSchema,
+  to_item_id: idSchema,
+  cut_seconds: frameAlignedSecondsSchema.nonnegative().max(120),
+  duration_seconds: frameAlignedSecondsSchema
+    .min(1 / VIDEO_FPS)
+    .max(3)
+    .default(0.4),
+  preset_id: transitionPresetIdSchema,
+  parameters: z
+    .object({
+      direction: z.enum(["left", "right", "up", "down"]).optional(),
+      intensity: z.number().min(0).max(1).optional(),
+      blur: z.number().min(0).max(80).optional(),
+      color: z
+        .string()
+        .regex(/^#[a-f0-9]{6}$/i)
+        .optional(),
+    })
+    .default({}),
+  sound_artifact_id: idSchema.nullable().default(null),
+});
+
+export const transitionTrackSchema = baseTimelineTrackSchema.extend({
+  kind: z.literal("transition"),
+  visible: z.boolean().default(true),
+  clips: z.array(transitionTimelineClipSchema).default([]),
+});
+
+export const mediaLicenseReceiptSchema = z.object({
+  provider: z.enum(["pexels", "openverse", "generated", "local"]),
+  provider_asset_id: z.string().trim().min(1).max(160),
+  source_url: z.string().url(),
+  creator: z.string().trim().min(1).max(240).nullable().default(null),
+  license: z.string().trim().min(1).max(120),
+  license_url: z.string().url().nullable().default(null),
+  attribution: z.string().trim().max(600).nullable().default(null),
+  commercial_use: z.boolean(),
+  verified_at: z.string().datetime(),
+});
+
+export const mediaLibraryResultSchema = z.object({
+  provider: z.enum(["pexels", "openverse"]),
+  provider_asset_id: z.string().trim().min(1).max(160),
+  kind: z.enum(["video", "audio"]),
+  use: z.enum(["broll", "music", "sound_effect"]),
+  title: z.string().trim().min(1).max(240),
+  preview_url: z.string().url(),
+  source_url: z.string().url(),
+  duration_seconds: z.number().positive().nullable().default(null),
+  width: z.number().int().positive().nullable().default(null),
+  height: z.number().int().positive().nullable().default(null),
+  creator: z.string().trim().min(1).max(240).nullable().default(null),
+  license: z.string().trim().min(1).max(120),
+  license_url: z.string().url().nullable().default(null),
+  attribution: z.string().trim().max(600).nullable().default(null),
+});
+
+export const searchMediaLibraryInputSchema = z.object({
+  query: z.string().trim().min(2).max(160),
+  use: z.enum(["broll", "music", "sound_effect"]),
+  provider: z.enum(["pexels", "openverse"]).optional(),
+  orientation: z.enum(["landscape", "portrait", "square"]).optional(),
+  limit: z.number().int().min(1).max(20).default(8),
+});
+
+export const importMediaLibraryAssetInputSchema = z.object({
+  project_id: idSchema,
+  provider: z.enum(["pexels", "openverse"]),
+  provider_asset_id: z.string().trim().min(1).max(160),
+  use: z.enum(["broll", "music", "sound_effect"]),
 });
 
 export const captionTimelineClipSchema = z.object({
@@ -364,6 +578,7 @@ export const contentPackageSchema = z
     audio_tracks: z.array(audioTrackSchema).optional(),
     video_tracks: z.array(videoTrackSchema).optional(),
     caption_tracks: z.array(captionTimelineTrackSchema).optional(),
+    transition_tracks: z.array(transitionTrackSchema).optional(),
     track_order: z.array(idSchema).optional(),
     metadata: youtubeMetadataSchema,
     release: releasePlanSchema.default(() => ({
@@ -379,6 +594,7 @@ export const contentPackageSchema = z
         audio_tracks: audioTracks,
         video_tracks: videoTracks,
         caption_tracks: captionTracks,
+        transition_tracks: transitionTracks,
         track_order: trackOrder,
       },
       context,
@@ -455,6 +671,7 @@ export const contentPackageSchema = z
       for (const [trackKind, tracks] of [
         ["video_tracks", videoTracks ?? [{ id: "track_video" }]],
         ["caption_tracks", captionTracks ?? [{ id: "track_captions" }]],
+        ["transition_tracks", transitionTracks ?? []],
       ] as const) {
         for (const [trackIndex, track] of tracks.entries()) {
           if (trackIds.has(track.id)) {
@@ -465,6 +682,88 @@ export const contentPackageSchema = z
             });
           }
           trackIds.add(track.id);
+        }
+      }
+      for (const [trackIndex, track] of (videoTracks ?? []).entries()) {
+        for (const [clipIndex, clip] of (track.clips ?? []).entries()) {
+          if (!sceneIds.has(clip.scene_id)) {
+            context.addIssue({
+              code: "custom",
+              message: `Video clip references missing scene ${clip.scene_id}`,
+              path: [
+                "video_tracks",
+                trackIndex,
+                "clips",
+                clipIndex,
+                "scene_id",
+              ],
+            });
+          }
+          if (clipIds.has(clip.id)) {
+            context.addIssue({
+              code: "custom",
+              message: `Duplicate timeline clip ${clip.id}`,
+              path: ["video_tracks", trackIndex, "clips", clipIndex, "id"],
+            });
+          }
+          clipIds.add(clip.id);
+          if (
+            clip.timeline_start_seconds + clip.duration_seconds >
+            seconds + 1 / VIDEO_FPS
+          ) {
+            context.addIssue({
+              code: "custom",
+              message: "Video clip exceeds the production duration",
+              path: [
+                "video_tracks",
+                trackIndex,
+                "clips",
+                clipIndex,
+                "duration_seconds",
+              ],
+            });
+          }
+          const available =
+            (clip.source_out_seconds - clip.source_in_seconds) /
+            clip.playback_rate;
+          if (clip.duration_seconds > available + 1 / VIDEO_FPS) {
+            context.addIssue({
+              code: "custom",
+              message: "Video clip duration exceeds its source range",
+              path: [
+                "video_tracks",
+                trackIndex,
+                "clips",
+                clipIndex,
+                "duration_seconds",
+              ],
+            });
+          }
+        }
+      }
+      for (const [trackIndex, track] of (transitionTracks ?? []).entries()) {
+        for (const [clipIndex, clip] of track.clips.entries()) {
+          if (clipIds.has(clip.id)) {
+            context.addIssue({
+              code: "custom",
+              message: `Duplicate timeline clip ${clip.id}`,
+              path: ["transition_tracks", trackIndex, "clips", clipIndex, "id"],
+            });
+          }
+          clipIds.add(clip.id);
+          if (clip.cut_seconds > seconds) {
+            context.addIssue({
+              code: "custom",
+              message: "Transition cut is outside the production",
+              path: [
+                "transition_tracks",
+                trackIndex,
+                "clips",
+                clipIndex,
+                "cut_seconds",
+              ],
+            });
+          }
         }
       }
       for (const [trackIndex, track] of (captionTracks ?? []).entries()) {
@@ -634,6 +933,7 @@ export const contentPackageSchema = z
         ...(videoTracks?.map((track) => track.id) ?? ["track_video"]),
         ...effectiveAudioIds,
         ...(captionTracks?.map((track) => track.id) ?? ["track_captions"]),
+        ...(transitionTracks?.map((track) => track.id) ?? []),
       ];
       if (
         trackOrder &&
@@ -652,8 +952,20 @@ export const contentPackageSchema = z
 
 export type AudioTrack = z.infer<typeof audioTrackSchema>;
 export type VideoTrack = z.infer<typeof videoTrackSchema>;
+export type VideoTimelineClip = NonNullable<VideoTrack["clips"]>[number];
 export type CaptionTimelineTrack = z.infer<typeof captionTimelineTrackSchema>;
 export type CaptionTimelineClip = z.infer<typeof captionTimelineClipSchema>;
+export type TransitionTrack = z.infer<typeof transitionTrackSchema>;
+export type TransitionTimelineClip = z.infer<
+  typeof transitionTimelineClipSchema
+>;
+export type TransitionPresetId = z.infer<typeof transitionPresetIdSchema>;
+export type SoundEffectPresetId = z.infer<typeof soundEffectPresetIdSchema>;
+export type GenerateSoundEffectInput = z.infer<
+  typeof generateSoundEffectInputSchema
+>;
+export type MediaLibraryResult = z.infer<typeof mediaLibraryResultSchema>;
+export type MediaLicenseReceipt = z.infer<typeof mediaLicenseReceiptSchema>;
 export type EffectiveCaptionTimelineTrack = Omit<
   CaptionTimelineTrack,
   "clips"
@@ -663,8 +975,18 @@ export type EffectiveCaptionTimelineTrack = Omit<
 
 export const effectiveVideoTracks = (content: ContentPackage): VideoTrack[] =>
   content.video_tracks ?? [
-    { id: "track_video", name: "Video", kind: "video", protected: true },
+    {
+      id: "track_video",
+      name: "Video",
+      kind: "video",
+      protected: true,
+      visible: true,
+    },
   ];
+
+export const effectiveTransitionTracks = (
+  content: ContentPackage,
+): TransitionTrack[] => content.transition_tracks ?? [];
 
 export const effectiveCaptionTracks = (
   content: ContentPackage,
@@ -812,6 +1134,7 @@ export const materializeIndependentTimeline = (
       snapSecondsToFrame(scene.duration_seconds),
   }));
   content.caption_tracks = effectiveCaptionTracks(content);
+  content.video_tracks = effectiveVideoTracks(content);
   return content;
 };
 
@@ -828,12 +1151,14 @@ export const artifactKindSchema = z.enum([
   "content_package",
   "image",
   "narration",
+  "audio",
   "video",
   "thumbnail",
   "caption",
   "transcript",
   "edit_patch",
   "quality_report",
+  "media_license",
   "release_report",
 ]);
 
@@ -1050,6 +1375,7 @@ export const editorTrackIdSchema = z.union([
     "transcript",
     "evidence",
     "music",
+    "transition",
     "release",
   ]),
   idSchema,
@@ -1059,6 +1385,7 @@ export const editorTimelineItemKindSchema = z.enum([
   "video",
   "audio",
   "caption",
+  "transition",
 ]);
 
 const timelineItemIdPrefix = (
@@ -1081,6 +1408,9 @@ export const audioTimelineItemId = (clipId: string) =>
 
 export const captionTimelineItemId = (sceneId: string) =>
   timelineItemId(editorTimelineItemKindSchema.enum.caption, sceneId);
+
+export const transitionTimelineItemId = (clipId: string) =>
+  timelineItemId(editorTimelineItemKindSchema.enum.transition, clipId);
 
 export const editorTimelineTrackSchema = z.object({
   id: editorTrackIdSchema,
@@ -1105,6 +1435,17 @@ export const editorTimelineItemSchema = z
     start_seconds: frameAlignedSecondsSchema.nonnegative(),
     end_seconds: frameAlignedSecondsSchema.positive(),
     artifact_ids: z.array(idSchema).default([]),
+    transition: transitionTimelineClipSchema
+      .pick({
+        from_item_id: true,
+        to_item_id: true,
+        cut_seconds: true,
+        duration_seconds: true,
+        preset_id: true,
+        parameters: true,
+        sound_artifact_id: true,
+      })
+      .optional(),
   })
   .superRefine((item, context) => {
     if (!item.id.startsWith(timelineItemIdPrefix(item.kind))) {
@@ -1119,6 +1460,20 @@ export const editorTimelineItemSchema = z
         code: "custom",
         message: "Timeline item end must be after start",
         path: ["end_seconds"],
+      });
+    }
+    if (item.kind === "transition" && !item.transition) {
+      context.addIssue({
+        code: "custom",
+        message: "Transition timeline items require transition details",
+        path: ["transition"],
+      });
+    }
+    if (item.kind !== "transition" && item.transition) {
+      context.addIssue({
+        code: "custom",
+        message: "Only transition items may include transition details",
+        path: ["transition"],
       });
     }
   });
@@ -1329,6 +1684,38 @@ export const editorPatchOperationSchema = z.discriminatedUnion("type", [
     type: z.literal("remove_video_track"),
     track_id: idSchema,
   }),
+  z
+    .object({
+      type: z.literal("update_video_clip"),
+      item_id: idSchema,
+      clip_id: audioClipIdSchema,
+      target_track_id: idSchema.optional(),
+      artifact_id: idSchema.optional(),
+      label: z.string().trim().min(1).max(90).optional(),
+      timeline_start_seconds: frameAlignedSecondsSchema
+        .nonnegative()
+        .max(120)
+        .optional(),
+      source_in_seconds: z.number().nonnegative().optional(),
+      source_out_seconds: z.number().positive().optional(),
+      duration_seconds: frameAlignedSecondsSchema
+        .min(1 / VIDEO_FPS)
+        .max(120)
+        .optional(),
+      playback_rate: z.number().min(0.25).max(4).optional(),
+      fit: z.enum(["cover", "contain"]).optional(),
+      opacity: z.number().min(0).max(1).optional(),
+    })
+    .refine(
+      ({ type: _type, item_id: _itemId, clip_id: _clipId, ...patch }) =>
+        Object.values(patch).some((value) => value !== undefined),
+      { message: "Video clip patch must change at least one field" },
+    ),
+  z.object({
+    type: z.literal("remove_video_clip"),
+    item_id: idSchema,
+    clip_id: audioClipIdSchema,
+  }),
   z.object({
     type: z.literal("upsert_caption_track"),
     track: captionTimelineTrackSchema,
@@ -1357,6 +1744,39 @@ export const editorPatchOperationSchema = z.discriminatedUnion("type", [
         Object.values(patch).some((value) => value !== undefined),
       { message: "Caption clip patch must change at least one field" },
     ),
+  z.object({
+    type: z.literal("upsert_transition_track"),
+    track: transitionTrackSchema,
+  }),
+  z.object({
+    type: z.literal("remove_transition_track"),
+    track_id: idSchema,
+  }),
+  z
+    .object({
+      type: z.literal("update_transition_clip"),
+      item_id: idSchema,
+      clip_id: audioClipIdSchema,
+      target_track_id: idSchema.optional(),
+      cut_seconds: frameAlignedSecondsSchema.nonnegative().max(120).optional(),
+      duration_seconds: frameAlignedSecondsSchema
+        .min(1 / VIDEO_FPS)
+        .max(3)
+        .optional(),
+      preset_id: transitionPresetIdSchema.optional(),
+      parameters: transitionTimelineClipSchema.shape.parameters.optional(),
+      sound_artifact_id: idSchema.nullable().optional(),
+    })
+    .refine(
+      ({ type: _type, item_id: _itemId, clip_id: _clipId, ...patch }) =>
+        Object.values(patch).some((value) => value !== undefined),
+      { message: "Transition patch must change at least one field" },
+    ),
+  z.object({
+    type: z.literal("remove_transition_clip"),
+    item_id: idSchema,
+    clip_id: audioClipIdSchema,
+  }),
   z.object({
     type: z.literal("reorder_tracks"),
     track_ids: z.array(idSchema).min(3),
@@ -1844,6 +2264,10 @@ export const applyEditorPatch = (
       }
       case "upsert_video_track": {
         requireOneTrack("visual", operation.track.id);
+        for (const clip of operation.track.clips ?? []) {
+          requireSelectedScene(selectedSceneIds, clip.scene_id);
+          requireScene(next.scenes, clip.scene_id);
+        }
         next.video_tracks ??= effectiveVideoTracks(next);
         const index = next.video_tracks.findIndex(
           (track) => track.id === operation.track.id,
@@ -1872,9 +2296,84 @@ export const applyEditorPatch = (
         ) {
           throw new Error("track_not_empty");
         }
+        if ((next.video_tracks[index]!.clips ?? []).length > 0) {
+          throw new Error("track_not_empty");
+        }
         next.video_tracks.splice(index, 1);
         next.track_order = next.track_order?.filter(
           (trackId) => trackId !== operation.track_id,
+        );
+        break;
+      }
+      case "update_video_clip": {
+        if (!selection.item_ids.includes(operation.item_id)) {
+          throw new Error(`item_outside_selection:${operation.item_id}`);
+        }
+        if (operation.item_id !== videoTimelineItemId(operation.clip_id)) {
+          throw new Error("video_item_clip_mismatch");
+        }
+        next.video_tracks ??= effectiveVideoTracks(next);
+        const sourceTrack = next.video_tracks.find((track) =>
+          (track.clips ?? []).some((clip) => clip.id === operation.clip_id),
+        );
+        const targetTrack = operation.target_track_id
+          ? next.video_tracks.find(
+              (track) => track.id === operation.target_track_id,
+            )
+          : sourceTrack;
+        if (!sourceTrack) throw new Error("video_clip_not_found");
+        if (!targetTrack) throw new Error("video_track_not_found");
+        requireOneTrack("visual", sourceTrack.id);
+        const clipIndex = (sourceTrack.clips ?? []).findIndex(
+          (clip) => clip.id === operation.clip_id,
+        );
+        const [clip] = sourceTrack.clips!.splice(clipIndex, 1);
+        if (!clip) throw new Error("video_clip_not_found");
+        requireSelectedScene(selectedSceneIds, clip.scene_id);
+        targetTrack.clips ??= [];
+        targetTrack.clips.push({
+          ...clip,
+          ...(operation.artifact_id === undefined
+            ? {}
+            : { artifact_id: operation.artifact_id }),
+          ...(operation.label === undefined ? {} : { label: operation.label }),
+          ...(operation.timeline_start_seconds === undefined
+            ? {}
+            : { timeline_start_seconds: operation.timeline_start_seconds }),
+          ...(operation.source_in_seconds === undefined
+            ? {}
+            : { source_in_seconds: operation.source_in_seconds }),
+          ...(operation.source_out_seconds === undefined
+            ? {}
+            : { source_out_seconds: operation.source_out_seconds }),
+          ...(operation.duration_seconds === undefined
+            ? {}
+            : { duration_seconds: operation.duration_seconds }),
+          ...(operation.playback_rate === undefined
+            ? {}
+            : { playback_rate: operation.playback_rate }),
+          ...(operation.fit === undefined ? {} : { fit: operation.fit }),
+          ...(operation.opacity === undefined
+            ? {}
+            : { opacity: operation.opacity }),
+        });
+        break;
+      }
+      case "remove_video_clip": {
+        if (!selection.item_ids.includes(operation.item_id)) {
+          throw new Error(`item_outside_selection:${operation.item_id}`);
+        }
+        if (operation.item_id !== videoTimelineItemId(operation.clip_id)) {
+          throw new Error("video_item_clip_mismatch");
+        }
+        next.video_tracks ??= effectiveVideoTracks(next);
+        const track = next.video_tracks.find((candidate) =>
+          (candidate.clips ?? []).some((clip) => clip.id === operation.clip_id),
+        );
+        if (!track) throw new Error("video_clip_not_found");
+        requireOneTrack("visual", track.id);
+        track.clips = track.clips!.filter(
+          (clip) => clip.id !== operation.clip_id,
         );
         break;
       }
@@ -1946,11 +2445,105 @@ export const applyEditorPatch = (
         });
         break;
       }
+      case "upsert_transition_track": {
+        requireOneTrack("transition", operation.track.id);
+        next.transition_tracks ??= effectiveTransitionTracks(next);
+        const index = next.transition_tracks.findIndex(
+          (track) => track.id === operation.track.id,
+        );
+        if (index === -1) {
+          next.transition_tracks.push(operation.track);
+          if (next.track_order) next.track_order.push(operation.track.id);
+        } else next.transition_tracks[index] = operation.track;
+        break;
+      }
+      case "remove_transition_track": {
+        requireOneTrack("transition", operation.track_id);
+        next.transition_tracks ??= effectiveTransitionTracks(next);
+        const index = next.transition_tracks.findIndex(
+          (track) => track.id === operation.track_id,
+        );
+        if (index === -1) throw new Error("transition_track_not_found");
+        if (next.transition_tracks[index]!.protected) {
+          throw new Error("protected_track");
+        }
+        if (next.transition_tracks[index]!.clips.length > 0) {
+          throw new Error("track_not_empty");
+        }
+        next.transition_tracks.splice(index, 1);
+        next.track_order = next.track_order?.filter(
+          (trackId) => trackId !== operation.track_id,
+        );
+        break;
+      }
+      case "update_transition_clip": {
+        if (!selection.item_ids.includes(operation.item_id)) {
+          throw new Error(`item_outside_selection:${operation.item_id}`);
+        }
+        if (operation.item_id !== transitionTimelineItemId(operation.clip_id)) {
+          throw new Error("transition_item_clip_mismatch");
+        }
+        next.transition_tracks ??= effectiveTransitionTracks(next);
+        const sourceTrack = next.transition_tracks.find((track) =>
+          track.clips.some((clip) => clip.id === operation.clip_id),
+        );
+        const targetTrack = operation.target_track_id
+          ? next.transition_tracks.find(
+              (track) => track.id === operation.target_track_id,
+            )
+          : sourceTrack;
+        if (!sourceTrack) throw new Error("transition_clip_not_found");
+        if (!targetTrack) throw new Error("transition_track_not_found");
+        requireOneTrack("transition", sourceTrack.id);
+        const clipIndex = sourceTrack.clips.findIndex(
+          (clip) => clip.id === operation.clip_id,
+        );
+        const [clip] = sourceTrack.clips.splice(clipIndex, 1);
+        if (!clip) throw new Error("transition_clip_not_found");
+        targetTrack.clips.push({
+          ...clip,
+          ...(operation.cut_seconds === undefined
+            ? {}
+            : { cut_seconds: operation.cut_seconds }),
+          ...(operation.duration_seconds === undefined
+            ? {}
+            : { duration_seconds: operation.duration_seconds }),
+          ...(operation.preset_id === undefined
+            ? {}
+            : { preset_id: operation.preset_id }),
+          ...(operation.parameters === undefined
+            ? {}
+            : { parameters: operation.parameters }),
+          ...(operation.sound_artifact_id === undefined
+            ? {}
+            : { sound_artifact_id: operation.sound_artifact_id }),
+        });
+        break;
+      }
+      case "remove_transition_clip": {
+        if (!selection.item_ids.includes(operation.item_id)) {
+          throw new Error(`item_outside_selection:${operation.item_id}`);
+        }
+        if (operation.item_id !== transitionTimelineItemId(operation.clip_id)) {
+          throw new Error("transition_item_clip_mismatch");
+        }
+        next.transition_tracks ??= effectiveTransitionTracks(next);
+        const track = next.transition_tracks.find((candidate) =>
+          candidate.clips.some((clip) => clip.id === operation.clip_id),
+        );
+        if (!track) throw new Error("transition_clip_not_found");
+        requireOneTrack("transition", track.id);
+        track.clips = track.clips.filter(
+          (clip) => clip.id !== operation.clip_id,
+        );
+        break;
+      }
       case "reorder_tracks": {
         const currentTrackIds = [
           ...effectiveVideoTracks(next).map((track) => track.id),
           ...effectiveAudioTracks(next).map((track) => track.id),
           ...effectiveCaptionTracks(next).map((track) => track.id),
+          ...effectiveTransitionTracks(next).map((track) => track.id),
         ];
         if (
           operation.track_ids.length !== currentTrackIds.length ||

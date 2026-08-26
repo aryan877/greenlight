@@ -1,4 +1,8 @@
-import type { Artifact } from "@greenlight/contracts";
+import type {
+  Artifact,
+  SoundEffectPresetId,
+  TransitionPresetId,
+} from "@greenlight/contracts";
 import {
   Captions,
   Check,
@@ -6,9 +10,11 @@ import {
   ExternalLink,
   Film,
   Image as ImageIcon,
+  Library,
   Mic2,
   PanelLeftClose,
   Plus,
+  Sparkles,
   Upload,
   X,
 } from "lucide-react";
@@ -17,6 +23,11 @@ import { useRef, useState } from "react";
 import { greenlightApi } from "../api/greenlight.js";
 import { MEDIA_ACCEPT, MEDIA_ARTIFACT_MIME } from "../editor/media-transfer.js";
 import { cx, IconButton } from "./controls.js";
+import {
+  MediaLibraryDialog,
+  type PlacedLibraryAsset,
+} from "./MediaLibraryDialog.js";
+import { EffectsLibraryDialog } from "./EffectsLibraryDialog.js";
 
 type MediaFacts = {
   audioCodec?: string;
@@ -74,7 +85,8 @@ const MediaKindIcon = ({
 }) => {
   if (artifact.kind === "image") return <ImageIcon size={size} />;
   if (artifact.kind === "video") return <Film size={size} />;
-  if (artifact.kind === "narration") return <Mic2 size={size} />;
+  if (artifact.kind === "narration" || artifact.kind === "audio")
+    return <Mic2 size={size} />;
   return <Captions size={size} />;
 };
 
@@ -121,7 +133,7 @@ const MediaPreview = ({
       />
     );
   }
-  if (artifact.kind === "narration") {
+  if (artifact.kind === "narration" || artifact.kind === "audio") {
     return controls ? (
       <audio
         src={greenlightApi.artifactUrl(artifact.id)}
@@ -283,6 +295,7 @@ const MediaViewer = ({
 };
 
 export const MediaBrowser = ({
+  projectId,
   artifacts,
   attachedArtifactIds,
   importing,
@@ -290,8 +303,14 @@ export const MediaBrowser = ({
   workspacePath,
   onSelectArtifact,
   onImport,
+  onPlaceLibraryAsset,
+  onApplySoundEffect,
+  onApplyTransition,
+  onPreviewTransition,
+  previewTransitionPreset,
   onCollapse,
 }: {
+  projectId: string;
   artifacts: Artifact[];
   attachedArtifactIds: string[];
   importing: boolean;
@@ -299,15 +318,28 @@ export const MediaBrowser = ({
   workspacePath: string | null;
   onSelectArtifact: (artifactId: string) => void;
   onImport: (files: File[]) => void;
+  onPlaceLibraryAsset: (input: PlacedLibraryAsset) => Promise<void> | void;
+  onApplySoundEffect: (input: {
+    artifact: Artifact;
+    durationSeconds: number;
+    presetId: SoundEffectPresetId;
+  }) => Promise<void> | void;
+  onApplyTransition: (preset: TransitionPresetId) => Promise<void> | void;
+  onPreviewTransition: (preset: TransitionPresetId | null) => void;
+  previewTransitionPreset: TransitionPresetId | null;
   onCollapse: () => void;
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [openArtifactId, setOpenArtifactId] = useState<string | null>(null);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [effectsOpen, setEffectsOpen] = useState(false);
   const [loadedFacts, setLoadedFacts] = useState<Record<string, MediaFacts>>(
     {},
   );
   const media = artifacts.filter(
-    (artifact) => artifact.provenance.source === "local_import",
+    (artifact) =>
+      artifact.provenance.source === "local_import" ||
+      artifact.provenance.source === "media_library",
   );
   const openArtifact =
     media.find((artifact) => artifact.id === openArtifactId) ?? null;
@@ -346,6 +378,24 @@ export const MediaBrowser = ({
             className="flex h-8 items-center gap-1.5 rounded-md bg-control px-3 text-[11px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-45"
           >
             <Plus size={13} /> {importing ? "Adding…" : "Add media"}
+          </button>
+          <button
+            type="button"
+            aria-label="Open licensed media library"
+            title="Licensed media library"
+            onClick={() => setLibraryOpen(true)}
+            className="grid size-8 place-items-center rounded-full border border-line text-ink-secondary hover:bg-hover hover:text-ink"
+          >
+            <Library size={13} />
+          </button>
+          <button
+            type="button"
+            aria-label="Open transitions and sound effects"
+            title="Transitions and sound effects"
+            onClick={() => setEffectsOpen(true)}
+            className="grid size-8 place-items-center rounded-full border border-line text-ink-secondary hover:bg-hover hover:text-ink"
+          >
+            <Sparkles size={13} />
           </button>
           <IconButton
             Icon={PanelLeftClose}
@@ -468,6 +518,27 @@ export const MediaBrowser = ({
           onClose={() => setOpenArtifactId(null)}
         />
       ) : null}
+      <MediaLibraryDialog
+        open={libraryOpen}
+        projectId={projectId}
+        onClose={() => setLibraryOpen(false)}
+        onPlace={onPlaceLibraryAsset}
+      />
+      <EffectsLibraryDialog
+        open={effectsOpen}
+        projectId={projectId}
+        previewPreset={previewTransitionPreset}
+        onApplySound={onApplySoundEffect}
+        onApplyTransition={onApplyTransition}
+        onPreviewTransition={(preset) => {
+          onPreviewTransition(preset);
+          if (preset) setEffectsOpen(false);
+        }}
+        onClose={() => {
+          onPreviewTransition(null);
+          setEffectsOpen(false);
+        }}
+      />
     </aside>
   );
 };

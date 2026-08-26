@@ -1,4 +1,8 @@
-import type { Artifact, Scene } from "@greenlight/contracts";
+import type {
+  Artifact,
+  Scene,
+  TransitionTimelineClip,
+} from "@greenlight/contracts";
 import {
   Maximize2,
   Pause,
@@ -15,6 +19,62 @@ import { formatTime } from "../editor/model.js";
 import { cx, IconButton } from "./controls.js";
 
 type MediaController = ReturnType<typeof useMediaController>;
+
+const TransitionOverlay = ({
+  clip,
+  currentTime,
+}: {
+  clip: TransitionTimelineClip;
+  currentTime: number;
+}) => {
+  const start = clip.cut_seconds - clip.duration_seconds / 2;
+  const progress = Math.max(
+    0,
+    Math.min(1, (currentTime - start) / clip.duration_seconds),
+  );
+  const peak = 1 - Math.abs(progress * 2 - 1);
+  if (peak <= 0 || clip.preset_id === "clean_cut") return null;
+
+  const intensity = clip.parameters.intensity ?? 0.75;
+  const direction = clip.parameters.direction ?? "left";
+  const axis = direction === "left" || direction === "right" ? "X" : "Y";
+  const sign = direction === "left" || direction === "up" ? -1 : 1;
+  const light = clip.preset_id === "light_flash";
+  const dark = clip.preset_id === "dip_to_black";
+  const blur = clip.preset_id === "blur_dissolve";
+  const motion = ["push", "slide", "zoom_through", "whip"].includes(
+    clip.preset_id,
+  );
+  const glitch = clip.preset_id === "glitch";
+  const background = light
+    ? (clip.parameters.color ?? "#ffffff")
+    : dark
+      ? (clip.parameters.color ?? "#000000")
+      : glitch
+        ? `linear-gradient(90deg, rgba(255,0,92,${peak * 0.42}), rgba(0,255,220,${peak * 0.42}))`
+        : "#000000";
+
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 z-20"
+      style={{
+        background,
+        opacity: peak * intensity * (dark || light ? 1 : 0.42),
+        backdropFilter: blur
+          ? `blur(${peak * (clip.parameters.blur ?? 28)}px)`
+          : undefined,
+        transform: motion
+          ? clip.preset_id === "zoom_through"
+            ? `scale(${1 + peak * intensity * 0.08})`
+            : `translate${axis}(${sign * (1 - progress) * intensity * 7}%)`
+          : glitch
+            ? `translateX(${Math.sin(currentTime * 84) * peak * 18}px)`
+            : undefined,
+      }}
+    />
+  );
+};
 
 export const SceneCanvas = ({
   scene,
@@ -105,6 +165,8 @@ export const ProgramMonitor = ({
   timelineOpen,
   previewing,
   previewUsesCanvas,
+  transition,
+  transitionReview,
   captionText,
   onToggleTimeline,
 }: {
@@ -117,6 +179,12 @@ export const ProgramMonitor = ({
   timelineOpen: boolean;
   previewing: boolean;
   previewUsesCanvas: boolean;
+  transition: TransitionTimelineClip | null;
+  transitionReview: {
+    label: string;
+    onApply: () => void;
+    onCancel: () => void;
+  } | null;
   captionText: string | null;
   onToggleTimeline: () => void;
 }) => {
@@ -128,8 +196,28 @@ export const ProgramMonitor = ({
     >
       <div className="flex h-10 shrink-0 items-center border-b border-line-subtle bg-surface px-2.5">
         <span className="px-1.5 text-[12px] font-medium text-ink">Program</span>
-        {previewing ? (
-          <span className="ml-2 rounded-md bg-warning-soft px-2 py-1 text-[9px] font-medium text-warning">
+        {transitionReview ? (
+          <div className="ml-2 flex min-w-0 items-center gap-1.5">
+            <span className="max-w-48 truncate rounded-full bg-warning-soft px-2.5 py-1 text-[9px] font-medium text-warning">
+              {transitionReview.label}
+            </span>
+            <button
+              type="button"
+              onClick={transitionReview.onApply}
+              className="h-7 rounded-full bg-control px-3 text-[9px] font-medium text-control-ink"
+            >
+              Apply
+            </button>
+            <button
+              type="button"
+              onClick={transitionReview.onCancel}
+              className="h-7 rounded-full border border-line px-3 text-[9px] text-ink-secondary hover:bg-hover"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : previewing ? (
+          <span className="ml-2 rounded-full bg-warning-soft px-2.5 py-1 text-[9px] font-medium text-warning">
             Preview
           </span>
         ) : null}
@@ -177,6 +265,12 @@ export const ProgramMonitor = ({
               No scene selected
             </div>
           )}
+          {transition ? (
+            <TransitionOverlay
+              clip={transition}
+              currentTime={media.currentTime}
+            />
+          ) : null}
         </div>
       </div>
 

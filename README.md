@@ -76,6 +76,8 @@ TrueFoundry AI Gateway and MCP Gateway are intentionally not in the judged path.
 - Frame-aligned timeline with continuous zoom, adaptive ruler ticks, marquee selection, gaps, and one playhead
 - Independent video, named audio, and caption clips on persistent, reorderable tracks
 - Immediate drag reorder, trim, split, speed, mute, solo, export inclusion, undo, and redo
+- Independent transition items with live audition plus deterministic local sound-effect generation
+- License-aware Openverse audio search and capability-gated Pexels B-roll with immutable source/license records
 - Any-size multi-selection with exact clip, track, and gap context that can be dragged into the AI composer
 - Signature-checked local media import with real preview, size, duration, dimensions, and codec details
 - AI focus that can highlight the scenes or gap it believes the creator means before acting
@@ -85,6 +87,9 @@ TrueFoundry AI Gateway and MCP Gateway are intentionally not in the judged path.
 ## Media pipeline
 
 - **Visuals:** OpenMoji with license provenance, creator media, and an optional bounded Codex subscription image route
+- **B-roll:** Pexels video search behind a server-only key; chosen clips are imported once with measured metadata and a license receipt
+- **Music and effects:** commercially compatible Openverse audio plus deterministic local sound synthesis
+- **Transitions:** a compact typed registry shared by the timeline, AI edit commands, Program preview, and Remotion
 - **Voice:** OpenRouter to Gemini TTS, one production provider with configurable model, voice, and locale
 - **Transcription:** OpenRouter `gpt-4o-mini-transcribe` for reference text and local `whisper.cpp` for measured word boundaries
 - **Captions:** Derived from measured words, never character-count timing

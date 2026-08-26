@@ -3,6 +3,8 @@ import {
   type Artifact,
   type ContentPackage,
   type EditorPatchInput,
+  type GenerateSoundEffectInput,
+  type MediaLibraryResult,
   type Project,
   type ProjectBrief,
   type ReleaseSnapshot,
@@ -41,6 +43,22 @@ export type YouTubeConnection = {
   connected: boolean;
   channel_title: string | null;
   custom_url: string | null;
+};
+
+export type MediaLibraryCapabilities = {
+  openverse: { available: boolean; use: "music_and_sound_effects" };
+  pexels: { available: boolean; use: "broll" };
+};
+
+export type ImportedLibraryAsset = {
+  artifact: Artifact;
+  licenseArtifact: Artifact;
+  cached: boolean;
+};
+
+export type GeneratedSoundEffect = {
+  artifact: Artifact;
+  cached: boolean;
 };
 
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
@@ -94,6 +112,47 @@ export const greenlightApi = {
     request<ProjectDetail>(`/projects/${encodeURIComponent(projectId)}`),
   getVoiceCapabilities: () => request<VoiceCapabilities>("/voice"),
   getYouTubeConnection: () => request<YouTubeConnection>("/youtube"),
+  getMediaLibraryCapabilities: () =>
+    request<MediaLibraryCapabilities>("/media-library/capabilities"),
+  searchMediaLibrary: (input: {
+    limit?: number;
+    orientation?: "landscape" | "portrait" | "square";
+    provider?: "pexels" | "openverse";
+    query: string;
+    use: "broll" | "music" | "sound_effect";
+  }) => {
+    const query = new URLSearchParams({ query: input.query, use: input.use });
+    if (input.limit) query.set("limit", String(input.limit));
+    if (input.orientation) query.set("orientation", input.orientation);
+    if (input.provider) query.set("provider", input.provider);
+    return request<{ results: MediaLibraryResult[] }>(
+      `/media-library/search?${query.toString()}`,
+    ).then((response) => response.results);
+  },
+  importMediaLibraryAsset: (
+    projectId: string,
+    input: Pick<MediaLibraryResult, "provider" | "provider_asset_id" | "use">,
+  ) =>
+    request<ImportedLibraryAsset>(
+      `/projects/${encodeURIComponent(projectId)}/media-library/import`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      },
+    ),
+  generateSoundEffect: (
+    projectId: string,
+    input: Omit<GenerateSoundEffectInput, "project_id">,
+  ) =>
+    request<GeneratedSoundEffect>(
+      `/projects/${encodeURIComponent(projectId)}/sound-effects`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      },
+    ),
   createVoiceSample: (
     projectId: string,
     input: { locale?: string; script: string; voice_id: string },

@@ -4,12 +4,16 @@ import {
   audioClipDurationSeconds,
   audibleAudioTracks,
   effectiveCaptionTracks,
+  effectiveTransitionTracks,
+  effectiveVideoTracks,
   sceneStartSeconds,
   type AudioTrack,
   type AudioTrackClip,
   type CaptionTimelineClip,
   type ContentPackage,
   type Scene,
+  type TransitionTimelineClip,
+  type VideoTimelineClip,
 } from "@greenlight/contracts";
 import { fitText } from "@remotion/layout-utils";
 import { Audio, Video } from "@remotion/media";
@@ -440,6 +444,149 @@ const ProductionCaptions = ({
   );
 };
 
+const BrollClip = ({
+  clip,
+  file,
+}: {
+  clip: VideoTimelineClip;
+  file: string;
+}) => (
+  <Video
+    src={staticFile(file)}
+    trimBefore={Math.round(clip.source_in_seconds * FPS)}
+    trimAfter={Math.round(clip.source_out_seconds * FPS)}
+    playbackRate={clip.playback_rate}
+    muted
+    style={{
+      width: "100%",
+      height: "100%",
+      objectFit: clip.fit,
+      opacity: clip.opacity,
+    }}
+  />
+);
+
+const ProductionVideoOverlays = ({
+  assetFiles,
+  content,
+}: Pick<RenderProject, "assetFiles" | "content">) => (
+  <>
+    {effectiveVideoTracks(content).flatMap((track) =>
+      track.visible
+        ? (track.clips ?? []).flatMap((clip) => {
+            const file = assetFiles[clip.artifact_id];
+            if (!file) return [];
+            return [
+              <Sequence
+                key={`${track.id}:${clip.id}`}
+                from={Math.round(clip.timeline_start_seconds * FPS)}
+                durationInFrames={Math.max(
+                  1,
+                  Math.round(clip.duration_seconds * FPS),
+                )}
+                premountFor={FPS}
+              >
+                <BrollClip clip={clip} file={file} />
+              </Sequence>,
+            ];
+          })
+        : [],
+    )}
+  </>
+);
+
+const TransitionEffect = ({ clip }: { clip: TransitionTimelineClip }) => {
+  const frame = useCurrentFrame();
+  const { durationInFrames } = useVideoConfig();
+  const progress = durationInFrames <= 1 ? 1 : frame / (durationInFrames - 1);
+  const peak = 1 - Math.abs(progress * 2 - 1);
+  const intensity = clip.parameters.intensity ?? 0.75;
+  const direction = clip.parameters.direction ?? "left";
+  const axis = direction === "left" || direction === "right" ? "X" : "Y";
+  const sign = direction === "left" || direction === "up" ? -1 : 1;
+  const isLight = clip.preset_id === "light_flash";
+  const isDark = clip.preset_id === "dip_to_black";
+  const isBlur = clip.preset_id === "blur_dissolve";
+  const isMotion = ["push", "slide", "zoom_through", "whip"].includes(
+    clip.preset_id,
+  );
+  const isGlitch = clip.preset_id === "glitch";
+  const background = isLight
+    ? (clip.parameters.color ?? "#ffffff")
+    : isDark
+      ? (clip.parameters.color ?? "#000000")
+      : isGlitch
+        ? `linear-gradient(90deg, rgba(255,0,92,${peak * 0.42}), rgba(0,255,220,${peak * 0.42}))`
+        : "#000000";
+  return (
+    <AbsoluteFill
+      style={{
+        pointerEvents: "none",
+        background,
+        opacity:
+          clip.preset_id === "clean_cut"
+            ? 0
+            : peak * intensity * (isDark || isLight ? 1 : 0.42),
+        backdropFilter: isBlur
+          ? `blur(${peak * (clip.parameters.blur ?? 28)}px)`
+          : undefined,
+        transform: isMotion
+          ? clip.preset_id === "zoom_through"
+            ? `scale(${1 + peak * intensity * 0.08})`
+            : `translate${axis}(${sign * (1 - progress) * intensity * 7}%)`
+          : isGlitch
+            ? `translateX(${Math.sin(frame * 2.8) * peak * 18}px)`
+            : undefined,
+      }}
+    />
+  );
+};
+
+const ProductionTransitions = ({
+  assetFiles,
+  content,
+}: Pick<RenderProject, "assetFiles" | "content">) => (
+  <>
+    {effectiveTransitionTracks(content).flatMap((track) =>
+      track.visible
+        ? track.clips.flatMap((clip) => {
+            const durationInFrames = Math.max(
+              1,
+              Math.round(clip.duration_seconds * FPS),
+            );
+            const from = Math.max(
+              0,
+              Math.round(clip.cut_seconds * FPS - durationInFrames / 2),
+            );
+            const soundFile = clip.sound_artifact_id
+              ? assetFiles[clip.sound_artifact_id]
+              : null;
+            return [
+              <Sequence
+                key={`${track.id}:${clip.id}:visual`}
+                from={from}
+                durationInFrames={durationInFrames}
+              >
+                <TransitionEffect clip={clip} />
+              </Sequence>,
+              ...(soundFile
+                ? [
+                    <Sequence
+                      key={`${track.id}:${clip.id}:sound`}
+                      from={from}
+                      durationInFrames={durationInFrames}
+                    >
+                      <Audio src={staticFile(soundFile)} />
+                    </Sequence>,
+                  ]
+                : []),
+            ];
+          })
+        : [],
+    )}
+  </>
+);
+
 export const getDurationInFrames = (content: ContentPackage): number =>
   content.scenes.reduce(
     (total, scene) =>
@@ -479,6 +626,8 @@ export const GreenlightFilm = ({
   return (
     <AbsoluteFill style={{ background: color.paper }}>
       <Series>{timeline}</Series>
+      <ProductionVideoOverlays assetFiles={assetFiles} content={content} />
+      <ProductionTransitions assetFiles={assetFiles} content={content} />
       <ProductionAudio assetFiles={assetFiles} content={content} />
       <ProductionCaptions captionTracks={captionTracks} content={content} />
     </AbsoluteFill>

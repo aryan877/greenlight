@@ -1,6 +1,7 @@
 import {
   effectiveAudioTracks,
   effectiveCaptionTracks,
+  effectiveTransitionTracks,
   effectiveVideoTracks,
   MIN_SCENE_DURATION_SECONDS,
   VIDEO_FPS,
@@ -18,6 +19,7 @@ import {
   Mic2,
   Plus,
   Redo2,
+  Sparkles,
   Split,
   Undo2,
   ZoomIn,
@@ -119,6 +121,7 @@ const ITEM_ICONS = {
   video: Layers3,
   audio: Mic2,
   caption: Captions,
+  transition: Sparkles,
 } satisfies Record<EditorTimelineItemKind, LucideIcon>;
 
 const itemIcon = (kind: EditorTimelineItemKind) => ITEM_ICONS[kind];
@@ -249,7 +252,34 @@ export const Timeline = ({
         [
           {
             type: "upsert_video_track",
-            track: { id, name, kind: "video", protected: false },
+            track: {
+              id,
+              name,
+              kind: "video",
+              protected: false,
+              visible: true,
+              clips: [],
+            },
+          },
+        ],
+        `Add ${name}`,
+      );
+      return;
+    }
+    if (draft.kind === "transition") {
+      onDirectTrackEdit(
+        ["transition", id],
+        [
+          {
+            type: "upsert_transition_track",
+            track: {
+              id,
+              name,
+              kind: "transition",
+              protected: false,
+              visible: true,
+              clips: [],
+            },
           },
         ],
         `Add ${name}`,
@@ -305,14 +335,18 @@ export const Timeline = ({
         ? { type: "remove_video_track", track_id: track.id }
         : track.kind === "caption"
           ? { type: "remove_caption_track", track_id: track.id }
-          : { type: "remove_audio_track", track_id: track.id };
+          : track.kind === "transition"
+            ? { type: "remove_transition_track", track_id: track.id }
+            : { type: "remove_audio_track", track_id: track.id };
     onDirectTrackEdit(
       [
         track.kind === "video"
           ? "visual"
           : track.kind === "caption"
             ? "caption"
-            : "voice",
+            : track.kind === "transition"
+              ? "transition"
+              : "voice",
         track.id,
       ],
       [operation],
@@ -546,7 +580,11 @@ export const Timeline = ({
     }
     const movingSceneIds = new Set(
       dragItems
-        .filter((candidate) => candidate.kind === "video")
+        .filter(
+          (candidate) =>
+            candidate.kind === "video" &&
+            candidate.id === videoItemId(candidate.scene_id),
+        )
         .map((candidate) => candidate.scene_id),
     );
     if (movingSceneIds.size > 0) {
@@ -866,6 +904,23 @@ export const Timeline = ({
                 );
                 return;
               }
+              if (track.kind === "transition") {
+                const source = effectiveTransitionTracks(content).find(
+                  (candidate) => candidate.id === track.id,
+                );
+                if (!source) return;
+                onDirectTrackEdit(
+                  ["transition", track.id],
+                  [
+                    {
+                      type: "upsert_transition_track",
+                      track: { ...source, name },
+                    },
+                  ],
+                  `Rename ${track.name} to ${name}`,
+                );
+                return;
+              }
               const source = audioTracks.find(
                 (candidate) => candidate.id === track.id,
               );
@@ -1065,9 +1120,12 @@ export const Timeline = ({
                     item,
                   );
                   const isDropTarget =
-                    item.kind === "video" && dropSceneId === item.scene_id;
+                    item.kind === "video" &&
+                    item.id === videoItemId(item.scene_id) &&
+                    dropSceneId === item.scene_id;
                   const atTimelineEnd =
                     item.kind === "video" &&
+                    item.id === videoItemId(item.scene_id) &&
                     dropSceneId === "timeline-end" &&
                     sceneIndex === content.scenes.length - 1;
                   const hasPreviousNeighbor = items.some(
@@ -1119,6 +1177,8 @@ export const Timeline = ({
                           "bg-track-voice text-ink-secondary",
                         item.kind === "caption" &&
                           "bg-track-caption text-ink-secondary",
+                        item.kind === "transition" &&
+                          "bg-action-soft text-action",
                         selected
                           ? "border-action ring-1 ring-inset ring-action"
                           : "border-line hover:border-line-strong",
@@ -1164,6 +1224,7 @@ export const Timeline = ({
                           item.kind === "audio" && "text-track-voice-strong",
                           item.kind === "caption" &&
                             "text-track-caption-strong",
+                          item.kind === "transition" && "text-action",
                         )}
                       />
                       <span className="truncate text-[9px] font-medium">

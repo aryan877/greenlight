@@ -12,6 +12,7 @@ import type { GreenlightStore } from "./store.js";
 
 const mimeByExtension: Record<string, string> = {
   ".aac": "audio/aac",
+  ".flac": "audio/flac",
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
   ".json": "application/json",
@@ -19,6 +20,7 @@ const mimeByExtension: Record<string, string> = {
   ".mov": "video/quicktime",
   ".mp3": "audio/mpeg",
   ".mp4": "video/mp4",
+  ".ogg": "audio/ogg",
   ".png": "image/png",
   ".srt": "application/x-subrip",
   ".svg": "image/svg+xml",
@@ -76,6 +78,7 @@ export class ArtifactStore {
       | "content_package"
       | "caption"
       | "edit_patch"
+      | "media_license"
       | "quality_report"
       | "transcript";
     value: unknown;

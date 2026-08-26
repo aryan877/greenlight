@@ -7,10 +7,12 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  artifactDurationSeconds,
   captionItemId,
   changeSceneSpeed,
   createSelection,
   createTimelineContext,
+  fitSourceDurationToFrames,
   gapItemId,
   timelineItems,
   timelineTracks,
@@ -21,8 +23,30 @@ import {
   splitSceneAtPlayhead,
   timelineTicks,
   trackOperationSceneIds,
+  transitionItemId,
   totalDuration,
+  videoItemId,
 } from "./model.js";
+
+describe("source-backed media", () => {
+  it("uses measured duration and never rounds beyond the source", () => {
+    const artifact: Artifact = {
+      id: "artifact_audio",
+      project_id: "project_editor",
+      kind: "audio",
+      sha256: "a".repeat(64),
+      relative_path: "audio/test.mp3",
+      mime_type: "audio/mpeg",
+      byte_size: 1,
+      provenance: { media_metadata: { duration_seconds: 3.156 } },
+      created_at: "2026-08-26T00:00:00.000Z",
+    };
+
+    expect(artifactDurationSeconds(artifact, 5)).toBe(3.156);
+    expect(fitSourceDurationToFrames(3.156)).toBe(94 / 30);
+    expect(fitSourceDurationToFrames(0.01)).toBe(1 / 30);
+  });
+});
 
 const content: ContentPackage = {
   version: 1,
@@ -341,6 +365,56 @@ describe("editor selection", () => {
         playheadSeconds: 0,
       }).tracks.find((track) => track.kind === "caption")?.visible,
     ).toBe(false);
+  });
+
+  it("gives dragged transitions their exact persisted cut and preset context", () => {
+    const withTransition = structuredClone(content);
+    withTransition.transition_tracks = [
+      {
+        id: "track_transitions",
+        name: "Transitions",
+        kind: "transition",
+        protected: false,
+        visible: true,
+        clips: [
+          {
+            id: "transition_scene_000_scene_001",
+            label: "Soft push",
+            from_item_id: videoItemId("scene_000"),
+            to_item_id: videoItemId("scene_001"),
+            cut_seconds: 2,
+            duration_seconds: 0.4,
+            preset_id: "push",
+            parameters: { direction: "left", intensity: 0.7 },
+            sound_artifact_id: null,
+          },
+        ],
+      },
+    ];
+
+    const item = timelineItems(withTransition).find(
+      (candidate) =>
+        candidate.id === transitionItemId("transition_scene_000_scene_001"),
+    );
+
+    expect(item).toMatchObject({
+      kind: "transition",
+      track_id: "track_transitions",
+      transition: {
+        cut_seconds: 2,
+        duration_seconds: 0.4,
+        preset_id: "push",
+        parameters: { direction: "left", intensity: 0.7 },
+      },
+    });
+    expect(
+      createTimelineContext({
+        projectId: withTransition.project_id,
+        contentArtifactId: "artifact_content",
+        content: withTransition,
+        playheadSeconds: 2,
+      }).items.find((candidate) => candidate.id === item?.id)?.transition,
+    ).toMatchObject({ preset_id: "push", cut_seconds: 2 });
   });
 
   it("uses the persisted track order instead of rebuilding lane order", () => {

@@ -4,12 +4,14 @@ import {
   captionTimelineItemId,
   effectiveAudioTracks,
   effectiveCaptionTracks,
+  effectiveTransitionTracks,
   effectiveVideoTracks,
   MIN_SCENE_DURATION_SECONDS,
   productionDurationSeconds,
   scenePresentationDurationSeconds,
   sceneStartSeconds,
   timelineGapId,
+  transitionTimelineItemId,
   videoTimelineItemId,
   VIDEO_FPS,
   type Artifact,
@@ -57,12 +59,13 @@ export const trackOperationSceneIds = (
 export const videoItemId = videoTimelineItemId;
 export const captionItemId = captionTimelineItemId;
 export const audioItemId = audioTimelineItemId;
+export const transitionItemId = transitionTimelineItemId;
 export const gapItemId = timelineGapId;
 
 export const timelineItems = (
   content: ContentPackage,
 ): EditorTimelineItem[] => {
-  const videoItems = content.scenes.map((scene, index) => {
+  const sceneVideoItems = content.scenes.map((scene, index) => {
     const start = snapToFrame(sceneOffset(content.scenes, index));
     return {
       id: videoItemId(scene.id),
@@ -75,6 +78,23 @@ export const timelineItems = (
       artifact_ids: scene.visual.artifact_ids,
     };
   });
+
+  const overlayVideoItems = effectiveVideoTracks(content).flatMap((track) =>
+    (track.clips ?? []).map((clip) => ({
+      id: videoItemId(clip.id),
+      kind: "video" as const,
+      track_id: track.id,
+      scene_id: clip.scene_id,
+      label: clip.label,
+      start_seconds: clip.timeline_start_seconds,
+      end_seconds: snapToFrame(
+        clip.timeline_start_seconds + clip.duration_seconds,
+      ),
+      artifact_ids: [clip.artifact_id, clip.provenance_artifact_id].filter(
+        (id): id is string => Boolean(id),
+      ),
+    })),
+  );
 
   const audioItems = effectiveAudioTracks(content).flatMap((track) =>
     track.clips.flatMap((clip) => {
@@ -128,7 +148,52 @@ export const timelineItems = (
     })),
   );
 
-  return [...videoItems, ...audioItems, ...captionItems];
+  const transitionItems = effectiveTransitionTracks(content).flatMap((track) =>
+    track.clips.map((clip) => ({
+      id: transitionItemId(clip.id),
+      kind: "transition" as const,
+      track_id: track.id,
+      scene_id:
+        content.scenes.find(
+          (scene, index) =>
+            sceneOffset(content.scenes, index) <= clip.cut_seconds &&
+            sceneOffset(content.scenes, index) +
+              scene.duration_seconds +
+              (scene.gap_after_seconds ?? 0) >=
+              clip.cut_seconds,
+        )?.id ?? content.scenes[0]!.id,
+      label: clip.label,
+      start_seconds: snapToFrame(
+        Math.max(0, clip.cut_seconds - clip.duration_seconds / 2),
+      ),
+      end_seconds: snapToFrame(
+        Math.min(
+          totalDuration(content),
+          clip.cut_seconds + clip.duration_seconds / 2,
+        ),
+      ),
+      artifact_ids: [clip.sound_artifact_id].filter((id): id is string =>
+        Boolean(id),
+      ),
+      transition: {
+        from_item_id: clip.from_item_id,
+        to_item_id: clip.to_item_id,
+        cut_seconds: clip.cut_seconds,
+        duration_seconds: clip.duration_seconds,
+        preset_id: clip.preset_id,
+        parameters: clip.parameters,
+        sound_artifact_id: clip.sound_artifact_id,
+      },
+    })),
+  );
+
+  return [
+    ...sceneVideoItems,
+    ...overlayVideoItems,
+    ...audioItems,
+    ...captionItems,
+    ...transitionItems,
+  ];
 };
 
 export const timelineGaps = (content: ContentPackage): EditorTimelineGap[] =>
@@ -188,6 +253,15 @@ export const timelineTracks = (
       gain: 1,
       visible: track.visible,
     })),
+    ...effectiveTransitionTracks(content).map((track) => ({
+      ...track,
+      role: null,
+      muted: false,
+      solo: false,
+      export_enabled: true,
+      gain: 1,
+      visible: track.visible,
+    })),
   ];
   if (!content.track_order) return tracks;
   const order = new Map(
@@ -231,6 +305,30 @@ export const sceneTimelineDuration = (scenes: Scene[], index: number) => {
 
 export const snapToFrame = (seconds: number) =>
   Math.round(seconds * VIDEO_FPS) / VIDEO_FPS;
+
+export const fitSourceDurationToFrames = (seconds: number) =>
+  Math.max(
+    1 / VIDEO_FPS,
+    Math.floor((Math.max(0, seconds) + Number.EPSILON) * VIDEO_FPS) / VIDEO_FPS,
+  );
+
+export const artifactDurationSeconds = (
+  artifact: Artifact,
+  fallbackSeconds: number,
+) => {
+  const mediaMetadata = artifact.provenance.media_metadata;
+  const measured =
+    mediaMetadata &&
+    typeof mediaMetadata === "object" &&
+    "duration_seconds" in mediaMetadata
+      ? mediaMetadata.duration_seconds
+      : artifact.provenance.measured_duration_seconds;
+  return typeof measured === "number" &&
+    Number.isFinite(measured) &&
+    measured > 0
+    ? measured
+    : fallbackSeconds;
+};
 
 const TIMELINE_TICK_FRAMES = [
   1, 2, 5, 10, 15, 30, 60, 90, 150, 300, 450, 900, 1800,
@@ -431,6 +529,9 @@ export const createSelection = (input: {
         : []),
       ...(selectedItems.some((item) => item.kind === "audio")
         ? (["voice"] as const)
+        : []),
+      ...(selectedItems.some((item) => item.kind === "transition")
+        ? (["transition"] as const)
         : []),
       ...(selectedItems.some(
         (item) => item.kind === "audio" && item.artifact_ids.length > 0,

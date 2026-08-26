@@ -7,6 +7,8 @@ import { promisify } from "node:util";
 import {
   contentPackageSchema,
   effectiveAudioTracks,
+  effectiveTransitionTracks,
+  effectiveVideoTracks,
 } from "@greenlight/contracts";
 
 import type { ArtifactStore } from "../storage/artifacts.js";
@@ -50,6 +52,15 @@ export class RemotionRenderer {
               clip.artifact_id,
               clip.captions_artifact_id,
             ]),
+          ),
+          ...effectiveVideoTracks(packageValue).flatMap((track) =>
+            (track.clips ?? []).flatMap((clip) => [
+              clip.artifact_id,
+              clip.provenance_artifact_id,
+            ]),
+          ),
+          ...effectiveTransitionTracks(packageValue).flatMap((track) =>
+            track.clips.map((clip) => clip.sound_artifact_id),
           ),
         ].filter((id): id is string => Boolean(id)),
       );

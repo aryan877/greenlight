@@ -189,6 +189,7 @@
 }
 
 .monitor-frame {
+  position: relative;
   width: min(1080px, 100cqw, calc(100cqh * 16 / 9));
   aspect-ratio: 16 / 9;
   max-height: 100cqh;

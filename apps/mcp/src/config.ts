@@ -43,6 +43,9 @@ export type GreenlightConfig = {
     timingBinaryPath: string;
     timingModelPath: string;
   };
+  mediaLibrary: {
+    pexelsApiKey: string | null;
+  };
   youtube: {
     allowedChannelId: string | null;
     profile: string;
@@ -107,6 +110,9 @@ export const loadConfig = (): GreenlightConfig => {
       timingModelPath:
         process.env.GREENLIGHT_WHISPER_MODEL ||
         resolve(homedir(), ".cache/greenlight/models/ggml-base.bin"),
+    },
+    mediaLibrary: {
+      pexelsApiKey: process.env.PEXELS_API_KEY || null,
     },
     youtube: {
       allowedChannelId: process.env.GREENLIGHT_YOUTUBE_CHANNEL_ID || null,

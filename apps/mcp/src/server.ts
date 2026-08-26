@@ -8,7 +8,10 @@ import { z } from "zod";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   editorPatchInputSchema,
+  generateSoundEffectInputSchema,
+  importMediaLibraryAssetInputSchema,
   projectBriefSchema,
+  searchMediaLibraryInputSchema,
   type Project,
 } from "@greenlight/contracts";
 
@@ -20,6 +23,7 @@ import { CodexImageProvider } from "./providers/codex-image.js";
 import { QualityInspector } from "./providers/quality.js";
 import { OpenMojiToolkit } from "./providers/openmoji.js";
 import { probeImportedMedia } from "./providers/media-metadata.js";
+import { MediaLibraryProvider } from "./providers/media-library.js";
 import { RemotionRenderer } from "./providers/render.js";
 import {
   DisabledTranscriptionProvider,
@@ -36,6 +40,8 @@ import {
   restoreContentRevision,
   saveEditorPatch,
 } from "./services/editor-patches.js";
+import { importLibraryAsset } from "./services/media-library.js";
+import { generateSoundEffectArtifact } from "./services/sound-design.js";
 
 const config = loadConfig();
 mkdirSync(config.dataDir, { recursive: true });
@@ -45,6 +51,7 @@ const store = new GreenlightStore(resolve(config.dataDir, "greenlight.sqlite"));
 const artifacts = new ArtifactStore(config.artifactDir, store);
 const image = new CodexImageProvider(config.codex, artifacts);
 const openmoji = new OpenMojiToolkit(config.openMojiRoot, artifacts);
+const mediaLibrary = new MediaLibraryProvider(config.mediaLibrary);
 const voice =
   config.voice.provider === "openrouter"
     ? new OpenRouterVoiceProvider(config.voice)
@@ -109,6 +116,86 @@ app.get("/api/youtube", async (_request, response) => {
       channel_title: null,
       custom_url: null,
     });
+  }
+});
+
+app.get("/api/media-library/capabilities", (_request, response) => {
+  response.json(mediaLibrary.describe());
+});
+
+app.get("/api/media-library/search", async (request, response) => {
+  try {
+    const input = searchMediaLibraryInputSchema.parse({
+      query: request.query.query,
+      use: request.query.use,
+      provider: request.query.provider,
+      orientation: request.query.orientation,
+      limit: request.query.limit ? Number(request.query.limit) : undefined,
+    });
+    response.json({ results: await mediaLibrary.search(input) });
+  } catch (error) {
+    if (error && typeof error === "object" && "issues" in error) {
+      response.status(400).json({ error: "invalid_media_search" });
+      return;
+    }
+    const code = error instanceof Error ? error.message : "media_search_failed";
+    response
+      .status(code === "pexels_not_configured" ? 503 : 502)
+      .json({ error: code });
+  }
+});
+
+app.post(
+  "/api/projects/:id/media-library/import",
+  async (request, response) => {
+    try {
+      const input = importMediaLibraryAssetInputSchema.parse({
+        ...request.body,
+        project_id: request.params.id,
+      });
+      response.status(201).json(
+        await importLibraryAsset({
+          artifacts,
+          library: mediaLibrary,
+          projectId: input.project_id,
+          provider: input.provider,
+          providerAssetId: input.provider_asset_id,
+          store,
+          use: input.use,
+        }),
+      );
+    } catch (error) {
+      if (error && typeof error === "object" && "issues" in error) {
+        response.status(400).json({ error: "invalid_media_import" });
+        return;
+      }
+      const code =
+        error instanceof Error ? error.message : "media_import_failed";
+      response
+        .status(code === "project_not_found" ? 404 : 502)
+        .json({ error: code });
+    }
+  },
+);
+
+app.post("/api/projects/:id/sound-effects", async (request, response) => {
+  try {
+    const input = generateSoundEffectInputSchema.parse({
+      ...request.body,
+      project_id: request.params.id,
+    });
+    response
+      .status(201)
+      .json(await generateSoundEffectArtifact({ artifacts, input, store }));
+  } catch (error) {
+    if (error && typeof error === "object" && "issues" in error) {
+      response.status(400).json({ error: "invalid_sound_effect" });
+      return;
+    }
+    const code = error instanceof Error ? error.message : "sound_effect_failed";
+    response
+      .status(code === "project_not_found" ? 404 : 500)
+      .json({ error: code });
   }
 });
 
@@ -392,6 +479,7 @@ app.post("/mcp", async (request, response) => {
     const server = buildMcpServer({
       artifacts,
       image,
+      mediaLibrary,
       openmoji,
       quality,
       renderer,
@@ -421,6 +509,24 @@ app.post("/mcp", async (request, response) => {
     }
   }
 });
+
+const rejectStatelessMcpStream = (
+  request: express.Request,
+  response: express.Response,
+) => {
+  if (!hasMcpAccess(request.header("authorization"))) {
+    response.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  response.status(405).json({
+    jsonrpc: "2.0",
+    error: { code: -32000, message: "Method not allowed." },
+    id: null,
+  });
+};
+
+app.get("/mcp", rejectStatelessMcpStream);
+app.delete("/mcp", rejectStatelessMcpStream);
 
 const listener = app.listen(config.port, "127.0.0.1", () => {
   console.log(`[greenlight-mcp] http://localhost:${config.port}/mcp`);

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { timelineItems } from "./model.js";
 import {
+  buildBrollPlacementOperation,
   buildTimelineMovePlan,
   buildTimelineTrimPlan,
   maximumTimelineItemDuration,
@@ -133,6 +134,47 @@ const item = (kind: EditorTimelineItemKind, sceneId = "scene_first") => {
 };
 
 describe("timeline operations", () => {
+  it("places licensed B-roll as an independent immutable-source clip", () => {
+    expect(
+      buildBrollPlacementOperation(content, {
+        artifactId: "artifact_pexels_video",
+        clipId: "clip_broll",
+        durationSeconds: 3,
+        label: "Editor at a desk",
+        licenseArtifactId: "artifact_pexels_license",
+        sceneId: "scene_second",
+        sourceDurationSeconds: 7,
+        startSeconds: 6,
+      }),
+    ).toEqual({
+      type: "upsert_video_track",
+      track: {
+        id: "track_broll",
+        name: "B-roll",
+        kind: "video",
+        protected: false,
+        visible: true,
+        clips: [
+          {
+            id: "clip_broll",
+            scene_id: "scene_second",
+            label: "Editor at a desk",
+            artifact_id: "artifact_pexels_video",
+            timeline_start_seconds: 6,
+            source_in_seconds: 0,
+            source_out_seconds: 3,
+            source_duration_seconds: 7,
+            duration_seconds: 3,
+            playback_rate: 1,
+            fit: "cover",
+            opacity: 1,
+            provenance_artifact_id: "artifact_pexels_license",
+          },
+        ],
+      },
+    });
+  });
+
   it("moves only the timeline items the creator selected", () => {
     const video = item("video");
     const audio = item("audio");

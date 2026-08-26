@@ -85,13 +85,14 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 3. Save a source ledger of sources and supported/conflicted claims.
 4. Author a content package: headline, scenes, narration, visual direction, metadata, locale tracks, and claim IDs.
 5. Attach license-compatible OpenMoji or explicitly selected generated/user media.
-6. Generate narration scene by scene.
-7. Transcribe narration for editable word timing and measured captions.
-8. Preview and approve Producer-authored scoped revisions; creator gestures remain immediate and undoable.
-9. Render the exact immutable package with Remotion.
-10. Run deterministic duration, frame, audio, evidence, and metadata checks.
-11. Upload the verified artifact as unlisted with title, description, tags, disclosure, and thumbnail.
-12. Publish or schedule only after approval of the exact release snapshot.
+6. Search license-aware B-roll or audio, audition transitions/effects, and place accepted results as independent timeline items.
+7. Generate narration scene by scene.
+8. Transcribe narration for editable word timing and measured captions.
+9. Preview and approve Producer-authored scoped revisions; creator gestures remain immediate and undoable.
+10. Render the exact immutable package with Remotion.
+11. Run deterministic duration, frame, audio, evidence, and metadata checks.
+12. Upload the verified artifact as unlisted with title, description, tags, disclosure, and thumbnail.
+13. Publish or schedule only after approval of the exact release snapshot.
 
 ## Media requirements
 
@@ -102,6 +103,8 @@ Render, unlisted upload, public publish, and schedule use the same native approv
 - Direct GPT Image API routes default to disabled.
 - Remotion owns layout, typography, timing, captions, transitions, and final encoding; generated images are assets, not the editor.
 - Creator images, clips, narration, and caption files are signature-checked, copied into immutable content-addressed storage, and placed on scenes by artifact ID. Imported video remains a real video source in preview and export.
+- Pexels B-roll and commercial-compatible Openverse audio remain provider-backed, license-aware options. Imported results keep their upstream page and a separate immutable license receipt.
+- Transitions are independent timeline items from a small typed registry. Generated sound effects are deterministic local WAV artifacts, not paid provider calls.
 
 ### Voice and transcription
 

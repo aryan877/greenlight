@@ -1,11 +1,22 @@
 import {
   applyEditorPatch,
   editorPatchInputSchema,
+  effectiveAudioTracks,
   effectiveCaptionTracks,
+  effectiveTransitionTracks,
+  effectiveVideoTracks,
+  soundEffectPresetRegistry,
+  transitionPresetRegistry,
+  VIDEO_FPS,
+  type Artifact,
   type ContentPackage,
+  type EditorPatchInput,
   type EditorPatchOperation,
   type EditorFocusInput,
   type EditorSelection,
+  type SoundEffectPresetId,
+  type TransitionPresetId,
+  type TransitionTimelineClip,
 } from "@greenlight/contracts";
 import {
   LockKeyhole,
@@ -43,23 +54,34 @@ import {
 import { ProgramMonitor } from "./components/ProgramMonitor.js";
 import { ProjectSwitcher } from "./components/ProjectSwitcher.js";
 import { MediaBrowser } from "./components/MediaBrowser.js";
+import type { PlacedLibraryAsset } from "./components/MediaLibraryDialog.js";
 import { ReleasePanel } from "./components/ReleasePanel.js";
 import { Timeline } from "./components/Timeline.js";
 import { ThemeToggle } from "./components/ThemeToggle.js";
 import {
+  artifactDurationSeconds,
+  audioItemId,
   changeSceneSpeed,
   createSelection,
   createTimelineContext,
+  fitSourceDurationToFrames,
   timelineGaps,
   timelineItems,
   timelineTracks,
+  transitionItemId,
   videoItemId,
   sceneAtTimelineTime,
   sceneOffset,
   splitSceneAtPlayhead,
+  snapToFrame,
   trackOperationSceneIds,
   totalDuration,
 } from "./editor/model.js";
+import { buildTransitionTrackEdit } from "./editor/effects.js";
+import {
+  BROLL_TRACK_ID,
+  buildBrollPlacementOperation,
+} from "./editor/operations.js";
 import type { ProducerDraftIntent } from "./editor/producer-draft.js";
 import {
   appendProducerReferences,
@@ -111,6 +133,10 @@ export const App = () => {
   const [draftIntent, setDraftIntent] = useState<ProducerDraftIntent | null>(
     null,
   );
+  const [manualPreviewPatch, setManualPreviewPatch] =
+    useState<EditorPatchInput | null>(null);
+  const [previewTransitionPreset, setPreviewTransitionPreset] =
+    useState<TransitionPresetId | null>(null);
   const layout = useWorkspaceLayout();
   const media = useMediaController();
 
@@ -158,7 +184,8 @@ export const App = () => {
   const content = useContentPackage(contentArtifact?.id ?? null);
   const editorArtifactId =
     directRevision?.artifactId ?? contentArtifact?.id ?? null;
-  const editorContent = directRevision?.content ?? content.data ?? null;
+  const editorContent =
+    directRevision?.content ?? content.data?.content ?? null;
   const editorItems = useMemo(
     () => (editorContent ? timelineItems(editorContent) : []),
     [editorContent],
@@ -170,6 +197,27 @@ export const App = () => {
   const editorGaps = useMemo(
     () => (editorContent ? timelineGaps(editorContent) : []),
     [editorContent],
+  );
+  const liveSelectedItemIds = useMemo(
+    () =>
+      selectedItemIds.filter((itemId) =>
+        editorItems.some((item) => item.id === itemId),
+      ),
+    [editorItems, selectedItemIds],
+  );
+  const liveSelectedTrackIds = useMemo(
+    () =>
+      selectedTrackIds.filter((trackId) =>
+        editorTracks.some((track) => track.id === trackId),
+      ),
+    [editorTracks, selectedTrackIds],
+  );
+  const liveSelectedGapIds = useMemo(
+    () =>
+      selectedGapIds.filter((gapId) =>
+        editorGaps.some((gap) => gap.id === gapId),
+      ),
+    [editorGaps, selectedGapIds],
   );
   const resolvedProducerReferences = useMemo(
     () =>
@@ -252,14 +300,28 @@ export const App = () => {
   useEffect(() => {
     const nextId = contentArtifact?.id ?? null;
     const previousId = previousContentArtifactId.current;
-    previousContentArtifactId.current = nextId;
-    if (!nextId || nextId === previousId) return;
-    if (nextId !== lastDirectArtifactId.current && previousId) {
+    const changed = nextId !== previousId;
+    const externalChange =
+      Boolean(nextId && previousId && changed) &&
+      nextId !== lastDirectArtifactId.current;
+
+    if (changed) previousContentArtifactId.current = nextId;
+    if (externalChange) {
       undoStack.current = [];
       redoStack.current = [];
       updateHistorySize();
     }
-    if (directRevision?.artifactId === nextId && content.data) {
+
+    // A direct edit is already an authoritative, server-confirmed revision. Keep
+    // displaying it while the project and artifact queries catch up. Only hand
+    // display ownership back to a revision created outside this editor after
+    // that exact artifact has hydrated.
+    if (
+      directRevision &&
+      nextId &&
+      nextId !== lastDirectArtifactId.current &&
+      content.data?.artifactId === nextId
+    ) {
       setDirectRevision(null);
     }
   }, [
@@ -295,11 +357,17 @@ export const App = () => {
     }
   }, [editorGaps, selectedGapIds]);
 
+  useEffect(() => {
+    if (liveSelectedTrackIds.length !== selectedTrackIds.length) {
+      setSelectedTrackIds(liveSelectedTrackIds);
+    }
+  }, [liveSelectedTrackIds, selectedTrackIds.length]);
+
   const selectedScene =
     editorContent?.scenes.find(
       (scene) =>
         scene.id ===
-        editorItems.find((item) => item.id === selectedItemIds.at(-1))
+        editorItems.find((item) => item.id === liveSelectedItemIds.at(-1))
           ?.scene_id,
     ) ?? null;
 
@@ -308,9 +376,9 @@ export const App = () => {
       !projectId ||
       !editorArtifactId ||
       !editorContent ||
-      (selectedItemIds.length === 0 &&
-        selectedTrackIds.length === 0 &&
-        selectedGapIds.length === 0)
+      (liveSelectedItemIds.length === 0 &&
+        liveSelectedTrackIds.length === 0 &&
+        liveSelectedGapIds.length === 0)
     ) {
       return null;
     }
@@ -318,9 +386,9 @@ export const App = () => {
       projectId,
       contentArtifactId: editorArtifactId,
       content: editorContent,
-      itemIds: selectedItemIds,
-      trackIds: selectedTrackIds,
-      gapIds: selectedGapIds,
+      itemIds: liveSelectedItemIds,
+      trackIds: liveSelectedTrackIds,
+      gapIds: liveSelectedGapIds,
       playheadSeconds: media.currentTime,
       sourceLedgerArtifact: evidenceArtifact,
       extraArtifactIds: attachedArtifactIds,
@@ -330,9 +398,9 @@ export const App = () => {
     editorArtifactId,
     evidenceArtifact,
     projectId,
-    selectedItemIds,
-    selectedTrackIds,
-    selectedGapIds,
+    liveSelectedItemIds,
+    liveSelectedTrackIds,
+    liveSelectedGapIds,
     attachedArtifactIds,
     media.currentTime,
   ]);
@@ -472,7 +540,28 @@ export const App = () => {
     const parsed = editorPatchInputSchema.safeParse(pending.arguments);
     return parsed.success ? parsed.data : null;
   }, [producer.pendingApprovals]);
-  const previewPatch = agentPreviewPatch;
+  const previewPatch = agentPreviewPatch ?? manualPreviewPatch;
+
+  const transitionFromPatch = useCallback(
+    (patch: EditorPatchInput | null): TransitionTimelineClip | null => {
+      const operation = patch?.operations.find(
+        (candidate) => candidate.type === "upsert_transition_track",
+      );
+      if (!patch || operation?.type !== "upsert_transition_track") return null;
+      return (
+        operation.track.clips.find(
+          (clip) =>
+            clip.from_item_id === patch.selection.item_ids[0] &&
+            clip.to_item_id === patch.selection.item_ids[1],
+        ) ?? null
+      );
+    },
+    [],
+  );
+  const manualTransition = useMemo(
+    () => transitionFromPatch(manualPreviewPatch),
+    [manualPreviewPatch, transitionFromPatch],
+  );
 
   useEffect(() => {
     setSelectedGapIds([]);
@@ -481,6 +570,8 @@ export const App = () => {
     redoStack.current = [];
     setHistorySize({ undo: 0, redo: 0 });
     setDirectRevision(null);
+    setManualPreviewPatch(null);
+    setPreviewTransitionPreset(null);
     lastDirectArtifactId.current = null;
   }, [projectId]);
 
@@ -564,7 +655,35 @@ export const App = () => {
     );
   }, [media.currentTime, visibleContent]);
 
+  const activeTransition = useMemo(() => {
+    if (!visibleContent) return null;
+    return (
+      effectiveTransitionTracks(visibleContent)
+        .filter((track) => track.visible)
+        .flatMap((track) => track.clips)
+        .find((clip) => {
+          const halfDuration = clip.duration_seconds / 2;
+          return (
+            media.currentTime >= clip.cut_seconds - halfDuration &&
+            media.currentTime <= clip.cut_seconds + halfDuration
+          );
+        }) ?? null
+    );
+  }, [media.currentTime, visibleContent]);
+
   useEffect(() => {
+    if (manualTransition) {
+      media.setPlaybackWindow({
+        start: Math.max(
+          0,
+          manualTransition.cut_seconds - manualTransition.duration_seconds / 2,
+        ),
+        end:
+          manualTransition.cut_seconds + manualTransition.duration_seconds / 2,
+      });
+      media.setPlaybackRate(1);
+      return;
+    }
     if (!previewPatch?.selection.time_range_seconds) {
       media.setPlaybackWindow(null);
       media.setPlaybackRate(1);
@@ -572,7 +691,12 @@ export const App = () => {
     }
     media.setPlaybackWindow(previewPatch.selection.time_range_seconds);
     media.setPlaybackRate(1);
-  }, [media.setPlaybackRate, media.setPlaybackWindow, previewPatch]);
+  }, [
+    manualTransition,
+    media.setPlaybackRate,
+    media.setPlaybackWindow,
+    previewPatch,
+  ]);
 
   const directProducer = useCallback(
     (text: string) => {
@@ -589,13 +713,14 @@ export const App = () => {
       operations: EditorPatchOperation[];
       summary: string;
       recordHistory: boolean;
+      allowPreview?: boolean;
     }) => {
       if (
         !projectId ||
         !editorArtifactId ||
         !editorContent ||
         applyDirectPatch.isPending ||
-        previewPatch
+        (previewPatch && !input.allowPreview)
       ) {
         return false;
       }
@@ -988,6 +1113,335 @@ export const App = () => {
     }
   };
 
+  const placeAudioArtifact = useCallback(
+    async (input: {
+      artifact: Artifact;
+      durationSeconds: number;
+      extraArtifactIds?: string[];
+      label: string;
+      role: "effects" | "music";
+    }) => {
+      if (!projectId || !editorArtifactId || !editorContent) return false;
+      const selectedGap = editorGaps.find((gap) =>
+        selectedGapIds.includes(gap.id),
+      );
+      const selectedItem = editorItems.find(
+        (item) => item.id === selectedItemIds.at(-1),
+      );
+      const start = snapToFrame(
+        Math.max(
+          0,
+          selectedGap?.start_seconds ??
+            selectedItem?.start_seconds ??
+            media.currentTime,
+        ),
+      );
+      const scene =
+        editorContent.scenes.find(
+          (candidate) => candidate.id === selectedGap?.after_scene_id,
+        ) ?? sceneAtTimelineTime(editorContent, start);
+      if (!scene) return false;
+      const sourceDuration = fitSourceDurationToFrames(
+        artifactDurationSeconds(input.artifact, input.durationSeconds),
+      );
+      const duration = snapToFrame(
+        Math.max(
+          1 / VIDEO_FPS,
+          Math.min(sourceDuration, totalDuration(editorContent) - start),
+        ),
+      );
+      const clipId = `clip_${crypto.randomUUID()}`;
+      const existing = effectiveAudioTracks(editorContent).find(
+        (track) => track.role === input.role,
+      );
+      const track = existing ?? {
+        id: input.role === "music" ? "track_music" : "track_effects",
+        name: input.role === "music" ? "Music" : "Sound effects",
+        role: input.role,
+        locale: null,
+        voice_label: null,
+        muted: false,
+        solo: false,
+        export_enabled: true,
+        gain: 1,
+        clips: [],
+      };
+      const operation: EditorPatchOperation = {
+        type: "upsert_audio_track",
+        track: {
+          ...track,
+          clips: [
+            ...track.clips,
+            {
+              id: clipId,
+              scene_id: scene.id,
+              label: input.label,
+              artifact_id: input.artifact.id,
+              script: null,
+              transcript_artifact_id: null,
+              captions_artifact_id: null,
+              start_offset_seconds: 0,
+              timeline_start_seconds: start,
+              source_in_seconds: 0,
+              source_out_seconds: duration,
+              duration_seconds: duration,
+              playback_rate: 1,
+              status: "generated",
+            },
+          ],
+        },
+      };
+      const applied = await persistDirectOperations({
+        selection: createSelection({
+          projectId,
+          contentArtifactId: editorArtifactId,
+          content: editorContent,
+          sceneIds: [scene.id],
+          trackIds: ["voice", track.id],
+          playheadSeconds: start,
+          sourceLedgerArtifact: evidenceArtifact,
+          extraArtifactIds: [
+            input.artifact.id,
+            ...(input.extraArtifactIds ?? []),
+          ],
+        }),
+        operations: [operation],
+        summary: `Place ${input.label}`,
+        recordHistory: true,
+      });
+      if (applied) {
+        setSelectedItemIds([audioItemId(clipId)]);
+        setSelectedGapIds([]);
+        media.seek(start);
+      }
+      return applied;
+    },
+    [
+      editorArtifactId,
+      editorContent,
+      editorGaps,
+      editorItems,
+      evidenceArtifact,
+      media,
+      persistDirectOperations,
+      projectId,
+      selectedGapIds,
+      selectedItemIds,
+    ],
+  );
+
+  const buildTransitionPatch = useCallback(
+    (preset: TransitionPresetId): EditorPatchInput | null => {
+      if (!projectId || !editorArtifactId || !editorContent) return null;
+      const selectedGap = editorGaps.find((gap) =>
+        selectedGapIds.includes(gap.id),
+      );
+      const selectedItem = editorItems.find(
+        (item) => item.id === selectedItemIds.at(-1),
+      );
+      const targetTime =
+        selectedGap?.end_seconds ??
+        selectedItem?.end_seconds ??
+        media.currentTime;
+      const edit = buildTransitionTrackEdit({
+        content: editorContent,
+        items: editorItems,
+        targetSeconds: targetTime,
+        preset,
+        createClipId: () => `clip_${crypto.randomUUID()}`,
+      });
+      if (!edit) return null;
+      return editorPatchInputSchema.parse({
+        instruction_summary: `Use ${edit.clip.label}`,
+        operations: [edit.operation],
+        selection: createSelection({
+          projectId,
+          contentArtifactId: editorArtifactId,
+          content: editorContent,
+          itemIds: [edit.leftItem.id, edit.rightItem.id],
+          sceneIds: [edit.leftItem.scene_id, edit.rightItem.scene_id],
+          trackIds: ["transition", edit.operation.track.id],
+          gapIds: selectedGap ? [selectedGap.id] : [],
+          playheadSeconds: edit.clip.cut_seconds,
+          sourceLedgerArtifact: evidenceArtifact,
+        }),
+      });
+    },
+    [
+      editorArtifactId,
+      editorContent,
+      editorGaps,
+      editorItems,
+      evidenceArtifact,
+      media.currentTime,
+      projectId,
+      selectedGapIds,
+      selectedItemIds,
+    ],
+  );
+
+  const previewTransition = useCallback(
+    (preset: TransitionPresetId | null) => {
+      setPreviewTransitionPreset(preset);
+      const patch = preset ? buildTransitionPatch(preset) : null;
+      setManualPreviewPatch(patch);
+      const transition = transitionFromPatch(patch);
+      if (transition) {
+        media.seek(
+          Math.max(0, transition.cut_seconds - transition.duration_seconds / 2),
+        );
+      }
+    },
+    [buildTransitionPatch, media, transitionFromPatch],
+  );
+
+  const applyTransition = useCallback(
+    async (preset: TransitionPresetId) => {
+      const patch =
+        previewTransitionPreset === preset && manualPreviewPatch
+          ? manualPreviewPatch
+          : buildTransitionPatch(preset);
+      if (!patch) return;
+      setManualPreviewPatch(null);
+      setPreviewTransitionPreset(null);
+      const applied = await persistDirectOperations({
+        selection: patch.selection,
+        operations: patch.operations,
+        summary: patch.instruction_summary,
+        recordHistory: true,
+        allowPreview: true,
+      });
+      if (!applied) return;
+      const transition = transitionFromPatch(patch);
+      if (transition) {
+        setSelectedItemIds([transitionItemId(transition.id)]);
+        media.seek(transition.cut_seconds);
+      }
+    },
+    [
+      buildTransitionPatch,
+      manualPreviewPatch,
+      media,
+      persistDirectOperations,
+      previewTransitionPreset,
+      transitionFromPatch,
+    ],
+  );
+
+  const applyGeneratedSound = useCallback(
+    async (input: {
+      artifact: Artifact;
+      durationSeconds: number;
+      presetId: SoundEffectPresetId;
+    }) => {
+      await placeAudioArtifact({
+        artifact: input.artifact,
+        durationSeconds: input.durationSeconds,
+        label: soundEffectPresetRegistry[input.presetId].label,
+        role: "effects",
+      });
+    },
+    [placeAudioArtifact],
+  );
+
+  const placeLibraryAsset = useCallback(
+    async ({ artifact, licenseArtifact, result }: PlacedLibraryAsset) => {
+      if (!projectId || !editorArtifactId || !editorContent) return;
+      const selectedGap = editorGaps.find((gap) =>
+        selectedGapIds.includes(gap.id),
+      );
+      const selectedItem = editorItems.find(
+        (item) => item.id === selectedItemIds.at(-1),
+      );
+      const start = snapToFrame(
+        Math.max(
+          0,
+          selectedGap?.start_seconds ??
+            selectedItem?.start_seconds ??
+            media.currentTime,
+        ),
+      );
+      const scene =
+        editorContent.scenes.find(
+          (candidate) => candidate.id === selectedGap?.after_scene_id,
+        ) ?? sceneAtTimelineTime(editorContent, start);
+      if (!scene) return;
+      const sourceDuration = fitSourceDurationToFrames(
+        artifactDurationSeconds(artifact, result.duration_seconds ?? 5),
+      );
+      const available = Math.max(
+        1 / VIDEO_FPS,
+        totalDuration(editorContent) - start,
+      );
+      const requestedDuration = selectedGap
+        ? selectedGap.end_seconds - selectedGap.start_seconds
+        : Math.min(sourceDuration, 5);
+      const duration = snapToFrame(
+        Math.max(
+          1 / VIDEO_FPS,
+          Math.min(sourceDuration, available, requestedDuration),
+        ),
+      );
+      const clipId = `clip_${crypto.randomUUID()}`;
+
+      if (result.use === "broll") {
+        const operation = buildBrollPlacementOperation(editorContent, {
+          artifactId: artifact.id,
+          clipId,
+          durationSeconds: duration,
+          label: result.title,
+          licenseArtifactId: licenseArtifact.id,
+          sceneId: scene.id,
+          sourceDurationSeconds: sourceDuration,
+          startSeconds: start,
+        });
+        const applied = await persistDirectOperations({
+          selection: createSelection({
+            projectId,
+            contentArtifactId: editorArtifactId,
+            content: editorContent,
+            sceneIds: [scene.id],
+            trackIds: ["visual", BROLL_TRACK_ID],
+            gapIds: selectedGap ? [selectedGap.id] : [],
+            playheadSeconds: start,
+            sourceLedgerArtifact: evidenceArtifact,
+            extraArtifactIds: [artifact.id, licenseArtifact.id],
+          }),
+          operations: [operation],
+          summary: `Place ${result.title}`,
+          recordHistory: true,
+        });
+        if (applied) {
+          setSelectedItemIds([videoItemId(clipId)]);
+          setSelectedGapIds([]);
+          media.seek(start);
+        }
+        return;
+      }
+
+      await placeAudioArtifact({
+        artifact,
+        durationSeconds: sourceDuration,
+        extraArtifactIds: [licenseArtifact.id],
+        label: result.title,
+        role: result.use === "music" ? "music" : "effects",
+      });
+    },
+    [
+      editorArtifactId,
+      editorContent,
+      editorGaps,
+      editorItems,
+      evidenceArtifact,
+      media,
+      placeAudioArtifact,
+      persistDirectOperations,
+      projectId,
+      selectedGapIds,
+      selectedItemIds,
+    ],
+  );
+
   const leftPaneWidth = layout.leftOpen ? layout.leftWidth : 42;
   const rightPaneWidth = layout.rightOpen ? layout.rightWidth : 42;
 
@@ -1069,6 +1523,7 @@ export const App = () => {
         >
           {layout.leftOpen ? (
             <MediaBrowser
+              projectId={projectId!}
               artifacts={project.data?.artifacts ?? []}
               attachedArtifactIds={attachedArtifactIds}
               importing={uploadAsset.isPending}
@@ -1076,6 +1531,11 @@ export const App = () => {
               workspacePath={project.data?.project.workspace_path ?? null}
               onSelectArtifact={selectArtifact}
               onImport={(files) => void importMedia(files)}
+              onPlaceLibraryAsset={placeLibraryAsset}
+              onApplySoundEffect={applyGeneratedSound}
+              onApplyTransition={applyTransition}
+              onPreviewTransition={previewTransition}
+              previewTransitionPreset={previewTransitionPreset}
               onCollapse={() => layout.setLeftOpen(false)}
             />
           ) : (
@@ -1105,6 +1565,17 @@ export const App = () => {
             duration={programDuration}
             previewing={Boolean(previewContent)}
             previewUsesCanvas={previewUsesCanvas}
+            transition={activeTransition}
+            transitionReview={
+              manualTransition && previewTransitionPreset
+                ? {
+                    label: `${transitionPresetRegistry[previewTransitionPreset].label} preview`,
+                    onApply: () =>
+                      void applyTransition(previewTransitionPreset),
+                    onCancel: () => previewTransition(null),
+                  }
+                : null
+            }
             captionText={activeCaption?.label ?? null}
             timelineOpen={layout.timelineOpen}
             onToggleTimeline={() =>

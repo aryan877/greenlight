@@ -413,6 +413,7 @@ describe("applyEditorPatch", () => {
             name: "B-roll",
             kind: "video",
             protected: false,
+            visible: true,
           },
         },
         {

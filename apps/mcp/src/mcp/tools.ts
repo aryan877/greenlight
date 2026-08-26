@@ -8,9 +8,11 @@ import {
   editorPatchInputSchema,
   evidenceLedgerSchema,
   generateImageInputSchema,
+  generateSoundEffectInputSchema,
   generateVoiceInputSchema,
   getArtifactInputSchema,
   idSchema,
+  importMediaLibraryAssetInputSchema,
   projectBriefSchema,
   publishVideoInputSchema,
   qualityCheckInputSchema,
@@ -18,6 +20,7 @@ import {
   readArtifactChunkInputSchema,
   renderVideoInputSchema,
   scheduleVideoInputSchema,
+  searchMediaLibraryInputSchema,
   searchOpenMojiInputSchema,
   stageVideoInputSchema,
   transcribeAudioInputSchema,
@@ -31,6 +34,7 @@ import { createId, hashJson } from "../lib/canonical.js";
 import type { CodexImageProvider } from "../providers/codex-image.js";
 import type { QualityInspector } from "../providers/quality.js";
 import type { OpenMojiToolkit } from "../providers/openmoji.js";
+import type { MediaLibraryProvider } from "../providers/media-library.js";
 import type { RemotionRenderer } from "../providers/render.js";
 import type { TranscriptionProvider } from "../providers/transcription.js";
 import type { VoiceProvider } from "../providers/voice.js";
@@ -38,10 +42,13 @@ import type { YouTubeUploader } from "../providers/youtube.js";
 import type { ArtifactStore } from "../storage/artifacts.js";
 import type { GreenlightStore } from "../storage/store.js";
 import { saveEditorPatch } from "../services/editor-patches.js";
+import { importLibraryAsset } from "../services/media-library.js";
+import { generateSoundEffectArtifact } from "../services/sound-design.js";
 
 type ToolDependencies = {
   artifacts: ArtifactStore;
   image: CodexImageProvider;
+  mediaLibrary: MediaLibraryProvider;
   openmoji: OpenMojiToolkit;
   quality: QualityInspector;
   renderer: RemotionRenderer;
@@ -78,6 +85,7 @@ export const captionsFromTimedWords = (
 export const buildMcpServer = ({
   artifacts,
   image,
+  mediaLibrary,
   openmoji,
   quality,
   renderer,
@@ -111,11 +119,62 @@ export const buildMcpServer = ({
           ...image.describe(),
         },
         openmoji: openmoji.describe(),
+        media_library: mediaLibrary.describe(),
         voice: voice.describe(),
         transcription: transcription.describe(),
         render: { available: true, provider: "remotion" },
         youtube: { available: true, mode: "local_oauth_profile" },
       }),
+  );
+
+  server.registerTool(
+    "search_media_library",
+    {
+      title: "Search licensed B-roll or audio",
+      description:
+        "Search the configured stock-media adapters by meaning. Returns provider asset IDs, previews, source pages, creator names, and license metadata. Search only; it does not download or place media.",
+      inputSchema: searchMediaLibraryInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (input) => {
+      const request = searchMediaLibraryInputSchema.parse(input);
+      return result({ results: await mediaLibrary.search(request) });
+    },
+  );
+
+  server.registerTool(
+    "import_media_library_asset",
+    {
+      title: "Import one licensed media result",
+      description:
+        "Resolve one selected provider asset ID server-side, verify its current license metadata, and save immutable media plus a license receipt. Use the returned artifact ID in an editor patch; never pass a provider download URL to the timeline.",
+      inputSchema: importMediaLibraryAssetInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (input) => {
+      const request = importMediaLibraryAssetInputSchema.parse(input);
+      return result(
+        await importLibraryAsset({
+          artifacts,
+          library: mediaLibrary,
+          projectId: request.project_id,
+          provider: request.provider,
+          providerAssetId: request.provider_asset_id,
+          store,
+          use: request.use,
+        }),
+      );
+    },
   );
 
   server.registerTool(
@@ -138,6 +197,28 @@ export const buildMcpServer = ({
         matches: await openmoji.search(request.query, request.limit),
         attribution: "All emojis designed by OpenMoji, licensed CC BY-SA 4.0.",
       });
+    },
+  );
+
+  server.registerTool(
+    "generate_sound_effect",
+    {
+      title: "Generate one sound-effect preview",
+      description:
+        "Synthesize a deterministic local WAV from a Greenlight sound preset. Saves an immutable preview artifact but does not edit the timeline. The creator can audition it before either direct UI placement or an approved editor patch.",
+      inputSchema: generateSoundEffectInputSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (input) => {
+      const request = generateSoundEffectInputSchema.parse(input);
+      return result(
+        await generateSoundEffectArtifact({ artifacts, input: request, store }),
+      );
     },
   );
 

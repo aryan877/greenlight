@@ -38,6 +38,7 @@ export type TrackDraft = {
 const trackIcon = (track: Pick<EditorTimelineTrack, "kind" | "role">) => {
   if (track.kind === "video") return Film;
   if (track.kind === "caption") return Captions;
+  if (track.kind === "transition") return Sparkles;
   if (track.role === "dub") return Languages;
   if (track.role === "music") return Music2;
   if (track.role === "effects") return Sparkles;
@@ -81,6 +82,7 @@ const trackChoices: Array<TrackDraft & { Icon: typeof Film }> = [
   { kind: "audio", name: "Music", role: "music", Icon: Music2 },
   { kind: "audio", name: "Effects", role: "effects", Icon: Sparkles },
   { kind: "caption", name: "Captions", role: null, Icon: Captions },
+  { kind: "transition", name: "Transitions", role: null, Icon: Sparkles },
 ];
 
 type TrackDrag = {
@@ -288,6 +290,7 @@ export const TrackRail = ({
                 track.kind === "video" && "text-track-video-strong",
                 track.kind === "audio" && "text-track-voice-strong",
                 track.kind === "caption" && "text-track-caption-strong",
+                track.kind === "transition" && "text-action",
               )}
             />
             {renamingTrackId === track.id ? (

@@ -80,6 +80,10 @@ const referenceAppearance = {
     className:
       "border-track-caption-strong/30 bg-track-caption text-track-caption-strong",
   },
+  transition: {
+    Icon: Sparkles,
+    className: "border-action/35 bg-action-soft text-action",
+  },
   gap: {
     Icon: Split,
     className: "border-line bg-surface-sunken text-ink-secondary",
