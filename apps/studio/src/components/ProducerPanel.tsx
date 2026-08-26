@@ -10,6 +10,7 @@ import {
   ArrowUp,
   Captions,
   Check,
+  ChevronDown,
   CircleDot,
   Film,
   Image as ImageIcon,
@@ -61,6 +62,122 @@ const AgentMark = ({ thinking = false }: { thinking?: boolean }) => (
     />
   </span>
 );
+
+const SubagentMark = ({
+  running,
+  failed,
+}: {
+  running: boolean;
+  failed: boolean;
+}) => (
+  <span
+    className={cx(
+      "relative grid size-7 shrink-0 place-items-center rounded-full bg-action-soft text-action",
+      failed && "bg-warning-soft text-warning",
+    )}
+  >
+    <GreenlightMark
+      size={16}
+      strokeWidth={1.9}
+      className={cx(running && "motion-safe:animate-spin")}
+    />
+    <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full border-2 border-surface bg-action" />
+  </span>
+);
+
+const SubagentCard = ({
+  event,
+  onOpenDocument,
+}: {
+  event: StudioAgentEvent;
+  onOpenDocument: (document: StudioReviewDocument) => void;
+}) => {
+  const running = event.status === "running";
+  const failed = event.status === "error";
+  const shouldStayOpen = running || Boolean(event.document);
+  const [open, setOpen] = useState(shouldStayOpen);
+  const previousStatus = useRef(event.status);
+  const document = event.document;
+
+  useEffect(() => {
+    if (shouldStayOpen) {
+      setOpen(true);
+    } else if (previousStatus.current === "running") {
+      setOpen(false);
+    }
+    previousStatus.current = event.status;
+  }, [event.status, shouldStayOpen]);
+
+  const run = event.subagent;
+  return (
+    <section className="ml-8 w-[calc(100%-2rem)] overflow-hidden rounded-xl border border-line bg-surface">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left hover:bg-surface-raised"
+      >
+        <SubagentMark running={running} failed={failed} />
+        <span className="min-w-0 flex-1">
+          <strong className="block truncate text-[12px] font-medium leading-5 text-ink">
+            {event.label}
+          </strong>
+          <span className="text-[11px] text-ink-tertiary">{event.detail}</span>
+        </span>
+        <ChevronDown
+          size={14}
+          className={cx(
+            "shrink-0 text-ink-tertiary transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open ? (
+        <div className="border-t border-line-subtle px-3 pb-3 pt-2.5">
+          {run?.brief ? (
+            <p className="mb-2 text-[11px] leading-5 text-ink-secondary">
+              {run.brief}
+            </p>
+          ) : null}
+          {run?.steps.length ? (
+            <ul className="space-y-1.5">
+              {run.steps.map((step) => (
+                <li
+                  key={step.id}
+                  className="flex items-center gap-2 text-[11px] leading-5 text-ink-tertiary"
+                >
+                  {step.status === "done" ? (
+                    <Check size={12} className="shrink-0 text-action" />
+                  ) : (
+                    <LoaderCircle
+                      size={12}
+                      className="shrink-0 motion-safe:animate-spin"
+                    />
+                  )}
+                  <span>{step.label}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {run?.result && !event.document ? (
+            <p className="mt-2 line-clamp-6 whitespace-pre-wrap text-[11px] leading-5 text-ink-secondary">
+              {run.result}
+            </p>
+          ) : null}
+          {document ? (
+            <button
+              type="button"
+              onClick={() => onOpenDocument(document)}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface-raised px-2.5 py-1.5 text-[11px] font-medium text-ink hover:border-action/40"
+            >
+              <FileText size={12} /> Review draft
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+};
 
 type TimelineReferenceKind = EditorTimelineItem["kind"] | "gap";
 
@@ -859,37 +976,11 @@ export const ProducerPanel = ({
               }
               if (event.kind === "subagent") {
                 return (
-                  <div
+                  <SubagentCard
                     key={event.id}
-                    className="ml-8 flex w-[calc(100%-2rem)] items-center gap-2.5 rounded-xl border border-line bg-surface px-3 py-2.5"
-                  >
-                    <span
-                      className={cx(
-                        "grid size-6 shrink-0 place-items-center rounded-full bg-action-soft text-action",
-                        event.status === "error" &&
-                          "bg-warning-soft text-warning",
-                      )}
-                    >
-                      {event.status === "running" ? (
-                        <LoaderCircle
-                          size={13}
-                          className="motion-safe:animate-spin"
-                        />
-                      ) : event.status === "done" ? (
-                        <Check size={13} />
-                      ) : (
-                        <X size={13} />
-                      )}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <strong className="block truncate text-[12px] font-medium leading-5 text-ink">
-                        {event.label}
-                      </strong>
-                      <span className="text-[11px] text-ink-tertiary">
-                        {event.detail}
-                      </span>
-                    </div>
-                  </div>
+                    event={event}
+                    onOpenDocument={setOpenDocument}
+                  />
                 );
               }
               return (

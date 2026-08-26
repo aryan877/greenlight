@@ -34,6 +34,20 @@ export type StudioAgentEvent = {
   document?: StudioReviewDocument;
   artifactId?: string;
   status?: "running" | "done" | "error";
+  subagent?: StudioSubagentRun;
+};
+
+export type StudioSubagentStep = {
+  id: string;
+  label: string;
+  status: "running" | "done";
+};
+
+export type StudioSubagentRun = {
+  threadId: string;
+  brief: string;
+  steps: StudioSubagentStep[];
+  result: string;
 };
 
 export type StudioReviewDocument = {
@@ -53,7 +67,36 @@ export const appendUniqueStudioEvents = (
   const updates = new Map(incoming.map((item) => [item.id, item]));
   const currentIds = new Set(current.map((item) => item.id));
   return [
-    ...current.map((item) => updates.get(item.id) ?? item),
+    ...current.map((item) => {
+      const update = updates.get(item.id);
+      if (!update) return item;
+      if (item.kind !== "subagent" || update.kind !== "subagent") {
+        return update;
+      }
+      const steps = new Map(
+        (item.subagent?.steps ?? []).map((step) => [step.id, step]),
+      );
+      for (const step of update.subagent?.steps ?? []) {
+        const currentStep = steps.get(step.id);
+        steps.set(step.id, {
+          ...currentStep,
+          ...step,
+          label: step.label || currentStep?.label || "Working",
+        });
+      }
+      return {
+        ...item,
+        ...update,
+        label:
+          update.label === "Subagent" && item.label ? item.label : update.label,
+        subagent: {
+          threadId: update.subagent?.threadId ?? item.subagent?.threadId ?? "",
+          brief: update.subagent?.brief || item.subagent?.brief || "",
+          steps: [...steps.values()],
+          result: update.subagent?.result || item.subagent?.result || "",
+        },
+      };
+    }),
     ...incoming.filter((item) => !currentIds.has(item.id)),
   ];
 };
@@ -567,6 +610,159 @@ const toolPresentation = (
     : null;
 };
 
+const eventThreadId = (event: WireEvent): string | null => {
+  const value = event.threadId ?? event.thread_id;
+  return typeof value === "string" ? value : null;
+};
+
+const subagentInfo = (event: WireEvent) => {
+  const value = event.agentInfo ?? event.agent_info;
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
+};
+
+const subagentToolLabel = (toolName: string): string => {
+  if (/search|exa/i.test(toolName)) return "Searching the web";
+  if (/crawl|fetch|read|contents?/i.test(toolName)) return "Reading a source";
+  if (/evidence|claim|source/i.test(toolName)) return "Organizing findings";
+  if (/script|story|content_package/i.test(toolName))
+    return "Shaping the draft";
+  return cleanConversationText(toolName.replaceAll("_", " "));
+};
+
+const subagentResult = (event: WireEvent): string => {
+  const state =
+    event.state && typeof event.state === "object"
+      ? (event.state as Record<string, unknown>)
+      : null;
+  const output =
+    state?.output && typeof state.output === "object"
+      ? (state.output as Record<string, unknown>)
+      : null;
+  return textContent(output?.content)
+    .replace(/```(?:markdown|md)?/gi, "")
+    .replace(/```/g, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*]\s+/gm, "• ")
+    .trim()
+    .slice(0, 12_000);
+};
+
+const subagentDocument = (
+  title: string,
+  result: string,
+): StudioReviewDocument | undefined => {
+  if (!result || !/script|chapter|story|outline/i.test(title)) return undefined;
+  const lines = result
+    .split(/\n{2,}/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return {
+    title: "Script draft",
+    subtitle: "Review the chapters and wording before production starts",
+    sections: [{ title, lines }],
+  };
+};
+
+const describeSubagentEvent = (event: WireEvent): StudioAgentEvent[] | null => {
+  const type = String(event.type ?? "");
+  const threadId = eventThreadId(event);
+
+  if (type === "thread.created") {
+    const childThreadId = String(threadId ?? event.id ?? "");
+    const info = subagentInfo(event);
+    const title = cleanConversationText(
+      String(event.title ?? info?.name ?? "Subagent"),
+    );
+    return [
+      {
+        id: `subagent-${childThreadId}`,
+        kind: "subagent",
+        label: title,
+        detail: "Working",
+        sceneIds: [],
+        status: "running",
+        subagent: {
+          threadId: childThreadId,
+          brief: cleanConversationText(String(info?.input ?? "")),
+          steps: [],
+          result: "",
+        },
+      },
+    ];
+  }
+
+  if (!threadId || threadId === "main") return null;
+
+  if (type === "model.message") {
+    const steps = toolCallsOf(event).map((call) => ({
+      id: call.id,
+      label: subagentToolLabel(call.function.name),
+      status: "running" as const,
+    }));
+    return steps.length > 0
+      ? [
+          {
+            id: `subagent-${threadId}`,
+            kind: "subagent",
+            label: "Subagent",
+            detail: steps.at(-1)?.label ?? "Working",
+            sceneIds: [],
+            status: "running",
+            subagent: { threadId, brief: "", steps, result: "" },
+          },
+        ]
+      : [];
+  }
+
+  if (type === "tool.response") {
+    const toolCallId = event.toolCallId ?? event.tool_call_id;
+    return typeof toolCallId === "string"
+      ? [
+          {
+            id: `subagent-${threadId}`,
+            kind: "subagent",
+            label: "Subagent",
+            detail: "Working",
+            sceneIds: [],
+            status: "running",
+            subagent: {
+              threadId,
+              brief: "",
+              steps: [{ id: toolCallId, label: "", status: "done" }],
+              result: "",
+            },
+          },
+        ]
+      : [];
+  }
+
+  if (type === "thread.done") {
+    const title = cleanConversationText(String(event.title ?? "Subagent"));
+    const state =
+      event.state && typeof event.state === "object"
+        ? (event.state as Record<string, unknown>)
+        : null;
+    const failed = state?.status === "error";
+    const result = subagentResult(event);
+    return [
+      {
+        id: `subagent-${threadId}`,
+        kind: "subagent",
+        label: title,
+        detail: failed ? "Couldn’t finish" : "Done",
+        sceneIds: [],
+        status: failed ? "error" : "done",
+        subagent: { threadId, brief: "", steps: [], result },
+        document: subagentDocument(title, result),
+      },
+    ];
+  }
+
+  return [];
+};
+
 const creatorFacingSentence = (value: string): string | null => {
   const content = cleanConversationText(value);
   if (!content) return null;
@@ -604,6 +800,8 @@ const creatorFacingSentence = (value: string): string | null => {
 
 export const describeEvent = (event: WireEvent): StudioAgentEvent[] => {
   const type = String(event.type ?? "agent.event");
+  const childEvent = describeSubagentEvent(event);
+  if (childEvent) return childEvent;
   if (type === "agent.context.overwrite" && event.reason === "compaction") {
     return [
       {
@@ -647,43 +845,6 @@ export const describeEvent = (event: WireEvent): StudioAgentEvent[] => {
       });
     }
     return output;
-  }
-  if (type === "thread.created") {
-    const threadId = String(
-      event.threadId ?? event.thread_id ?? event.id ?? "",
-    );
-    const title = cleanConversationText(String(event.title ?? "Research task"));
-    return [
-      {
-        id: `subagent-${threadId}`,
-        kind: "subagent",
-        label: title,
-        detail: "Researching",
-        sceneIds: [],
-        status: "running",
-      },
-    ];
-  }
-  if (type === "thread.done") {
-    const threadId = String(
-      event.threadId ?? event.thread_id ?? event.id ?? "",
-    );
-    const title = cleanConversationText(String(event.title ?? "Research task"));
-    const state =
-      event.state && typeof event.state === "object"
-        ? (event.state as Record<string, unknown>)
-        : null;
-    const failed = state?.status === "error";
-    return [
-      {
-        id: `subagent-${threadId}`,
-        kind: "subagent",
-        label: title,
-        detail: failed ? "Couldn’t finish" : "Done",
-        sceneIds: [],
-        status: failed ? "error" : "done",
-      },
-    ];
   }
   return [];
 };

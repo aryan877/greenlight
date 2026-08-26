@@ -103,33 +103,116 @@ describe("Producer event projection", () => {
     ).toHaveLength(65);
   });
 
-  it("updates one durable card when a subagent finishes", async () => {
+  it("projects a child thread into one durable subagent card", async () => {
     const { appendUniqueStudioEvents, describeEvent } =
       await import("./trueforge.js");
     const started = describeEvent({
       id: "thread_created",
       type: "thread.created",
       thread_id: "research_sources",
-      title: "Verify the launch claim",
+      title: "Research · Primary sources",
+      agent_info: {
+        type: "dynamic",
+        name: "Research · Primary sources",
+        input: "Find primary sources for the opening claim.",
+      },
+    });
+    const searching = describeEvent({
+      id: "searching",
+      type: "model.message",
+      thread_id: "research_sources",
+      tool_calls: [
+        {
+          id: "search_call",
+          function: { name: "web_search_exa", arguments: "{}" },
+        },
+      ],
+    });
+    const searched = describeEvent({
+      id: "searched",
+      type: "tool.response",
+      thread_id: "research_sources",
+      tool_call_id: "search_call",
     });
     const finished = describeEvent({
       id: "thread_done",
       type: "thread.done",
       thread_id: "research_sources",
-      title: "Verify the launch claim",
-      state: { status: "done" },
+      title: "Research · Primary sources",
+      state: {
+        status: "done",
+        output: {
+          type: "model.message",
+          content: "Two primary sources support the opening claim.",
+        },
+      },
     });
 
-    expect(appendUniqueStudioEvents(started, finished)).toEqual([
+    const projected = [searching, searched, finished].reduce(
+      appendUniqueStudioEvents,
+      started,
+    );
+
+    expect(projected).toEqual([
       {
         id: "subagent-research_sources",
         kind: "subagent",
-        label: "Verify the launch claim",
+        label: "Research · Primary sources",
         detail: "Done",
         sceneIds: [],
         status: "done",
+        subagent: {
+          threadId: "research_sources",
+          brief: "Find primary sources for the opening claim.",
+          steps: [
+            {
+              id: "search_call",
+              label: "Searching the web",
+              status: "done",
+            },
+          ],
+          result: "Two primary sources support the opening claim.",
+        },
       },
     ]);
+  });
+
+  it("turns a completed script thread into a review document", async () => {
+    const { appendUniqueStudioEvents, describeEvent } =
+      await import("./trueforge.js");
+    const started = describeEvent({
+      type: "thread.created",
+      thread_id: "script_draft",
+      title: "Script · Chapters and draft",
+      agent_info: { input: "Write the chapter plan and spoken script." },
+    });
+    const finished = describeEvent({
+      type: "thread.done",
+      thread_id: "script_draft",
+      title: "Script · Chapters and draft",
+      state: {
+        status: "done",
+        output: {
+          content:
+            "Chapter 1: Hook\n\nOpen with the creator's central tension.",
+        },
+      },
+    });
+
+    const [event] = appendUniqueStudioEvents(started, finished);
+    expect(event?.document).toEqual({
+      title: "Script draft",
+      subtitle: "Review the chapters and wording before production starts",
+      sections: [
+        {
+          title: "Script · Chapters and draft",
+          lines: [
+            "Chapter 1: Hook",
+            "Open with the creator's central tension.",
+          ],
+        },
+      ],
+    });
   });
 
   it("shows a compaction milestone only when TrueForge emits one", async () => {
