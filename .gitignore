@@ -2,6 +2,7 @@ node_modules/
 .turbo/
 dist/
 coverage/
+research/
 .env
 .env.*
 !.env.example
