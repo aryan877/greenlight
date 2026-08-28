@@ -115,9 +115,7 @@ export const buildMcpServer = ({
     },
     async () =>
       result({
-        image: {
-          ...image.describe(),
-        },
+        image: await image.describe(),
         openmoji: openmoji.describe(),
         media_library: mediaLibrary.describe(),
         voice: voice.describe(),

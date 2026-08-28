@@ -1,10 +1,11 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { extname, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import type { ArtifactKind } from "@greenlight/contracts";
 
@@ -26,20 +27,122 @@ type ImageGenerationItem = {
   type: "imageGeneration";
 };
 
+export type CodexImageCapabilities = {
+  available: boolean;
+  connected: boolean;
+  connection: "api_key" | "chatgpt" | "unknown" | null;
+  model: string | null;
+  provider: "codex_subscription";
+  quality: "provider_default";
+  reason:
+    | "codex_not_authenticated"
+    | "codex_not_installed"
+    | "codex_status_unavailable"
+    | null;
+  runtime: "codex app-server";
+  skill: "imagegen";
+};
+
+const execFileAsync = promisify(execFile);
+const CAPABILITY_TTL_MS = 30_000;
+
+export const codexConnectionFromStatus = (
+  output: string,
+): CodexImageCapabilities["connection"] => {
+  const normalized = output.toLowerCase();
+  if (
+    normalized.includes("not logged in") ||
+    normalized.includes("login required")
+  ) {
+    return null;
+  }
+  if (normalized.includes("chatgpt")) return "chatgpt";
+  if (normalized.includes("api key") || normalized.includes("api_key")) {
+    return "api_key";
+  }
+  return normalized.includes("logged in") ? "unknown" : null;
+};
+
 export class CodexImageProvider {
+  private cachedCapabilities:
+    { expiresAt: number; value: CodexImageCapabilities } | undefined;
+
   constructor(
     private readonly config: { binaryPath: string; model: string | null },
     private readonly artifacts: ArtifactStore,
   ) {}
 
-  describe() {
-    return {
-      available: true,
+  async describe(options: { refresh?: boolean } = {}) {
+    if (
+      !options.refresh &&
+      this.cachedCapabilities &&
+      this.cachedCapabilities.expiresAt > Date.now()
+    ) {
+      return this.cachedCapabilities.value;
+    }
+
+    const base = {
       provider: "codex_subscription",
       runtime: "codex app-server",
       model: this.config.model,
       skill: "imagegen",
+      quality: "provider_default",
+    } as const;
+    let value: CodexImageCapabilities;
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        this.config.binaryPath,
+        ["login", "status"],
+        {
+          env: process.env,
+          maxBuffer: 16 * 1024,
+          timeout: 5_000,
+          windowsHide: true,
+        },
+      );
+      const connection = codexConnectionFromStatus(`${stdout}\n${stderr}`);
+      value = connection
+        ? {
+            ...base,
+            available: true,
+            connected: true,
+            connection,
+            reason: null,
+          }
+        : {
+            ...base,
+            available: false,
+            connected: false,
+            connection: null,
+            reason: "codex_not_authenticated",
+          };
+    } catch (error) {
+      const failure = error as NodeJS.ErrnoException & {
+        stderr?: Buffer | string;
+        stdout?: Buffer | string;
+      };
+      const output = `${String(failure.stdout ?? "")}\n${String(
+        failure.stderr ?? "",
+      )}`.toLowerCase();
+      value = {
+        ...base,
+        available: false,
+        connected: false,
+        connection: null,
+        reason:
+          failure.code === "ENOENT"
+            ? "codex_not_installed"
+            : output.includes("not logged in") ||
+                output.includes("login required")
+              ? "codex_not_authenticated"
+              : "codex_status_unavailable",
+      };
+    }
+    this.cachedCapabilities = {
+      expiresAt: Date.now() + CAPABILITY_TTL_MS,
+      value,
     };
+    return value;
   }
 
   async generate(input: {
@@ -49,6 +152,10 @@ export class CodexImageProvider {
     prompt: string;
     sceneId: string | null;
   }) {
+    const capabilities = await this.describe();
+    if (!capabilities.connected) {
+      throw new Error(capabilities.reason ?? "codex_not_authenticated");
+    }
     const workDir = await mkdtemp(join(tmpdir(), "greenlight-codex-image-"));
     const child = spawn(this.config.binaryPath, ["app-server"], {
       cwd: workDir,

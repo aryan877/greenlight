@@ -7,7 +7,7 @@ import {
   type SoundEffectPresetId,
   type TransitionPresetId,
 } from "@greenlight/contracts";
-import { Check, Play, Sparkles, Volume2, X } from "lucide-react";
+import { Blend, Check, Play, Volume2, X } from "lucide-react";
 import { useState } from "react";
 
 import { greenlightApi } from "../api/greenlight.js";
@@ -16,25 +16,28 @@ import { cx } from "./controls.js";
 
 type EffectsTab = "transitions" | "sounds";
 
-const TransitionSwatch = ({ preset }: { preset: TransitionPresetId }) => (
-  <div className="relative h-20 overflow-hidden rounded-xl bg-canvas">
-    <div className="absolute inset-y-0 left-0 w-1/2 bg-action-soft" />
-    <div
-      className={cx(
-        "absolute inset-y-0 right-0 w-1/2 bg-track-caption-soft",
-        preset === "crossfade" && "opacity-70",
-        preset === "dip_to_black" && "border-l-8 border-ink",
-        preset === "blur_dissolve" && "blur-sm",
-        ["push", "slide", "whip"].includes(preset) &&
-          "translate-x-2 skew-x-[-5deg]",
-        preset === "zoom_through" && "scale-110",
-        preset === "mask_reveal" && "rounded-l-full",
-        preset === "glitch" && "translate-y-1 border-l-4 border-error",
-        preset === "light_flash" && "border-l-[18px] border-white",
-        preset === "film_burn" && "border-l-[18px] border-warning",
-      )}
-    />
-    <span className="absolute left-1/2 top-1/2 h-12 w-px -translate-x-1/2 -translate-y-1/2 bg-ink/25" />
+const TransitionSwatch = ({
+  preset,
+  playing,
+}: {
+  preset: TransitionPresetId;
+  playing: boolean;
+}) => (
+  <div
+    data-preset={preset}
+    data-playing={playing || undefined}
+    className="transition-preview relative h-20 overflow-hidden rounded-xl bg-canvas"
+  >
+    <div className="transition-preview__from absolute inset-0 grid place-items-center bg-action-soft text-[10px] font-medium text-action">
+      A
+    </div>
+    <div className="transition-preview__to absolute inset-0 grid place-items-center bg-track-caption-soft text-[10px] font-medium text-track-caption-strong">
+      B
+    </div>
+    <span className="transition-preview__cut absolute inset-y-3 left-1/2 w-px bg-ink/30" />
+    <span className="absolute bottom-1.5 left-2 rounded-full bg-surface/80 px-1.5 py-0.5 text-[7px] text-ink-caption backdrop-blur-sm">
+      {playing ? "Previewing" : "Preview here"}
+    </span>
   </div>
 );
 
@@ -42,6 +45,7 @@ export const EffectsLibraryDialog = ({
   open,
   projectId,
   previewPreset,
+  selectedPreset,
   onApplySound,
   onApplyTransition,
   onClose,
@@ -50,6 +54,7 @@ export const EffectsLibraryDialog = ({
   open: boolean;
   projectId: string;
   previewPreset: TransitionPresetId | null;
+  selectedPreset: TransitionPresetId | null;
   onApplySound: (input: {
     artifact: Artifact;
     durationSeconds: number;
@@ -82,17 +87,19 @@ export const EffectsLibraryDialog = ({
       <section className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-line bg-surface shadow-float">
         <header className="flex shrink-0 items-center gap-3 border-b border-line-subtle px-4 py-3">
           <span className="grid size-9 place-items-center rounded-full bg-action-soft text-action">
-            <Sparkles size={16} />
+            <Blend size={16} />
           </span>
           <div className="min-w-0">
-            <h2 className="text-[15px] font-medium text-ink">Effects</h2>
+            <h2 className="text-[15px] font-medium text-ink">
+              {tab === "transitions" ? "Transitions" : "Sound effects"}
+            </h2>
             <p className="text-[10px] text-ink-tertiary">
-              Preview first. Placement remains editable and undoable.
+              Preview inside this picker, then place an editable timeline item.
             </p>
           </div>
           <button
             type="button"
-            aria-label="Close effects"
+            aria-label="Close transitions and sound effects"
             onClick={onClose}
             className="ml-auto grid size-8 place-items-center rounded-full text-ink-tertiary hover:bg-hover hover:text-ink"
           >
@@ -135,11 +142,25 @@ export const EffectsLibraryDialog = ({
                       selected ? "border-action" : "border-line",
                     )}
                   >
-                    <TransitionSwatch preset={preset} />
+                    <button
+                      type="button"
+                      aria-label={`${selected ? "Stop" : "Play"} ${definition.label} preview`}
+                      onClick={() =>
+                        onPreviewTransition(selected ? null : preset)
+                      }
+                      className="block w-full text-left"
+                    >
+                      <TransitionSwatch preset={preset} playing={selected} />
+                    </button>
                     <div className="flex items-center gap-2 px-1 pb-1 pt-2">
                       <span className="min-w-0 flex-1 text-[11px] font-medium text-ink">
                         {definition.label}
                       </span>
+                      {selectedPreset === preset ? (
+                        <span className="rounded-full bg-action-soft px-1.5 py-0.5 text-[7px] font-medium text-action">
+                          Selected
+                        </span>
+                      ) : null}
                       <span className="font-mono text-[8px] text-ink-caption">
                         {definition.default_duration_seconds.toFixed(2)}s
                       </span>
@@ -152,14 +173,14 @@ export const EffectsLibraryDialog = ({
                         }
                         className="h-8 rounded-full border border-line text-[10px] text-ink-secondary hover:bg-hover"
                       >
-                        {selected ? "Stop preview" : "Preview"}
+                        {selected ? "Stop" : "Preview"}
                       </button>
                       <button
                         type="button"
                         onClick={() => void onApplyTransition(preset)}
                         className="h-8 rounded-full bg-control text-[10px] font-medium text-control-ink"
                       >
-                        Apply
+                        {selectedPreset ? "Replace" : "Apply"}
                       </button>
                     </div>
                   </article>

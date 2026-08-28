@@ -176,6 +176,153 @@
   }
 }
 
+@keyframes timeline-label-marquee {
+  0%,
+  18% {
+    transform: translateX(0);
+  }
+  72%,
+  88% {
+    transform: translateX(calc(-100% + 2.5rem));
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes transition-preview-fade-from {
+  0%,
+  18% {
+    opacity: 1;
+  }
+  72%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes transition-preview-fade-to {
+  0%,
+  18% {
+    opacity: 0;
+  }
+  72%,
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes transition-preview-slide-from {
+  0%,
+  18% {
+    transform: translateX(0);
+  }
+  72%,
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes transition-preview-slide-to {
+  0%,
+  18% {
+    transform: translateX(100%);
+  }
+  72%,
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.transition-preview__from {
+  clip-path: inset(0 50% 0 0);
+}
+
+.transition-preview__to {
+  clip-path: inset(0 0 0 50%);
+}
+
+.transition-preview[data-playing] .transition-preview__from,
+.transition-preview[data-playing] .transition-preview__to,
+.transition-preview[data-preset="clean_cut"] .transition-preview__from,
+.transition-preview[data-preset="clean_cut"] .transition-preview__to {
+  clip-path: none;
+}
+
+.transition-preview[data-playing] .transition-preview__from {
+  animation: transition-preview-fade-from 1.8s ease-in-out infinite alternate;
+}
+
+.transition-preview[data-playing] .transition-preview__to {
+  animation: transition-preview-fade-to 1.8s ease-in-out infinite alternate;
+}
+
+.transition-preview[data-playing][data-preset="push"] .transition-preview__from,
+.transition-preview[data-playing][data-preset="slide"]
+  .transition-preview__from,
+.transition-preview[data-playing][data-preset="whip"]
+  .transition-preview__from {
+  animation-name: transition-preview-slide-from;
+}
+
+.transition-preview[data-playing][data-preset="push"] .transition-preview__to,
+.transition-preview[data-playing][data-preset="slide"] .transition-preview__to,
+.transition-preview[data-playing][data-preset="whip"] .transition-preview__to {
+  animation-name: transition-preview-slide-to;
+}
+
+.transition-preview[data-preset="dip_to_black"] {
+  box-shadow: inset 0 0 0 2px var(--color-ink);
+}
+
+.transition-preview[data-preset="blur_dissolve"] .transition-preview__to {
+  filter: blur(5px);
+}
+
+.transition-preview[data-preset="zoom_through"] .transition-preview__to {
+  transform: scale(1.18);
+}
+
+.transition-preview[data-preset="mask_reveal"] .transition-preview__to {
+  clip-path: circle(36% at 70% 50%);
+}
+
+.transition-preview[data-preset="glitch"] .transition-preview__cut {
+  width: 4px;
+  background: var(--color-error);
+}
+
+.transition-preview[data-preset="light_flash"] .transition-preview__cut,
+.transition-preview[data-preset="film_burn"] .transition-preview__cut {
+  width: 12px;
+  transform: translateX(-6px);
+  background: var(--color-warning);
+  filter: blur(4px);
+}
+
+.timeline-clip-label > span {
+  display: inline-block;
+  min-width: max-content;
+  white-space: nowrap;
+}
+
+.group:hover .timeline-clip-label > span,
+.group:focus-visible .timeline-clip-label > span {
+  animation: timeline-label-marquee 3.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group:hover .timeline-clip-label > span,
+  .group:focus-visible .timeline-clip-label > span {
+    animation: none;
+  }
+
+  .transition-preview[data-playing] .transition-preview__from,
+  .transition-preview[data-playing] .transition-preview__to {
+    animation: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .agent-thinking {
     animation: none;

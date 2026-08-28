@@ -97,7 +97,7 @@ export const maximumTimelineItemDuration = (
         .find((candidate) => videoItemId(candidate.id) === item.id);
       if (clip) {
         return Math.min(
-          (clip.source_out_seconds - clip.source_in_seconds) /
+          (clip.source_duration_seconds - clip.source_in_seconds) /
             clip.playback_rate,
           totalDuration(content) - item.start_seconds,
         );
@@ -114,10 +114,7 @@ export const maximumTimelineItemDuration = (
       );
     }
     case "caption":
-      return Math.min(
-        scene.duration_seconds,
-        totalDuration(content) - item.start_seconds,
-      );
+      return totalDuration(content) - item.start_seconds;
     case "audio": {
       const clip = effectiveAudioTracks(content)
         .flatMap((track) => track.clips)
@@ -134,7 +131,49 @@ export const maximumTimelineItemDuration = (
       );
     }
     case "transition":
-      return Math.min(3, totalDuration(content) - item.start_seconds);
+      return Math.min(
+        3,
+        item.end_seconds + item.start_seconds,
+        2 *
+          (totalDuration(content) -
+            (item.start_seconds + item.end_seconds) / 2),
+      );
+    default:
+      return unreachableTimelineItemKind(item.kind);
+  }
+};
+
+export const minimumTimelineItemStart = (
+  content: ContentPackage,
+  item: EditorTimelineItem,
+) => {
+  switch (item.kind) {
+    case "audio": {
+      const clip = effectiveAudioTracks(content)
+        .flatMap((track) => track.clips)
+        .find((candidate) => audioItemId(candidate.id) === item.id);
+      return clip
+        ? Math.max(
+            0,
+            item.start_seconds - clip.source_in_seconds / clip.playback_rate,
+          )
+        : item.start_seconds;
+    }
+    case "caption":
+      return 0;
+    case "video": {
+      const clip = effectiveVideoTracks(content)
+        .flatMap((track) => track.clips ?? [])
+        .find((candidate) => videoItemId(candidate.id) === item.id);
+      return clip
+        ? Math.max(
+            0,
+            item.start_seconds - clip.source_in_seconds / clip.playback_rate,
+          )
+        : item.start_seconds;
+    }
+    case "transition":
+      return Math.max(0, (item.start_seconds + item.end_seconds) / 2 - 1.5);
     default:
       return unreachableTimelineItemKind(item.kind);
   }
@@ -144,6 +183,7 @@ export const buildTimelineTrimPlan = (
   content: ContentPackage,
   item: EditorTimelineItem,
   nextDuration: number,
+  nextStart = item.start_seconds,
 ): TimelineEditPlan | null => {
   const scene = content.scenes.find(
     (candidate) => candidate.id === item.scene_id,
@@ -162,6 +202,14 @@ export const buildTimelineTrimPlan = (
             type: "update_audio_clip",
             item_id: item.id,
             clip_id: clip.id,
+            ...(nextStart === item.start_seconds
+              ? {}
+              : {
+                  timeline_start_seconds: nextStart,
+                  source_in_seconds:
+                    clip.source_in_seconds +
+                    (nextStart - item.start_seconds) * clip.playback_rate,
+                }),
             duration_seconds: nextDuration,
           },
         ],
@@ -179,6 +227,9 @@ export const buildTimelineTrimPlan = (
             type: "update_caption_clip",
             item_id: item.id,
             clip_id: clip.id,
+            ...(nextStart === item.start_seconds
+              ? {}
+              : { timeline_start_seconds: nextStart }),
             duration_seconds: nextDuration,
           },
         ],
@@ -196,9 +247,19 @@ export const buildTimelineTrimPlan = (
               type: "update_video_clip",
               item_id: item.id,
               clip_id: clip.id,
+              ...(nextStart === item.start_seconds
+                ? {}
+                : {
+                    timeline_start_seconds: nextStart,
+                    source_in_seconds:
+                      clip.source_in_seconds +
+                      (nextStart - item.start_seconds) * clip.playback_rate,
+                  }),
               duration_seconds: nextDuration,
               source_out_seconds:
-                clip.source_in_seconds + nextDuration * clip.playback_rate,
+                clip.source_in_seconds +
+                (nextStart - item.start_seconds) * clip.playback_rate +
+                nextDuration * clip.playback_rate,
             },
           ],
         };
@@ -247,6 +308,99 @@ export const buildTimelineTrimPlan = (
     default:
       return unreachableTimelineItemKind(item.kind);
   }
+};
+
+export const buildTimelineDeletePlan = (
+  content: ContentPackage,
+  itemIds: string[],
+): TimelineEditPlan => {
+  const selected = timelineItems(content).filter((item) =>
+    itemIds.includes(item.id),
+  );
+  const audioClips = effectiveAudioTracks(content).flatMap(
+    (track) => track.clips,
+  );
+  const captionClips = effectiveCaptionTracks(content).flatMap(
+    (track) => track.clips,
+  );
+  const videoClips = effectiveVideoTracks(content).flatMap(
+    (track) => track.clips ?? [],
+  );
+  const transitionClips = effectiveTransitionTracks(content).flatMap(
+    (track) => track.clips,
+  );
+  const operations: EditorPatchOperation[] = [];
+  const removingSceneIds = new Set<string>();
+
+  for (const item of selected) {
+    switch (item.kind) {
+      case "audio": {
+        const clip = audioClips.find(
+          (candidate) => audioItemId(candidate.id) === item.id,
+        );
+        if (clip) {
+          operations.push({
+            type: "remove_audio_clip",
+            item_id: item.id,
+            clip_id: clip.id,
+          });
+        }
+        break;
+      }
+      case "caption": {
+        const clip = captionClips.find(
+          (candidate) => captionItemId(candidate.id) === item.id,
+        );
+        if (clip) {
+          operations.push({
+            type: "remove_caption_clip",
+            item_id: item.id,
+            clip_id: clip.id,
+          });
+        }
+        break;
+      }
+      case "video": {
+        const clip = videoClips.find(
+          (candidate) => videoItemId(candidate.id) === item.id,
+        );
+        if (clip) {
+          operations.push({
+            type: "remove_video_clip",
+            item_id: item.id,
+            clip_id: clip.id,
+          });
+        } else if (
+          content.scenes.length - removingSceneIds.size > 1 &&
+          !removingSceneIds.has(item.scene_id)
+        ) {
+          removingSceneIds.add(item.scene_id);
+          operations.push({ type: "remove_scene", scene_id: item.scene_id });
+        }
+        break;
+      }
+      case "transition": {
+        const clip = transitionClips.find(
+          (candidate) => transitionItemId(candidate.id) === item.id,
+        );
+        if (clip) {
+          operations.push({
+            type: "remove_transition_clip",
+            item_id: item.id,
+            clip_id: clip.id,
+          });
+        }
+        break;
+      }
+      default:
+        unreachableTimelineItemKind(item.kind);
+    }
+  }
+
+  return {
+    operations,
+    sceneScope: removingSceneIds.size > 0 ? "all" : "items",
+  };
 };
 
 export const buildTimelineMovePlan = (

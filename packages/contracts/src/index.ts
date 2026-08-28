@@ -1653,6 +1653,11 @@ export const editorPatchOperationSchema = z.discriminatedUnion("type", [
     type: z.literal("remove_audio_track"),
     track_id: idSchema,
   }),
+  z.object({
+    type: z.literal("remove_audio_clip"),
+    item_id: idSchema,
+    clip_id: audioClipIdSchema,
+  }),
   z
     .object({
       type: z.literal("update_audio_clip"),
@@ -1724,6 +1729,11 @@ export const editorPatchOperationSchema = z.discriminatedUnion("type", [
     type: z.literal("remove_caption_track"),
     track_id: idSchema,
   }),
+  z.object({
+    type: z.literal("remove_caption_clip"),
+    item_id: idSchema,
+    clip_id: audioClipIdSchema,
+  }),
   z
     .object({
       type: z.literal("update_caption_clip"),
@@ -1758,6 +1768,7 @@ export const editorPatchOperationSchema = z.discriminatedUnion("type", [
       item_id: idSchema,
       clip_id: audioClipIdSchema,
       target_track_id: idSchema.optional(),
+      label: z.string().trim().min(1).max(90).optional(),
       cut_seconds: frameAlignedSecondsSchema.nonnegative().max(120).optional(),
       duration_seconds: frameAlignedSecondsSchema
         .min(1 / VIDEO_FPS)
@@ -1890,7 +1901,12 @@ export const applyEditorPatch = (
   ) {
     throw new Error("selection_time_range_outside_production");
   }
-  if (selection.time_range_seconds && selectedSceneIds.size > 0) {
+  if (
+    selection.time_range_seconds &&
+    selectedSceneIds.size > 0 &&
+    selection.item_ids.length === 0 &&
+    selection.gap_ids.length === 0
+  ) {
     const selectedIndexes = [...selectedSceneIds].map((sceneId) =>
       requireScene(base.scenes, sceneId),
     );
@@ -2218,6 +2234,29 @@ export const applyEditorPatch = (
         );
         break;
       }
+      case "remove_audio_clip": {
+        if (!selection.item_ids.includes(operation.item_id)) {
+          throw new Error(`item_outside_selection:${operation.item_id}`);
+        }
+        if (operation.item_id !== audioTimelineItemId(operation.clip_id)) {
+          throw new Error("audio_item_clip_mismatch");
+        }
+        next.audio_tracks ??= effectiveAudioTracks(next);
+        const track = next.audio_tracks.find((candidate) =>
+          candidate.clips.some((clip) => clip.id === operation.clip_id),
+        );
+        if (!track) throw new Error("audio_clip_not_found");
+        requireOneTrack("voice", track.id);
+        const clip = track.clips.find(
+          (candidate) => candidate.id === operation.clip_id,
+        );
+        if (!clip) throw new Error("audio_clip_not_found");
+        requireSelectedScene(selectedSceneIds, clip.scene_id);
+        track.clips = track.clips.filter(
+          (candidate) => candidate.id !== operation.clip_id,
+        );
+        break;
+      }
       case "update_audio_clip": {
         if (!selection.item_ids.includes(operation.item_id)) {
           throw new Error(`item_outside_selection:${operation.item_id}`);
@@ -2408,6 +2447,29 @@ export const applyEditorPatch = (
         );
         break;
       }
+      case "remove_caption_clip": {
+        if (!selection.item_ids.includes(operation.item_id)) {
+          throw new Error(`item_outside_selection:${operation.item_id}`);
+        }
+        if (operation.item_id !== captionTimelineItemId(operation.clip_id)) {
+          throw new Error("caption_item_clip_mismatch");
+        }
+        next.caption_tracks = effectiveCaptionTracks(next);
+        const track = next.caption_tracks.find((candidate) =>
+          (candidate.clips ?? []).some((clip) => clip.id === operation.clip_id),
+        );
+        if (!track) throw new Error("caption_clip_not_found");
+        requireOneTrack("caption", track.id);
+        const clip = (track.clips ?? []).find(
+          (candidate) => candidate.id === operation.clip_id,
+        );
+        if (!clip) throw new Error("caption_clip_not_found");
+        requireSelectedScene(selectedSceneIds, clip.scene_id);
+        track.clips = (track.clips ?? []).filter(
+          (candidate) => candidate.id !== operation.clip_id,
+        );
+        break;
+      }
       case "update_caption_clip": {
         if (!selection.item_ids.includes(operation.item_id)) {
           throw new Error(`item_outside_selection:${operation.item_id}`);
@@ -2502,6 +2564,7 @@ export const applyEditorPatch = (
         if (!clip) throw new Error("transition_clip_not_found");
         targetTrack.clips.push({
           ...clip,
+          ...(operation.label === undefined ? {} : { label: operation.label }),
           ...(operation.cut_seconds === undefined
             ? {}
             : { cut_seconds: operation.cut_seconds }),

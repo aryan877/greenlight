@@ -102,6 +102,10 @@ app.get("/api/voice", (_request, response) => {
   response.json(voice.describe());
 });
 
+app.get("/api/image-generation", async (_request, response) => {
+  response.json(await image.describe());
+});
+
 app.get("/api/youtube", async (_request, response) => {
   try {
     const channel = await youtube.identity();

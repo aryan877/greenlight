@@ -14,7 +14,7 @@ import {
   Mic2,
   PanelLeftClose,
   Plus,
-  Sparkles,
+  Blend,
   Upload,
   X,
 } from "lucide-react";
@@ -308,6 +308,7 @@ export const MediaBrowser = ({
   onApplyTransition,
   onPreviewTransition,
   previewTransitionPreset,
+  selectedTransitionPreset,
   onCollapse,
 }: {
   projectId: string;
@@ -327,6 +328,7 @@ export const MediaBrowser = ({
   onApplyTransition: (preset: TransitionPresetId) => Promise<void> | void;
   onPreviewTransition: (preset: TransitionPresetId | null) => void;
   previewTransitionPreset: TransitionPresetId | null;
+  selectedTransitionPreset: TransitionPresetId | null;
   onCollapse: () => void;
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -355,9 +357,16 @@ export const MediaBrowser = ({
 
   return (
     <aside className="flex h-full min-h-0 flex-col bg-sidebar">
-      <div className="flex h-12 shrink-0 items-center gap-2 overflow-hidden border-b border-line-subtle px-3">
-        <span className="text-[12px] font-medium text-ink">Media</span>
-        <span className="text-[9px] text-ink-caption">{media.length}</span>
+      <div
+        role="toolbar"
+        aria-label="Media tools"
+        data-testid="media-tools-scroll"
+        className="no-scrollbar flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b border-line-subtle px-3"
+      >
+        <span className="shrink-0 text-[12px] font-medium text-ink">Media</span>
+        <span className="shrink-0 text-[9px] text-ink-caption">
+          {media.length}
+        </span>
         <div className="ml-auto flex shrink-0 items-center gap-1">
           <input
             ref={fileInputRef}
@@ -395,7 +404,7 @@ export const MediaBrowser = ({
             onClick={() => setEffectsOpen(true)}
             className="grid size-8 place-items-center rounded-full border border-line text-ink-secondary hover:bg-hover hover:text-ink"
           >
-            <Sparkles size={13} />
+            <Blend size={13} />
           </button>
           <IconButton
             Icon={PanelLeftClose}
@@ -528,11 +537,11 @@ export const MediaBrowser = ({
         open={effectsOpen}
         projectId={projectId}
         previewPreset={previewTransitionPreset}
+        selectedPreset={selectedTransitionPreset}
         onApplySound={onApplySoundEffect}
         onApplyTransition={onApplyTransition}
         onPreviewTransition={(preset) => {
           onPreviewTransition(preset);
-          if (preset) setEffectsOpen(false);
         }}
         onClose={() => {
           onPreviewTransition(null);

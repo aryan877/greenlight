@@ -86,7 +86,7 @@ TrueFoundry AI Gateway and MCP Gateway are intentionally not in the judged path.
 
 ## Media pipeline
 
-- **Visuals:** OpenMoji with license provenance, creator media, and an optional bounded Codex subscription image route
+- **Visuals:** OpenMoji with license provenance, creator media, and an optional bounded Codex image route with live installed/authenticated status
 - **B-roll:** Pexels video search behind a server-only key; chosen clips are imported once with measured metadata and a license receipt
 - **Music and effects:** commercially compatible Openverse audio plus deterministic local sound synthesis
 - **Transitions:** a compact typed registry shared by the timeline, AI edit commands, Program preview, and Remotion
@@ -215,7 +215,7 @@ The gate runs formatting, lint, type checks, unit tests, and production builds. 
 - It does not promise views, revenue, or autonomous channel growth.
 - Custom TrueForge skills require a public Git source at runtime.
 - The YouTube OAuth profile must be connected manually on the trusted host.
-- Codex subscription image generation is a trusted-machine capability, not a hosted multi-tenant provider.
+- Codex image generation is a trusted-machine capability, not a hosted multi-tenant provider. Studio detects the local Codex login without spending an image generation request.
 - The final paid transcription, unlisted upload, and release rehearsal remain manual pre-submission gates.
 
 ## Attribution and disclosure

@@ -7,6 +7,7 @@ import type {
   EditorTimelineTrack,
 } from "@greenlight/contracts";
 import {
+  Blend,
   ArrowUp,
   Captions,
   Check,
@@ -211,7 +212,7 @@ const referenceAppearance = {
       "border-track-caption-strong/30 bg-track-caption text-track-caption-strong",
   },
   transition: {
-    Icon: Sparkles,
+    Icon: Blend,
     className: "border-action/35 bg-action-soft text-action",
   },
   gap: {

@@ -15,12 +15,13 @@ import {
 import {
   Captions,
   ChevronDown,
+  Blend,
   Layers3,
   Mic2,
   Plus,
   Redo2,
-  Sparkles,
   Split,
+  Trash2,
   Undo2,
   ZoomIn,
   ZoomOut,
@@ -55,6 +56,7 @@ import {
   buildTimelineMovePlan,
   buildTimelineTrimPlan,
   maximumTimelineItemDuration,
+  minimumTimelineItemStart,
 } from "../editor/operations.js";
 import { pointInsideProducer } from "../editor/pointer-target.js";
 import { TrackRail, type TrackDraft } from "./TrackRail.js";
@@ -123,7 +125,7 @@ const ITEM_ICONS = {
   video: Layers3,
   audio: Mic2,
   caption: Captions,
-  transition: Sparkles,
+  transition: Blend,
 } satisfies Record<EditorTimelineItemKind, LucideIcon>;
 
 const itemIcon = (kind: EditorTimelineItemKind) => ITEM_ICONS[kind];
@@ -159,6 +161,7 @@ export const Timeline = ({
   editing,
   onUndo,
   onRedo,
+  onDeleteSelection,
 }: {
   content: ContentPackage;
   selectedItemIds: string[];
@@ -202,6 +205,7 @@ export const Timeline = ({
   editing: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  onDeleteSelection: () => void;
 }) => {
   const duration = totalDuration(content);
   const audioTracks = effectiveAudioTracks(content);
@@ -230,6 +234,7 @@ export const Timeline = ({
   const [dropSceneId, setDropSceneId] = useState<string | null>(null);
   const [trim, setTrim] = useState<{
     itemId: string;
+    start: number;
     duration: number;
   } | null>(null);
   const [marquee, setMarquee] = useState<Marquee | null>(null);
@@ -833,6 +838,108 @@ export const Timeline = ({
     );
   };
 
+  const commitItemTrim = (
+    item: EditorTimelineItem,
+    edge: "start" | "end",
+    next: { start: number; duration: number },
+  ) => {
+    const initialDuration = item.end_seconds - item.start_seconds;
+    const sameFrame = (left: number, right: number) =>
+      Math.round(left * VIDEO_FPS) === Math.round(right * VIDEO_FPS);
+    if (
+      sameFrame(next.start, item.start_seconds) &&
+      sameFrame(next.duration, initialDuration)
+    ) {
+      return;
+    }
+    const plan = buildTimelineTrimPlan(
+      content,
+      item,
+      next.duration,
+      next.start,
+    );
+    if (!plan) return;
+    const summary = `${edge === "start" ? "Trim start of" : "Trim end of"} ${item.label} to ${formatTime(next.duration)}`;
+    if (plan.sceneScope === "all") {
+      onDirectEdit([item.scene_id], plan.operations, summary);
+    } else {
+      onDirectItemEdit([item.id], plan.operations, summary);
+    }
+  };
+
+  const startItemTrim = (
+    event: ReactPointerEvent<HTMLSpanElement>,
+    item: EditorTimelineItem,
+    edge: "start" | "end",
+    maximumDuration: number,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const initialStart = item.start_seconds;
+    const initialEnd = item.end_seconds;
+    const initialDuration = initialEnd - initialStart;
+    const minimumDuration =
+      item.kind === "video" ? MIN_SCENE_DURATION_SECONDS : 1 / VIDEO_FPS;
+    const minimumStart = minimumTimelineItemStart(content, item);
+    const axisWidth = timeAxisRef.current?.getBoundingClientRect().width;
+    if (!axisWidth) return;
+
+    const resolveTrim = (clientX: number) => {
+      const delta = ((clientX - startX) / axisWidth) * duration;
+      if (item.kind === "transition") {
+        const cut = (initialStart + initialEnd) / 2;
+        const nextDuration = Math.max(
+          minimumDuration,
+          Math.min(
+            maximumDuration,
+            snapToFrame(
+              edge === "start"
+                ? initialDuration - delta * 2
+                : initialDuration + delta * 2,
+            ),
+          ),
+        );
+        return {
+          start: snapToFrame(cut - nextDuration / 2),
+          duration: nextDuration,
+        };
+      }
+      if (edge === "start") {
+        const nextStart = Math.max(
+          minimumStart,
+          Math.min(
+            initialEnd - minimumDuration,
+            snapToFrame(initialStart + delta),
+          ),
+        );
+        return {
+          start: nextStart,
+          duration: snapToFrame(initialEnd - nextStart),
+        };
+      }
+      const nextDuration = Math.max(
+        minimumDuration,
+        Math.min(maximumDuration, snapToFrame(initialDuration + delta)),
+      );
+      return { start: initialStart, duration: nextDuration };
+    };
+
+    const move = (pointer: PointerEvent) => {
+      const next = resolveTrim(pointer.clientX);
+      setTrim({ itemId: item.id, ...next });
+    };
+    const up = (pointer: PointerEvent) => {
+      const next = resolveTrim(pointer.clientX);
+      setTrim(null);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      commitItemTrim(item, edge, next);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up, { once: true });
+  };
+
   return (
     <section className="isolate flex h-full min-h-0 flex-col bg-surface">
       <div className="flex h-10 shrink-0 items-center border-b border-line-subtle px-2.5">
@@ -909,6 +1016,13 @@ export const Timeline = ({
             size="sm"
             disabled={!canRedo || editing}
             onClick={onRedo}
+          />
+          <IconButton
+            Icon={Trash2}
+            label="Delete selected timeline items"
+            size="sm"
+            disabled={selectedItemIds.length === 0 || previewing || editing}
+            onClick={onDeleteSelection}
           />
           <span className="mx-1 h-4 w-px bg-line-subtle" />
           <IconButton
@@ -1186,12 +1300,14 @@ export const Timeline = ({
                   const sceneIndex = content.scenes.findIndex(
                     (candidate) => candidate.id === scene.id,
                   );
+                  const displayedStart =
+                    trim?.itemId === item.id ? trim.start : item.start_seconds;
                   const displayedEnd =
                     trim?.itemId === item.id
-                      ? item.start_seconds + trim.duration
+                      ? trim.start + trim.duration
                       : item.end_seconds;
                   const width =
-                    ((displayedEnd - item.start_seconds) / duration) * 100;
+                    ((displayedEnd - displayedStart) / duration) * 100;
                   const selected = selectedItemIds.includes(item.id);
                   const proposed = previewSceneIds.includes(item.scene_id);
                   const row = laneIndex.get(item.track_id) ?? 0;
@@ -1200,6 +1316,13 @@ export const Timeline = ({
                     content,
                     item,
                   );
+                  const canTrimStart =
+                    item.kind !== "video" ||
+                    effectiveVideoTracks(content).some((track) =>
+                      (track.clips ?? []).some(
+                        (clip) => videoItemId(clip.id) === item.id,
+                      ),
+                    );
                   const isDropTarget =
                     item.kind === "video" &&
                     item.id === videoItemId(item.scene_id) &&
@@ -1273,7 +1396,7 @@ export const Timeline = ({
                           "after:absolute after:inset-y-0 after:right-0 after:z-20 after:w-0.5 after:bg-action",
                       )}
                       style={{
-                        left: `${(item.start_seconds / duration) * 100}%`,
+                        left: `${(displayedStart / duration) * 100}%`,
                         top: row * LANE_HEIGHT + 2,
                         width: `${width}%`,
                         height: LANE_HEIGHT - 4,
@@ -1308,83 +1431,141 @@ export const Timeline = ({
                           item.kind === "transition" && "text-action",
                         )}
                       />
-                      <span className="truncate text-[9px] font-medium">
-                        {item.label}
+                      <span className="timeline-clip-label min-w-0 flex-1 overflow-hidden text-[9px] font-medium">
+                        <span>{item.label}</span>
                       </span>
-                      <span className="ml-auto shrink-0 font-mono text-[7px] text-ink-caption">
-                        {formatTime(displayedEnd - item.start_seconds)}
-                      </span>
+                      {item.kind !== "transition" ? (
+                        <span className="ml-auto shrink-0 font-mono text-[7px] text-ink-caption">
+                          {formatTime(displayedEnd - displayedStart)}
+                        </span>
+                      ) : null}
                       {selected && !previewing && !editing ? (
-                        <span
-                          role="slider"
-                          tabIndex={0}
-                          data-trim-handle
-                          aria-label={`Trim ${item.label}`}
-                          title="Drag to trim the end"
-                          className="absolute inset-y-0 right-0 z-20 w-1.5 cursor-ew-resize bg-action/70 hover:bg-action"
-                          onPointerDown={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            const startX = event.clientX;
-                            const initial =
-                              item.end_seconds - item.start_seconds;
-                            const minimumDuration =
-                              item.kind === "video"
-                                ? MIN_SCENE_DURATION_SECONDS
-                                : 1 / VIDEO_FPS;
-                            const width =
-                              timeAxisRef.current?.getBoundingClientRect()
-                                .width;
-                            if (!width) return;
-                            const resolveDuration = (clientX: number) =>
-                              Math.max(
-                                minimumDuration,
+                        <>
+                          {canTrimStart ? (
+                            <span
+                              role="slider"
+                              tabIndex={0}
+                              data-trim-handle
+                              data-trim-edge="start"
+                              aria-label={`Trim start of ${item.label}`}
+                              aria-valuemin={minimumTimelineItemStart(
+                                content,
+                                item,
+                              )}
+                              aria-valuemax={item.end_seconds - 1 / VIDEO_FPS}
+                              aria-valuenow={displayedStart}
+                              title="Drag to trim or extend the start"
+                              className="absolute inset-y-0 left-0 z-20 w-2 cursor-ew-resize border-l-2 border-action bg-action/20 hover:bg-action/40"
+                              onPointerDown={(event) =>
+                                startItemTrim(
+                                  event,
+                                  item,
+                                  "start",
+                                  maximumDuration,
+                                )
+                              }
+                              onKeyDown={(event) => {
+                                if (
+                                  event.key !== "ArrowLeft" &&
+                                  event.key !== "ArrowRight"
+                                ) {
+                                  return;
+                                }
+                                event.preventDefault();
+                                const direction =
+                                  event.key === "ArrowRight" ? 1 : -1;
+                                const step =
+                                  (event.shiftKey ? 5 : 1) / VIDEO_FPS;
+                                if (item.kind === "transition") {
+                                  const nextDuration = Math.max(
+                                    1 / VIDEO_FPS,
+                                    Math.min(
+                                      maximumDuration,
+                                      snapToFrame(
+                                        displayedEnd -
+                                          displayedStart -
+                                          direction * step * 2,
+                                      ),
+                                    ),
+                                  );
+                                  const cut =
+                                    (item.start_seconds + item.end_seconds) / 2;
+                                  commitItemTrim(item, "start", {
+                                    start: snapToFrame(cut - nextDuration / 2),
+                                    duration: nextDuration,
+                                  });
+                                  return;
+                                }
+                                const nextStart = Math.max(
+                                  minimumTimelineItemStart(content, item),
+                                  Math.min(
+                                    item.end_seconds - 1 / VIDEO_FPS,
+                                    snapToFrame(
+                                      item.start_seconds + direction * step,
+                                    ),
+                                  ),
+                                );
+                                commitItemTrim(item, "start", {
+                                  start: nextStart,
+                                  duration: snapToFrame(
+                                    item.end_seconds - nextStart,
+                                  ),
+                                });
+                              }}
+                            />
+                          ) : null}
+                          <span
+                            role="slider"
+                            tabIndex={0}
+                            data-trim-handle
+                            data-trim-edge="end"
+                            aria-label={`Trim end of ${item.label}`}
+                            aria-valuemin={1 / VIDEO_FPS}
+                            aria-valuemax={maximumDuration}
+                            aria-valuenow={displayedEnd - displayedStart}
+                            title="Drag to trim or extend the end"
+                            className="absolute inset-y-0 right-0 z-20 w-2 cursor-ew-resize border-r-2 border-action bg-action/20 hover:bg-action/40"
+                            onPointerDown={(event) =>
+                              startItemTrim(event, item, "end", maximumDuration)
+                            }
+                            onKeyDown={(event) => {
+                              if (
+                                event.key !== "ArrowLeft" &&
+                                event.key !== "ArrowRight"
+                              ) {
+                                return;
+                              }
+                              event.preventDefault();
+                              const direction =
+                                event.key === "ArrowRight" ? 1 : -1;
+                              const step = (event.shiftKey ? 5 : 1) / VIDEO_FPS;
+                              const multiplier =
+                                item.kind === "transition" ? 2 : 1;
+                              const nextDuration = Math.max(
+                                item.kind === "video"
+                                  ? MIN_SCENE_DURATION_SECONDS
+                                  : 1 / VIDEO_FPS,
                                 Math.min(
                                   maximumDuration,
                                   snapToFrame(
-                                    initial +
-                                      ((clientX - startX) / width) * duration,
+                                    item.end_seconds -
+                                      item.start_seconds +
+                                      direction * step * multiplier,
                                   ),
                                 ),
                               );
-                            const move = (pointer: PointerEvent) =>
-                              setTrim({
-                                itemId: item.id,
-                                duration: resolveDuration(pointer.clientX),
+                              const cut =
+                                (item.start_seconds + item.end_seconds) / 2;
+                              commitItemTrim(item, "end", {
+                                start:
+                                  item.kind === "transition"
+                                    ? snapToFrame(cut - nextDuration / 2)
+                                    : item.start_seconds,
+                                duration: nextDuration,
                               });
-                            const up = (pointer: PointerEvent) => {
-                              const next = resolveDuration(pointer.clientX);
-                              setTrim(null);
-                              window.removeEventListener("pointermove", move);
-                              window.removeEventListener("pointerup", up);
-                              if (next === initial) return;
-                              const plan = buildTimelineTrimPlan(
-                                content,
-                                item,
-                                next,
-                              );
-                              if (!plan) return;
-                              const summary = `Trim ${item.label} to ${formatTime(next)}`;
-                              if (plan.sceneScope === "all") {
-                                onDirectEdit(
-                                  [scene.id],
-                                  plan.operations,
-                                  summary,
-                                );
-                              } else {
-                                onDirectItemEdit(
-                                  [item.id],
-                                  plan.operations,
-                                  summary,
-                                );
-                              }
-                            };
-                            window.addEventListener("pointermove", move);
-                            window.addEventListener("pointerup", up, {
-                              once: true,
-                            });
-                          }}
-                        />
+                            }}
+                          />
+                        </>
                       ) : null}
                     </button>
                   );

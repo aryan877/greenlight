@@ -32,6 +32,7 @@ import {
   useContentPackage,
   useApplyEditorPatch,
   useCreateProject,
+  useImageGenerationCapabilities,
   useProject,
   useProjects,
   useRestoreContentRevision,
@@ -46,6 +47,7 @@ import {
   YouTubeIcon,
 } from "./brand-icons.js";
 import { IconButton, ResizeHandle, cx } from "./components/controls.js";
+import { CodexConnectionStatus } from "./components/CodexConnectionStatus.js";
 import { InspectorPanel } from "./components/InspectorPanel.js";
 import {
   ProducerPanel,
@@ -81,6 +83,7 @@ import { buildTransitionTrackEdit } from "./editor/effects.js";
 import {
   BROLL_TRACK_ID,
   buildBrollPlacementOperation,
+  buildTimelineDeletePlan,
 } from "./editor/operations.js";
 import type { ProducerDraftIntent } from "./editor/producer-draft.js";
 import {
@@ -133,8 +136,6 @@ export const App = () => {
   const [draftIntent, setDraftIntent] = useState<ProducerDraftIntent | null>(
     null,
   );
-  const [manualPreviewPatch, setManualPreviewPatch] =
-    useState<EditorPatchInput | null>(null);
   const [previewTransitionPreset, setPreviewTransitionPreset] =
     useState<TransitionPresetId | null>(null);
   const layout = useWorkspaceLayout();
@@ -146,6 +147,7 @@ export const App = () => {
 
   const project = useProject(projectId);
   const youtubeConnection = useYouTubeConnection();
+  const imageGeneration = useImageGenerationCapabilities();
   const uploadAsset = useUploadAsset(projectId);
   const applyDirectPatch = useApplyEditorPatch(projectId);
   const restoreRevision = useRestoreContentRevision(projectId);
@@ -219,6 +221,17 @@ export const App = () => {
       ),
     [editorGaps, selectedGapIds],
   );
+  const selectedTransitionPreset = useMemo(() => {
+    if (!editorContent) return null;
+    const selectedId = liveSelectedItemIds.at(-1);
+    if (!selectedId) return null;
+    return (
+      effectiveTransitionTracks(editorContent)
+        .flatMap((track) => track.clips)
+        .find((clip) => transitionItemId(clip.id) === selectedId)?.preset_id ??
+      null
+    );
+  }, [editorContent, liveSelectedItemIds]);
   const resolvedProducerReferences = useMemo(
     () =>
       producerReferences.flatMap<ProducerReference>((reference) => {
@@ -540,7 +553,7 @@ export const App = () => {
     const parsed = editorPatchInputSchema.safeParse(pending.arguments);
     return parsed.success ? parsed.data : null;
   }, [producer.pendingApprovals]);
-  const previewPatch = agentPreviewPatch ?? manualPreviewPatch;
+  const previewPatch = agentPreviewPatch;
 
   const transitionFromPatch = useCallback(
     (patch: EditorPatchInput | null): TransitionTimelineClip | null => {
@@ -558,11 +571,6 @@ export const App = () => {
     },
     [],
   );
-  const manualTransition = useMemo(
-    () => transitionFromPatch(manualPreviewPatch),
-    [manualPreviewPatch, transitionFromPatch],
-  );
-
   useEffect(() => {
     setSelectedGapIds([]);
     setSelectedTrackIds([]);
@@ -570,7 +578,6 @@ export const App = () => {
     redoStack.current = [];
     setHistorySize({ undo: 0, redo: 0 });
     setDirectRevision(null);
-    setManualPreviewPatch(null);
     setPreviewTransitionPreset(null);
     lastDirectArtifactId.current = null;
   }, [projectId]);
@@ -672,18 +679,6 @@ export const App = () => {
   }, [media.currentTime, visibleContent]);
 
   useEffect(() => {
-    if (manualTransition) {
-      media.setPlaybackWindow({
-        start: Math.max(
-          0,
-          manualTransition.cut_seconds - manualTransition.duration_seconds / 2,
-        ),
-        end:
-          manualTransition.cut_seconds + manualTransition.duration_seconds / 2,
-      });
-      media.setPlaybackRate(1);
-      return;
-    }
     if (!previewPatch?.selection.time_range_seconds) {
       media.setPlaybackWindow(null);
       media.setPlaybackRate(1);
@@ -691,12 +686,7 @@ export const App = () => {
     }
     media.setPlaybackWindow(previewPatch.selection.time_range_seconds);
     media.setPlaybackRate(1);
-  }, [
-    manualTransition,
-    media.setPlaybackRate,
-    media.setPlaybackWindow,
-    previewPatch,
-  ]);
+  }, [media.setPlaybackRate, media.setPlaybackWindow, previewPatch]);
 
   const directProducer = useCallback(
     (text: string) => {
@@ -891,6 +881,49 @@ export const App = () => {
     ],
   );
 
+  const deleteTimelineSelection = useCallback(async () => {
+    if (
+      !projectId ||
+      !editorArtifactId ||
+      !editorContent ||
+      selectedItemIds.length === 0 ||
+      applyDirectPatch.isPending
+    ) {
+      return;
+    }
+    const plan = buildTimelineDeletePlan(editorContent, selectedItemIds);
+    if (plan.operations.length === 0) return;
+    const deleted = await persistDirectOperations({
+      selection: createSelection({
+        projectId,
+        contentArtifactId: editorArtifactId,
+        content: editorContent,
+        itemIds: selectedItemIds,
+        playheadSeconds: media.currentTime,
+        sourceLedgerArtifact: evidenceArtifact,
+      }),
+      operations: plan.operations,
+      summary:
+        selectedItemIds.length === 1
+          ? "Delete selected timeline item"
+          : `Delete ${selectedItemIds.length} selected timeline items`,
+      recordHistory: true,
+    });
+    if (deleted) {
+      setSelectedItemIds([]);
+      setSelectedGapIds([]);
+    }
+  }, [
+    applyDirectPatch.isPending,
+    editorArtifactId,
+    editorContent,
+    evidenceArtifact,
+    media.currentTime,
+    persistDirectOperations,
+    projectId,
+    selectedItemIds,
+  ]);
+
   const cutAtPlayhead = useCallback(
     (sceneId: string) => {
       if (!editorContent || !projectId || !editorArtifactId) return;
@@ -983,23 +1016,31 @@ export const App = () => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (
-        target?.matches("input, textarea, [contenteditable='true']") ||
-        !(event.metaKey || event.ctrlKey)
+        target?.closest(
+          "input, textarea, [contenteditable='true'], [role='dialog']",
+        )
       ) {
         return;
       }
-      if (event.key.toLowerCase() === "z") {
+      const commandKey = event.metaKey || event.ctrlKey;
+      if (commandKey && event.key.toLowerCase() === "z") {
         event.preventDefault();
         if (event.shiftKey) void redo();
         else void undo();
-      } else if (event.key.toLowerCase() === "y") {
+      } else if (commandKey && event.key.toLowerCase() === "y") {
         event.preventDefault();
         void redo();
+      } else if (
+        !commandKey &&
+        (event.key === "Delete" || event.key === "Backspace")
+      ) {
+        event.preventDefault();
+        void deleteTimelineSelection();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [redo, undo]);
+  }, [deleteTimelineSelection, redo, undo]);
 
   const selectItem = (itemId: string, additive = false) => {
     const item = editorItems.find((candidate) => candidate.id === itemId);
@@ -1239,6 +1280,37 @@ export const App = () => {
       const selectedItem = editorItems.find(
         (item) => item.id === selectedItemIds.at(-1),
       );
+      const selectedTransition = selectedItem
+        ? effectiveTransitionTracks(editorContent)
+            .flatMap((track) => track.clips)
+            .find((clip) => transitionItemId(clip.id) === selectedItem.id)
+        : null;
+      if (selectedItem?.kind === "transition" && selectedTransition) {
+        const definition = transitionPresetRegistry[preset];
+        return editorPatchInputSchema.parse({
+          instruction_summary: `Replace ${selectedTransition.label} with ${definition.label}`,
+          operations: [
+            {
+              type: "update_transition_clip",
+              item_id: selectedItem.id,
+              clip_id: selectedTransition.id,
+              label: definition.label,
+              preset_id: preset,
+              duration_seconds: snapToFrame(
+                definition.default_duration_seconds,
+              ),
+            },
+          ],
+          selection: createSelection({
+            projectId,
+            contentArtifactId: editorArtifactId,
+            content: editorContent,
+            itemIds: [selectedItem.id],
+            playheadSeconds: selectedTransition.cut_seconds,
+            sourceLedgerArtifact: evidenceArtifact,
+          }),
+        });
+      }
       const targetTime =
         selectedGap?.end_seconds ??
         selectedItem?.end_seconds ??
@@ -1280,29 +1352,14 @@ export const App = () => {
     ],
   );
 
-  const previewTransition = useCallback(
-    (preset: TransitionPresetId | null) => {
-      setPreviewTransitionPreset(preset);
-      const patch = preset ? buildTransitionPatch(preset) : null;
-      setManualPreviewPatch(patch);
-      const transition = transitionFromPatch(patch);
-      if (transition) {
-        media.seek(
-          Math.max(0, transition.cut_seconds - transition.duration_seconds / 2),
-        );
-      }
-    },
-    [buildTransitionPatch, media, transitionFromPatch],
-  );
+  const previewTransition = useCallback((preset: TransitionPresetId | null) => {
+    setPreviewTransitionPreset(preset);
+  }, []);
 
   const applyTransition = useCallback(
     async (preset: TransitionPresetId) => {
-      const patch =
-        previewTransitionPreset === preset && manualPreviewPatch
-          ? manualPreviewPatch
-          : buildTransitionPatch(preset);
+      const patch = buildTransitionPatch(preset);
       if (!patch) return;
-      setManualPreviewPatch(null);
       setPreviewTransitionPreset(null);
       const applied = await persistDirectOperations({
         selection: patch.selection,
@@ -1318,14 +1375,7 @@ export const App = () => {
         media.seek(transition.cut_seconds);
       }
     },
-    [
-      buildTransitionPatch,
-      manualPreviewPatch,
-      media,
-      persistDirectOperations,
-      previewTransitionPreset,
-      transitionFromPatch,
-    ],
+    [buildTransitionPatch, media, persistDirectOperations, transitionFromPatch],
   );
 
   const applyGeneratedSound = useCallback(
@@ -1479,6 +1529,10 @@ export const App = () => {
         <div className="ml-auto mr-1.5">
           <ThemeToggle />
         </div>
+        <CodexConnectionStatus
+          capabilities={imageGeneration.data ?? null}
+          checking={imageGeneration.isLoading && !imageGeneration.data}
+        />
         <button
           type="button"
           onClick={() => {
@@ -1536,6 +1590,7 @@ export const App = () => {
               onApplyTransition={applyTransition}
               onPreviewTransition={previewTransition}
               previewTransitionPreset={previewTransitionPreset}
+              selectedTransitionPreset={selectedTransitionPreset}
               onCollapse={() => layout.setLeftOpen(false)}
             />
           ) : (
@@ -1566,16 +1621,7 @@ export const App = () => {
             previewing={Boolean(previewContent)}
             previewUsesCanvas={previewUsesCanvas}
             transition={activeTransition}
-            transitionReview={
-              manualTransition && previewTransitionPreset
-                ? {
-                    label: `${transitionPresetRegistry[previewTransitionPreset].label} preview`,
-                    onApply: () =>
-                      void applyTransition(previewTransitionPreset),
-                    onCancel: () => previewTransition(null),
-                  }
-                : null
-            }
+            transitionReview={null}
             captionText={activeCaption?.label ?? null}
             timelineOpen={layout.timelineOpen}
             onToggleTimeline={() =>
@@ -1668,6 +1714,7 @@ export const App = () => {
                     editing={applyDirectPatch.isPending}
                     onUndo={() => void undo()}
                     onRedo={() => void redo()}
+                    onDeleteSelection={() => void deleteTimelineSelection()}
                   />
                 ) : null}
               </div>

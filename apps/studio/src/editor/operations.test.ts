@@ -7,9 +7,11 @@ import { describe, expect, it } from "vitest";
 import { timelineItems } from "./model.js";
 import {
   buildBrollPlacementOperation,
+  buildTimelineDeletePlan,
   buildTimelineMovePlan,
   buildTimelineTrimPlan,
   maximumTimelineItemDuration,
+  minimumTimelineItemStart,
 } from "./operations.js";
 
 const content = {
@@ -275,6 +277,46 @@ describe("timeline operations", () => {
     });
     expect(plan?.operations[0]).not.toHaveProperty("source_in_seconds");
     expect(plan?.operations[0]).not.toHaveProperty("source_out_seconds");
+  });
+
+  it("trims and re-extends the start of independent audio on the source clock", () => {
+    const audio = item("audio");
+
+    expect(minimumTimelineItemStart(content, audio)).toBe(0);
+    expect(buildTimelineTrimPlan(content, audio, 4, 2)).toEqual({
+      sceneScope: "items",
+      operations: [
+        {
+          type: "update_audio_clip",
+          item_id: audio.id,
+          clip_id: "clip_first_scene",
+          timeline_start_seconds: 2,
+          source_in_seconds: 5,
+          duration_seconds: 4,
+        },
+      ],
+    });
+  });
+
+  it("deletes exact audio and caption clips through shared patch operations", () => {
+    const audio = item("audio");
+    const caption = item("caption");
+
+    expect(buildTimelineDeletePlan(content, [audio.id, caption.id])).toEqual({
+      sceneScope: "items",
+      operations: [
+        {
+          type: "remove_audio_clip",
+          item_id: audio.id,
+          clip_id: "clip_first_scene",
+        },
+        {
+          type: "remove_caption_clip",
+          item_id: caption.id,
+          clip_id: "caption_scene_first",
+        },
+      ],
+    });
   });
 
   it("uses retained source media when a video is extended into a gap", () => {

@@ -39,6 +39,22 @@ export type VoiceCapabilities = {
   voices: VoiceOption[];
 };
 
+export type ImageGenerationCapabilities = {
+  available: boolean;
+  connected: boolean;
+  connection: "api_key" | "chatgpt" | "unknown" | null;
+  model: string | null;
+  provider: "codex_subscription";
+  quality: "provider_default";
+  reason:
+    | "codex_not_authenticated"
+    | "codex_not_installed"
+    | "codex_status_unavailable"
+    | null;
+  runtime: "codex app-server";
+  skill: "imagegen";
+};
+
 export type YouTubeConnection = {
   connected: boolean;
   channel_title: string | null;
@@ -110,6 +126,8 @@ export const greenlightApi = {
     }).then((response) => response.project),
   getProject: (projectId: string) =>
     request<ProjectDetail>(`/projects/${encodeURIComponent(projectId)}`),
+  getImageGenerationCapabilities: () =>
+    request<ImageGenerationCapabilities>("/image-generation"),
   getVoiceCapabilities: () => request<VoiceCapabilities>("/voice"),
   getYouTubeConnection: () => request<YouTubeConnection>("/youtube"),
   getMediaLibraryCapabilities: () =>

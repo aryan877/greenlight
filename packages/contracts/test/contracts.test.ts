@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyEditorPatch,
   audibleAudioTracks,
   captionTrackSchema,
   contentPackageSchema,
@@ -99,6 +100,116 @@ describe("Greenlight contracts", () => {
     });
 
     expect(parsed.success).toBe(false);
+  });
+
+  it("accepts exact clip deletion and transition replacement operations", () => {
+    const selection = {
+      project_id: "project_001",
+      base_content_package_artifact_id: "artifact_001",
+      item_ids: [
+        "audio_clip_voice_001",
+        "caption_clip_caption_001",
+        "transition_clip_transition_001",
+      ],
+      scene_ids: ["scene_001"],
+      track_ids: ["voice", "caption", "transition"],
+      gap_ids: [],
+      artifact_ids: [],
+      playhead_seconds: 1,
+      time_range_seconds: null,
+    };
+    const parsed = editorPatchInputSchema.safeParse({
+      selection,
+      instruction_summary: "Delete clips and replace the selected transition",
+      operations: [
+        {
+          type: "remove_audio_clip",
+          item_id: "audio_clip_voice_001",
+          clip_id: "clip_voice_001",
+        },
+        {
+          type: "remove_caption_clip",
+          item_id: "caption_clip_caption_001",
+          clip_id: "clip_caption_001",
+        },
+        {
+          type: "update_transition_clip",
+          item_id: "transition_clip_transition_001",
+          clip_id: "clip_transition_001",
+          label: "Crossfade",
+          preset_id: "crossfade",
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it("allows an exact item time range inside its parent scene", () => {
+    const content = contentPackageSchema.parse({
+      version: 1,
+      project_id: "project_item_range",
+      headline: "Exact item edits stay exact",
+      dek: "A selected clip does not need to claim its entire parent scene.",
+      scenes: [
+        {
+          id: "scene_item_range",
+          kind: "hook",
+          title: "One scene",
+          narration: "A scene with one independently timed caption.",
+          claim_ids: [],
+          duration_seconds: 30,
+          visual: { treatment: "type", accent: "signal" },
+        },
+      ],
+      caption_tracks: [
+        {
+          id: "track_captions",
+          name: "Captions",
+          kind: "caption",
+          visible: true,
+          clips: [
+            {
+              id: "clip_caption_range",
+              scene_id: "scene_item_range",
+              label: "Only this caption",
+              timeline_start_seconds: 2,
+              duration_seconds: 2,
+            },
+          ],
+        },
+      ],
+      metadata: {
+        title: "Exact item edits stay exact",
+        description: "Item-scoped selection fixture.",
+        tags: ["editing"],
+      },
+    });
+
+    expect(() =>
+      applyEditorPatch(content, {
+        selection: {
+          project_id: content.project_id,
+          base_content_package_artifact_id: "artifact_item_range",
+          item_ids: ["caption_clip_caption_range"],
+          scene_ids: ["scene_item_range"],
+          track_ids: ["track_captions", "caption"],
+          gap_ids: [],
+          artifact_ids: [],
+          playhead_seconds: 3,
+          time_range_seconds: { start: 2, end: 4 },
+        },
+        instruction_summary: "Trim only the selected caption",
+        operations: [
+          {
+            type: "update_caption_clip",
+            item_id: "caption_clip_caption_range",
+            clip_id: "clip_caption_range",
+            duration_seconds: 1,
+          },
+        ],
+      }),
+    ).not.toThrow();
   });
 
   it("rejects timeline IDs that disagree with their typed item kind", () => {
