@@ -172,8 +172,32 @@ export class CodexImageProvider {
     let turnResolve: (() => void) | null = null;
     let turnReject: ((reason: Error) => void) | null = null;
     let stderr = "";
+    let processFailure: Error | null = null;
+
+    const rejectRpc = (error: Error) => {
+      if (processFailure) return;
+      processFailure = error;
+      for (const waiter of pending.values()) waiter.reject(error);
+      pending.clear();
+      turnReject?.(error);
+    };
+    child.once("error", (error) => {
+      rejectRpc(new Error(`codex_app_server_spawn_failed:${error.message}`));
+    });
+    child.stdin.on("error", (error) => {
+      rejectRpc(new Error(`codex_app_server_stdin_failed:${error.message}`));
+    });
+    child.once("exit", (code, signal) => {
+      if (code === 0 || processFailure) return;
+      rejectRpc(
+        new Error(
+          `codex_app_server_exited:${String(code ?? signal ?? "unknown")}`,
+        ),
+      );
+    });
 
     const send = (message: object) => {
+      if (processFailure) throw processFailure;
       child.stdin.write(`${JSON.stringify(message)}\n`);
     };
     const call = (method: string, params: object) =>
@@ -229,6 +253,10 @@ export class CodexImageProvider {
       turnResolve = resolvePromise;
       turnReject = rejectPromise;
     });
+    // A spawn failure can happen while initialize is still pending, before the
+    // turn promise is awaited. Register a handler immediately so that the same
+    // failure rejects generate() without becoming an unhandled rejection.
+    void completed.catch(() => undefined);
     const timeout = setTimeout(
       () => turnReject?.(new Error("codex_image_generation_timeout")),
       5 * 60_000,

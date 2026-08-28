@@ -4,11 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  "@truefoundry/trueforge-core@0.1.4":
-    hash: rwgua6dvugtpbqogpk2v5optwu
-    path: patches/@truefoundry__trueforge-core@0.1.4.patch
-
 importers:
   .:
     devDependencies:
@@ -7886,7 +7881,7 @@ snapshots:
 
   "@tanstack/virtual-core@3.17.7": {}
 
-  "@truefoundry/trueforge-core@0.1.4(patch_hash=rwgua6dvugtpbqogpk2v5optwu)(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.3)(hono@4.13.3)(redis@5.12.1(@opentelemetry/api@1.9.1))":
+  "@truefoundry/trueforge-core@0.1.4(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.3)(hono@4.13.3)(redis@5.12.1(@opentelemetry/api@1.9.1))":
     dependencies:
       "@ai-sdk/alibaba": 2.0.35(zod@4.4.3)
       "@ai-sdk/anthropic": 4.0.42(zod@4.4.3)
@@ -7932,7 +7927,7 @@ snapshots:
       "@hono/swagger-ui": 0.2.2(hono@4.13.3)
       "@hono/zod-openapi": 1.6.1(hono@4.13.3)(zod@4.4.3)
       "@modelcontextprotocol/sdk": 1.30.0(zod@4.4.3)
-      "@truefoundry/trueforge-core": 0.1.4(patch_hash=rwgua6dvugtpbqogpk2v5optwu)(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.3)(hono@4.13.3)(redis@5.12.1(@opentelemetry/api@1.9.1))
+      "@truefoundry/trueforge-core": 0.1.4(@aws-sdk/credential-provider-node@3.972.81)(@smithy/signature-v4@5.7.3)(hono@4.13.3)(redis@5.12.1(@opentelemetry/api@1.9.1))
       better-sqlite3: 13.0.3
       env-paths: 4.0.0
       hono: 4.13.3

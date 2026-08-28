@@ -893,12 +893,20 @@ export const App = () => {
     }
     const plan = buildTimelineDeletePlan(editorContent, selectedItemIds);
     if (plan.operations.length === 0) return;
+    const plannedItemIds = [
+      ...new Set([
+        ...selectedItemIds,
+        ...plan.operations.flatMap((operation) =>
+          "item_id" in operation ? [operation.item_id] : [],
+        ),
+      ]),
+    ];
     const deleted = await persistDirectOperations({
       selection: createSelection({
         projectId,
         contentArtifactId: editorArtifactId,
         content: editorContent,
-        itemIds: selectedItemIds,
+        itemIds: plannedItemIds,
         playheadSeconds: media.currentTime,
         sourceLedgerArtifact: evidenceArtifact,
       }),

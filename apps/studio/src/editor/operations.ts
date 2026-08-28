@@ -331,6 +331,25 @@ export const buildTimelineDeletePlan = (
   );
   const operations: EditorPatchOperation[] = [];
   const removingSceneIds = new Set<string>();
+  const selectedVideoIds = new Set(
+    selected.filter((item) => item.kind === "video").map((item) => item.id),
+  );
+  const removedTransitionIds = new Set<string>();
+
+  for (const clip of transitionClips) {
+    if (
+      !selectedVideoIds.has(clip.from_item_id) &&
+      !selectedVideoIds.has(clip.to_item_id)
+    ) {
+      continue;
+    }
+    removedTransitionIds.add(clip.id);
+    operations.push({
+      type: "remove_transition_clip",
+      item_id: transitionItemId(clip.id),
+      clip_id: clip.id,
+    });
+  }
 
   for (const item of selected) {
     switch (item.kind) {
@@ -383,7 +402,7 @@ export const buildTimelineDeletePlan = (
         const clip = transitionClips.find(
           (candidate) => transitionItemId(candidate.id) === item.id,
         );
-        if (clip) {
+        if (clip && !removedTransitionIds.has(clip.id)) {
           operations.push({
             type: "remove_transition_clip",
             item_id: item.id,

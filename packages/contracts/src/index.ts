@@ -741,6 +741,44 @@ export const contentPackageSchema = z
           }
         }
       }
+      const videoItemsByTrack = new Map<
+        string,
+        Array<{ end: number; id: string; start: number }>
+      >();
+      scenes.forEach((scene, sceneIndex) => {
+        const start = sceneStartSeconds(scenes, sceneIndex);
+        const trackId = scene.video_track_id ?? "track_video";
+        const items = videoItemsByTrack.get(trackId) ?? [];
+        items.push({
+          id: videoTimelineItemId(scene.id),
+          start,
+          end: start + scene.duration_seconds,
+        });
+        videoItemsByTrack.set(trackId, items);
+      });
+      for (const videoTrack of videoTracks ?? []) {
+        const items = videoItemsByTrack.get(videoTrack.id) ?? [];
+        for (const clip of videoTrack.clips ?? []) {
+          items.push({
+            id: videoTimelineItemId(clip.id),
+            start: clip.timeline_start_seconds,
+            end: clip.timeline_start_seconds + clip.duration_seconds,
+          });
+        }
+        videoItemsByTrack.set(videoTrack.id, items);
+      }
+      const videoCutByPair = new Map<string, number>();
+      for (const items of videoItemsByTrack.values()) {
+        items.sort(
+          (left, right) => left.start - right.start || left.end - right.end,
+        );
+        for (let index = 0; index < items.length - 1; index++) {
+          const from = items[index]!;
+          const to = items[index + 1]!;
+          if (Math.abs(from.end - to.start) > 1 / VIDEO_FPS) continue;
+          videoCutByPair.set(`${from.id}\0${to.id}`, to.start);
+        }
+      }
       for (const [trackIndex, track] of (transitionTracks ?? []).entries()) {
         for (const [clipIndex, clip] of track.clips.entries()) {
           if (clipIds.has(clip.id)) {
@@ -755,6 +793,35 @@ export const contentPackageSchema = z
             context.addIssue({
               code: "custom",
               message: "Transition cut is outside the production",
+              path: [
+                "transition_tracks",
+                trackIndex,
+                "clips",
+                clipIndex,
+                "cut_seconds",
+              ],
+            });
+          }
+          const cut = videoCutByPair.get(
+            `${clip.from_item_id}\0${clip.to_item_id}`,
+          );
+          if (clip.from_item_id === clip.to_item_id || cut === undefined) {
+            context.addIssue({
+              code: "custom",
+              message:
+                "Transition endpoints must reference distinct adjacent video items at a real cut",
+              path: [
+                "transition_tracks",
+                trackIndex,
+                "clips",
+                clipIndex,
+                "to_item_id",
+              ],
+            });
+          } else if (Math.abs(cut - clip.cut_seconds) > 1 / VIDEO_FPS) {
+            context.addIssue({
+              code: "custom",
+              message: "Transition cut must match its adjacent video boundary",
               path: [
                 "transition_tracks",
                 trackIndex,

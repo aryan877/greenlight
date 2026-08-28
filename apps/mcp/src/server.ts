@@ -24,6 +24,7 @@ import { QualityInspector } from "./providers/quality.js";
 import { OpenMojiToolkit } from "./providers/openmoji.js";
 import { probeImportedMedia } from "./providers/media-metadata.js";
 import { MediaLibraryProvider } from "./providers/media-library.js";
+import { LlmGatewayProvider } from "./providers/llm-gateway.js";
 import { RemotionRenderer } from "./providers/render.js";
 import {
   DisabledTranscriptionProvider,
@@ -52,6 +53,7 @@ const artifacts = new ArtifactStore(config.artifactDir, store);
 const image = new CodexImageProvider(config.codex, artifacts);
 const openmoji = new OpenMojiToolkit(config.openMojiRoot, artifacts);
 const mediaLibrary = new MediaLibraryProvider(config.mediaLibrary);
+const llmGateway = new LlmGatewayProvider(config.llmGateway);
 const voice =
   config.voice.provider === "openrouter"
     ? new OpenRouterVoiceProvider(config.voice)
@@ -74,6 +76,19 @@ const hasMcpAccess = (authorization: string | undefined): boolean => {
   );
 };
 
+const hasBearerSecret = (
+  secret: string | null,
+  authorization: string | undefined,
+): boolean => {
+  if (!secret || !authorization) return false;
+  const expected = Buffer.from(`Bearer ${secret}`);
+  const received = Buffer.from(authorization);
+  return (
+    expected.byteLength === received.byteLength &&
+    timingSafeEqual(expected, received)
+  );
+};
+
 app.use(
   cors({
     credentials: false,
@@ -85,6 +100,33 @@ app.use(
       done(new Error("origin_not_allowed"));
     },
   }),
+);
+app.post(
+  "/api/llm/v1/chat/completions",
+  express.json({ limit: "16mb" }),
+  async (request, response) => {
+    const expected = config.llmGateway.apiKey;
+    const authorization = request.header("authorization");
+    if (!hasBearerSecret(expected, authorization)) {
+      response.status(expected ? 401 : 503).json({
+        error: expected
+          ? "llm_gateway_unauthorized"
+          : "llm_gateway_not_configured",
+      });
+      return;
+    }
+    try {
+      await llmGateway.chatCompletions(request.body, response);
+    } catch (error) {
+      if (response.headersSent) {
+        response.end();
+        return;
+      }
+      response.status(502).json({
+        error: error instanceof Error ? error.message : "llm_gateway_failed",
+      });
+    }
+  },
 );
 app.use(express.json({ limit: "2mb" }));
 

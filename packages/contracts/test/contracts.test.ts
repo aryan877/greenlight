@@ -12,6 +12,7 @@ import {
   productionDurationSeconds,
   projectBriefSchema,
   sceneStartSeconds,
+  videoTimelineItemId,
 } from "../src/index.js";
 
 describe("Greenlight contracts", () => {
@@ -86,6 +87,65 @@ describe("Greenlight contracts", () => {
     });
 
     expect(parsed.success).toBe(false);
+  });
+
+  it("rejects transitions with dangling or nonadjacent video endpoints", () => {
+    const base = {
+      version: 1,
+      project_id: "project_transition_validation",
+      headline: "Transitions belong to real cuts",
+      dek: "Every transition keeps exact references to both neighboring clips.",
+      scenes: ["one", "two", "three"].map((id, index) => ({
+        id: `scene_${id}`,
+        kind: index === 0 ? "hook" : "explanation",
+        title: `Scene ${id}`,
+        narration: `Narration for scene ${id}.`,
+        claim_ids: [],
+        duration_seconds: 10,
+        visual: { treatment: "type", accent: "signal" },
+      })),
+      metadata: {
+        title: "Transitions belong to real cuts",
+        description: "Transition endpoint validation fixture.",
+        tags: ["editing"],
+      },
+    };
+    const transition = {
+      id: "clip_transition_invalid",
+      label: "Crossfade",
+      from_item_id: videoTimelineItemId("scene_one"),
+      to_item_id: videoTimelineItemId("scene_missing"),
+      cut_seconds: 10,
+      duration_seconds: 0.4,
+      preset_id: "crossfade",
+      parameters: {},
+      sound_artifact_id: null,
+    };
+    const withTransition = (clip: typeof transition) => ({
+      ...base,
+      transition_tracks: [
+        {
+          id: "track_transitions",
+          name: "Transitions",
+          kind: "transition",
+          visible: true,
+          clips: [clip],
+        },
+      ],
+    });
+
+    expect(
+      contentPackageSchema.safeParse(withTransition(transition)).success,
+    ).toBe(false);
+    expect(
+      contentPackageSchema.safeParse(
+        withTransition({
+          ...transition,
+          to_item_id: videoTimelineItemId("scene_three"),
+          cut_seconds: 20,
+        }),
+      ).success,
+    ).toBe(false);
   });
 
   it("requires editor operations to contain a real change", () => {

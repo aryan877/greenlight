@@ -150,7 +150,7 @@ Start TrueForge:
 pnpm trueforge
 ```
 
-The project pins TrueForge so every machine uses the same runtime. A small checked-in package patch maps OpenRouter's provider-reported `usage.cost` into TrueForge's normal cost metric; Greenlight never estimates spend from token counts.
+The project pins TrueForge so every machine uses the same runtime. Greenlight's loopback LLM gateway maps OpenRouter's provider-reported `usage.cost` onto the AI SDK's `costInUSD` field before TrueForge receives the response. TrueForge then records its normal canonical cost metric; Greenlight never patches the runtime or estimates spend from token counts.
 
 Standalone TrueForge includes a local sandbox fallback on supported macOS and Linux hosts. Confirm it before a demo with `GET /api/v1/capabilities`; `sandbox.enabled` must be `true`. A cloud sandbox provider is optional for the local judged flow.
 

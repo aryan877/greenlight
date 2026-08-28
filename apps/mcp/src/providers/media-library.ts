@@ -1,3 +1,7 @@
+import { lookup } from "node:dns/promises";
+import type { IncomingMessage } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { isIP } from "node:net";
 import { extname } from "node:path";
 
 import {
@@ -8,11 +12,12 @@ import {
 } from "@greenlight/contracts";
 import { z } from "zod";
 
-import type { GreenlightConfig } from "../config.js";
+import { MEDIA_LIBRARY_PROVIDERS, type GreenlightConfig } from "../config.js";
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const DOWNLOAD_TIMEOUT_MS = 60_000;
 const MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024;
+const MAX_DOWNLOAD_REDIRECTS = 5;
 
 type SearchInput = {
   query: string;
@@ -124,49 +129,125 @@ const extensionFor = (
   );
 };
 
-const assertRemoteMediaUrl = (value: string): URL => {
+export const isPublicMediaAddress = (address: string): boolean => {
+  const normalized = address.toLowerCase().replace(/^\[|\]$/g, "");
+  const family = isIP(normalized);
+  if (family === 4) {
+    const octets = normalized.split(".").map(Number);
+    const [first = 0, second = 0, third = 0] = octets;
+    return !(
+      first === 0 ||
+      first === 10 ||
+      first === 127 ||
+      (first === 100 && second >= 64 && second <= 127) ||
+      (first === 169 && second === 254) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 0 && third === 0) ||
+      (first === 192 && second === 0 && third === 2) ||
+      (first === 192 && second === 88 && third === 99) ||
+      (first === 192 && second === 168) ||
+      (first === 198 && (second === 18 || second === 19)) ||
+      (first === 198 && second === 51 && third === 100) ||
+      (first === 203 && second === 0 && third === 113) ||
+      first >= 224
+    );
+  }
+  if (family === 6) {
+    // Public IPv6 unicast is 2000::/3. Explicitly exclude the documentation
+    // block; all mapped, loopback, link-local, unique-local and multicast
+    // addresses are outside this range and are therefore rejected as well.
+    return /^[23]/.test(normalized) && !normalized.startsWith("2001:db8:");
+  }
+  return false;
+};
+
+const resolveSafeRemoteMediaUrl = async (
+  value: string,
+): Promise<{ address: string; family: 4 | 6; url: URL }> => {
   const url = new URL(value);
   if (url.protocol !== "https:")
     throw new Error("media_download_requires_https");
-  const hostname = url.hostname.toLowerCase();
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (hostname === "localhost" || hostname.endsWith(".local")) {
+    throw new Error("media_download_host_not_allowed");
+  }
+  const addresses = isIP(hostname)
+    ? [hostname]
+    : (await lookup(hostname, { all: true, verbatim: true })).map(
+        ({ address }) => address,
+      );
   if (
-    hostname === "localhost" ||
-    hostname.endsWith(".local") ||
-    /^127\./.test(hostname) ||
-    /^10\./.test(hostname) ||
-    /^192\.168\./.test(hostname) ||
-    /^169\.254\./.test(hostname) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
-    hostname === "::1"
+    addresses.length === 0 ||
+    addresses.some((address) => !isPublicMediaAddress(address))
   ) {
     throw new Error("media_download_host_not_allowed");
   }
-  return url;
+  const address = addresses[0]!;
+  return { address, family: isIP(address) as 4 | 6, url };
 };
 
-const download = async (value: string, kind: "video" | "audio") => {
-  const url = assertRemoteMediaUrl(value);
-  const response = await fetch(url, {
-    redirect: "follow",
-    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+export const assertSafeRemoteMediaUrl = async (value: string): Promise<URL> =>
+  (await resolveSafeRemoteMediaUrl(value)).url;
+
+const requestPinnedMedia = async (
+  destination: Awaited<ReturnType<typeof resolveSafeRemoteMediaUrl>>,
+): Promise<IncomingMessage> =>
+  new Promise((resolvePromise, rejectPromise) => {
+    const request = httpsRequest(
+      destination.url,
+      {
+        method: "GET",
+        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+        lookup: (_hostname, _options, callback) => {
+          callback(null, destination.address, destination.family);
+        },
+      },
+      resolvePromise,
+    );
+    request.once("error", rejectPromise);
+    request.end();
   });
-  if (!response.ok)
-    throw new Error(`media_download_${String(response.status)}`);
-  assertRemoteMediaUrl(response.url);
-  const contentLength = Number(response.headers.get("content-length"));
+
+const download = async (value: string, kind: "video" | "audio") => {
+  let destination = await resolveSafeRemoteMediaUrl(value);
+  let response: IncomingMessage | null = null;
+  for (
+    let redirectCount = 0;
+    redirectCount <= MAX_DOWNLOAD_REDIRECTS;
+    redirectCount++
+  ) {
+    response = await requestPinnedMedia(destination);
+    const status = response.statusCode ?? 0;
+    if (status < 300 || status >= 400) break;
+    const location = response.headers.location;
+    response.resume();
+    if (!location) throw new Error("media_download_redirect_missing_location");
+    if (redirectCount === MAX_DOWNLOAD_REDIRECTS) {
+      throw new Error("media_download_too_many_redirects");
+    }
+    destination = await resolveSafeRemoteMediaUrl(
+      new URL(location, destination.url).toString(),
+    );
+    response = null;
+  }
+  if (!response) throw new Error("media_download_failed");
+  const status = response.statusCode ?? 0;
+  if (status < 200 || status >= 300) {
+    response.resume();
+    throw new Error(`media_download_${String(status)}`);
+  }
+  const contentLength = Number(response.headers["content-length"]);
   if (Number.isFinite(contentLength) && contentLength > MAX_DOWNLOAD_BYTES) {
     throw new Error("media_download_too_large");
   }
-  if (!response.body) throw new Error("empty_media_file");
-  const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let byteLength = 0;
-  while (true) {
-    const { done, value: chunk } = await reader.read();
-    if (done) break;
+  for await (const rawChunk of response) {
+    const chunk =
+      typeof rawChunk === "string" ? Buffer.from(rawChunk) : rawChunk;
     byteLength += chunk.byteLength;
     if (byteLength > MAX_DOWNLOAD_BYTES) {
-      await reader.cancel();
+      response.destroy();
       throw new Error("media_download_too_large");
     }
     chunks.push(chunk);
@@ -180,7 +261,13 @@ const download = async (value: string, kind: "video" | "audio") => {
   if (bytes.byteLength === 0) throw new Error("empty_media_file");
   return {
     bytes,
-    extension: extensionFor(url, response.headers.get("content-type"), kind),
+    extension: extensionFor(
+      destination.url,
+      Array.isArray(response.headers["content-type"])
+        ? (response.headers["content-type"][0] ?? null)
+        : (response.headers["content-type"] ?? null),
+      kind,
+    ),
   };
 };
 
@@ -238,22 +325,46 @@ const openverseResult = (
 };
 
 export class MediaLibraryProvider {
-  constructor(private readonly config: GreenlightConfig["mediaLibrary"]) {}
+  private readonly config: GreenlightConfig["mediaLibrary"];
+
+  constructor(
+    config: Omit<GreenlightConfig["mediaLibrary"], "providers"> &
+      Partial<Pick<GreenlightConfig["mediaLibrary"], "providers">>,
+  ) {
+    this.config = {
+      ...config,
+      providers: config.providers ?? MEDIA_LIBRARY_PROVIDERS,
+    };
+  }
 
   describe() {
     return {
-      pexels: { available: Boolean(this.config.pexelsApiKey), use: "broll" },
-      openverse: { available: true, use: "music_and_sound_effects" },
+      pexels: {
+        available: Boolean(this.config.pexelsApiKey),
+        use: this.config.providers.pexels.capabilityUse,
+      },
+      openverse: {
+        available: true,
+        use: this.config.providers.openverse.capabilityUse,
+      },
     } as const;
   }
 
   async search(input: SearchInput): Promise<MediaLibraryResult[]> {
     const provider =
-      input.provider ?? (input.use === "broll" ? "pexels" : "openverse");
+      input.provider ??
+      (Object.entries(this.config.providers).find(([, providerConfig]) =>
+        (providerConfig.uses as readonly string[]).includes(input.use),
+      )?.[0] as SearchInput["provider"] | undefined);
+    if (!provider) throw new Error("media_provider_not_found");
     if (provider === "pexels") {
-      if (input.use !== "broll") throw new Error("pexels_video_only");
+      if (!this.config.providers.pexels.uses.includes(input.use as "broll"))
+        throw new Error("pexels_video_only");
       if (!this.config.pexelsApiKey) throw new Error("pexels_not_configured");
-      const url = new URL("https://api.pexels.com/videos/search");
+      const url = new URL(
+        "/videos/search",
+        this.config.providers.pexels.apiBaseUrl,
+      );
       url.searchParams.set("query", input.query);
       url.searchParams.set("per_page", String(input.limit));
       if (input.orientation)
@@ -268,7 +379,10 @@ export class MediaLibraryProvider {
 
     if (input.use === "broll") throw new Error("openverse_audio_only");
     const audioUse = input.use;
-    const url = new URL("https://api.openverse.org/v1/audio/");
+    const url = new URL(
+      "/v1/audio/",
+      this.config.providers.openverse.apiBaseUrl,
+    );
     url.searchParams.set("q", input.query);
     url.searchParams.set("page_size", String(input.limit));
     url.searchParams.set("license_type", "commercial");
@@ -287,7 +401,8 @@ export class MediaLibraryProvider {
       const body = pexelsVideoSchema.parse(
         await jsonRequest(
           new URL(
-            `https://api.pexels.com/videos/videos/${encodeURIComponent(input.providerAssetId)}`,
+            `/videos/videos/${encodeURIComponent(input.providerAssetId)}`,
+            this.config.providers.pexels.apiBaseUrl,
           ),
           { headers: { Authorization: this.config.pexelsApiKey } },
         ),
@@ -326,7 +441,8 @@ export class MediaLibraryProvider {
     const body = openverseAudioSchema.parse(
       await jsonRequest(
         new URL(
-          `https://api.openverse.org/v1/audio/${encodeURIComponent(input.providerAssetId)}/`,
+          `/v1/audio/${encodeURIComponent(input.providerAssetId)}/`,
+          this.config.providers.openverse.apiBaseUrl,
         ),
       ),
     );

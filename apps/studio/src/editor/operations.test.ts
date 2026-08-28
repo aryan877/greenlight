@@ -319,6 +319,46 @@ describe("timeline operations", () => {
     });
   });
 
+  it("deletes a transition before deleting either video endpoint", () => {
+    const withTransition: ContentPackage = structuredClone(content);
+    withTransition.transition_tracks = [
+      {
+        id: "track_transitions",
+        name: "Transitions",
+        kind: "transition",
+        protected: false,
+        visible: true,
+        clips: [
+          {
+            id: "clip_second_to_third",
+            label: "Crossfade",
+            from_item_id: "video_scene_second",
+            to_item_id: "video_scene_third",
+            cut_seconds: 12,
+            duration_seconds: 0.4,
+            preset_id: "crossfade",
+            parameters: {},
+            sound_artifact_id: null,
+          },
+        ],
+      },
+    ];
+
+    expect(
+      buildTimelineDeletePlan(withTransition, ["video_scene_second"]),
+    ).toEqual({
+      sceneScope: "all",
+      operations: [
+        {
+          type: "remove_transition_clip",
+          item_id: "transition_clip_second_to_third",
+          clip_id: "clip_second_to_third",
+        },
+        { type: "remove_scene", scene_id: "scene_second" },
+      ],
+    });
+  });
+
   it("uses retained source media when a video is extended into a gap", () => {
     const video = item("video");
 

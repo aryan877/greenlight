@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { MediaLibraryProvider } from "../src/providers/media-library.js";
+import {
+  assertSafeRemoteMediaUrl,
+  isPublicMediaAddress,
+  MediaLibraryProvider,
+} from "../src/providers/media-library.js";
 
 const openverseResult = (input: {
   duration: number;
@@ -41,6 +45,33 @@ const pexelsVideo = {
 
 describe("MediaLibraryProvider", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("rejects private, reserved, and mapped network destinations", () => {
+    expect(isPublicMediaAddress("8.8.8.8")).toBe(true);
+    expect(isPublicMediaAddress("2606:4700:4700::1111")).toBe(true);
+    for (const address of [
+      "127.0.0.1",
+      "10.0.0.1",
+      "169.254.169.254",
+      "172.16.0.1",
+      "192.168.0.1",
+      "100.64.0.1",
+      "198.51.100.1",
+      "::1",
+      "::ffff:127.0.0.1",
+      "fc00::1",
+      "fe80::1",
+      "2001:db8::1",
+    ]) {
+      expect(isPublicMediaAddress(address), address).toBe(false);
+    }
+  });
+
+  it("rejects a literal private destination before any network request", async () => {
+    await expect(
+      assertSafeRemoteMediaUrl("https://127.0.0.1/private.mp4"),
+    ).rejects.toThrow("media_download_host_not_allowed");
+  });
 
   it("normalizes Openverse milliseconds and rejects non-commercial licenses", async () => {
     const fetchMock = vi.fn().mockResolvedValue(

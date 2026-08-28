@@ -13,6 +13,13 @@ const rootProviderName =
 const rootProviderBaseUrl = (
   process.env.GREENLIGHT_ROOT_BASE_URL ?? "https://openrouter.ai/api/v1"
 ).replace(/\/$/, "");
+const llmGatewayBaseUrl = (
+  process.env.GREENLIGHT_LLM_GATEWAY_URL ??
+  `${process.env.GREENLIGHT_MCP_URL ?? "http://localhost:8941/mcp"}`.replace(
+    /\/mcp\/?$/,
+    "/api/llm/v1",
+  )
+).replace(/\/$/, "");
 const mcpAuthToken = process.env.GREENLIGHT_MCP_AUTH_TOKEN;
 const upstreamModel =
   process.env.GREENLIGHT_ROOT_MODEL ?? "google/gemini-3.7-flash";
@@ -190,7 +197,7 @@ await request("/api/v1/settings/model-providers", {
     manifest: {
       type: "custom",
       name: rootProviderName,
-      base_url: rootProviderBaseUrl,
+      base_url: llmGatewayBaseUrl,
       auth: { api_key: rootApiKey },
       models: [
         {

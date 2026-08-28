@@ -10,6 +10,19 @@ const workspaceRoot = resolve(
 const workspacePath = (value: string): string =>
   isAbsolute(value) ? value : resolve(workspaceRoot, value);
 
+export const MEDIA_LIBRARY_PROVIDERS = {
+  pexels: {
+    apiBaseUrl: "https://api.pexels.com",
+    uses: ["broll"],
+    capabilityUse: "broll",
+  },
+  openverse: {
+    apiBaseUrl: "https://api.openverse.org",
+    uses: ["music", "sound_effect"],
+    capabilityUse: "music_and_sound_effects",
+  },
+} as const;
+
 export const parseMcpPort = (value: string | undefined): number => {
   const port = Number(value ?? 8941);
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
@@ -30,6 +43,10 @@ export type GreenlightConfig = {
     binaryPath: string;
     model: string | null;
   };
+  llmGateway: {
+    apiKey: string | null;
+    upstreamBaseUrl: string;
+  };
   voice: {
     apiKey: string | null;
     model: string;
@@ -45,6 +62,7 @@ export type GreenlightConfig = {
   };
   mediaLibrary: {
     pexelsApiKey: string | null;
+    providers: typeof MEDIA_LIBRARY_PROVIDERS;
   };
   youtube: {
     allowedChannelId: string | null;
@@ -92,6 +110,15 @@ export const loadConfig = (): GreenlightConfig => {
       binaryPath: process.env.GREENLIGHT_CODEX_BINARY ?? "codex",
       model: process.env.GREENLIGHT_CODEX_MODEL || null,
     },
+    llmGateway: {
+      apiKey:
+        process.env.GREENLIGHT_ROOT_API_KEY?.trim() ||
+        process.env.OPENROUTER_API_KEY?.trim() ||
+        null,
+      upstreamBaseUrl: (
+        process.env.GREENLIGHT_ROOT_BASE_URL ?? "https://openrouter.ai/api/v1"
+      ).replace(/\/$/, ""),
+    },
     voice: {
       apiKey: process.env.OPENROUTER_API_KEY || null,
       model:
@@ -113,6 +140,7 @@ export const loadConfig = (): GreenlightConfig => {
     },
     mediaLibrary: {
       pexelsApiKey: process.env.PEXELS_API_KEY || null,
+      providers: MEDIA_LIBRARY_PROVIDERS,
     },
     youtube: {
       allowedChannelId: process.env.GREENLIGHT_YOUTUBE_CHANNEL_ID || null,
