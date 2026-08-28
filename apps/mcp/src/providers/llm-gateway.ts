@@ -53,6 +53,7 @@ export class LlmGatewayProvider {
   async chatCompletions(
     body: unknown,
     response: ExpressResponse,
+    clientSignal: AbortSignal,
   ): Promise<void> {
     if (!this.config.apiKey) throw new Error("llm_gateway_not_configured");
     const upstream = await fetch(
@@ -67,7 +68,10 @@ export class LlmGatewayProvider {
           "x-title": "Greenlight",
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(10 * 60_000),
+        signal: AbortSignal.any([
+          clientSignal,
+          AbortSignal.timeout(10 * 60_000),
+        ]),
       },
     );
 

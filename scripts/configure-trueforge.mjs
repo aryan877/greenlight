@@ -14,7 +14,7 @@ const rootProviderBaseUrl = (
   process.env.GREENLIGHT_ROOT_BASE_URL ?? "https://openrouter.ai/api/v1"
 ).replace(/\/$/, "");
 const llmGatewayBaseUrl = (
-  process.env.GREENLIGHT_LLM_GATEWAY_URL ??
+  process.env.GREENLIGHT_LLM_GATEWAY_URL?.trim() ||
   `${process.env.GREENLIGHT_MCP_URL ?? "http://localhost:8941/mcp"}`.replace(
     /\/mcp\/?$/,
     "/api/llm/v1",

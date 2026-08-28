@@ -115,8 +115,16 @@ app.post(
       });
       return;
     }
+    const clientAbort = new AbortController();
+    const abortUpstream = () => clientAbort.abort();
+    request.once("aborted", abortUpstream);
+    response.once("close", abortUpstream);
     try {
-      await llmGateway.chatCompletions(request.body, response);
+      await llmGateway.chatCompletions(
+        request.body,
+        response,
+        clientAbort.signal,
+      );
     } catch (error) {
       if (response.headersSent) {
         response.end();
@@ -125,6 +133,9 @@ app.post(
       response.status(502).json({
         error: error instanceof Error ? error.message : "llm_gateway_failed",
       });
+    } finally {
+      request.off("aborted", abortUpstream);
+      response.off("close", abortUpstream);
     }
   },
 );
