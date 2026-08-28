@@ -17,7 +17,7 @@ import {
 } from "@remotion/renderer";
 
 import { fixturePackage } from "./fixture";
-import type { RenderProject } from "./Root";
+import type { RenderProject } from "./root";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);

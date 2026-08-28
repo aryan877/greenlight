@@ -31,14 +31,17 @@ import {
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { greenlightApi, type VoiceOption } from "../api/greenlight.js";
-import { useVoiceCapabilities, useVoiceSample } from "../api/queries.js";
+import {
+  useVoiceCapabilities,
+  useVoiceSample,
+} from "../hooks/use-greenlight-queries.js";
 import { GreenlightMark } from "../brand-icons.js";
 import type {
   PendingToolApproval,
   PendingQuestion,
   StudioAgentEvent,
   StudioReviewDocument,
-} from "../api/trueforge.js";
+} from "../hooks/use-producer-agent.js";
 import { MEDIA_ACCEPT, MEDIA_ARTIFACT_MIME } from "../editor/media-transfer.js";
 import { shouldSubmitProducerInstruction } from "../editor/producer-composer.js";
 import type { ProducerDraftIntent } from "../editor/producer-draft.js";

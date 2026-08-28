@@ -26,8 +26,8 @@ import { cx, IconButton } from "./controls.js";
 import {
   MediaLibraryDialog,
   type PlacedLibraryAsset,
-} from "./MediaLibraryDialog.js";
-import { EffectsLibraryDialog } from "./EffectsLibraryDialog.js";
+} from "./media-library-dialog.js";
+import { EffectsLibraryDialog } from "./effects-library-dialog.js";
 
 type MediaFacts = {
   audioCodec?: string;

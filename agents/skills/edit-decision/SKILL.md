@@ -16,7 +16,7 @@ Selection does not force every selected scene to change. A split targets one sce
 ## Timing
 
 - Use measured transcript words for spoken-word edits.
-- Run `scripts/find_phrase.py` against transcript JSON for exact word indexes and seconds.
+- Run `scripts/find-phrase.py` against transcript JSON for exact word indexes and seconds.
 - Snap output decisions to the production frame rate.
 - Shortening records a gap. Do not silently ripple another scene.
 - Extend source media only through recorded unused source frames and only into an existing gap.

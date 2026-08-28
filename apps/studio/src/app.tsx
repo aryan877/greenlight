@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { useProducerAgent } from "./api/trueforge.js";
+import { useProducerAgent } from "./hooks/use-producer-agent.js";
 import { greenlightApi } from "./api/greenlight.js";
 import {
   useContentPackage,
@@ -38,7 +38,7 @@ import {
   useRestoreContentRevision,
   useUploadAsset,
   useYouTubeConnection,
-} from "./api/queries.js";
+} from "./hooks/use-greenlight-queries.js";
 import {
   GeminiIcon,
   GreenlightMark,
@@ -47,19 +47,19 @@ import {
   YouTubeIcon,
 } from "./brand-icons.js";
 import { IconButton, ResizeHandle, cx } from "./components/controls.js";
-import { CodexConnectionStatus } from "./components/CodexConnectionStatus.js";
-import { InspectorPanel } from "./components/InspectorPanel.js";
+import { CodexConnectionStatus } from "./components/codex-connection-status.js";
+import { InspectorPanel } from "./components/inspector-panel.js";
 import {
   ProducerPanel,
   type ProducerReference,
-} from "./components/ProducerPanel.js";
-import { ProgramMonitor } from "./components/ProgramMonitor.js";
-import { ProjectSwitcher } from "./components/ProjectSwitcher.js";
-import { MediaBrowser } from "./components/MediaBrowser.js";
-import type { PlacedLibraryAsset } from "./components/MediaLibraryDialog.js";
-import { ReleasePanel } from "./components/ReleasePanel.js";
-import { Timeline } from "./components/Timeline.js";
-import { ThemeToggle } from "./components/ThemeToggle.js";
+} from "./components/producer-panel.js";
+import { ProgramMonitor } from "./components/program-monitor.js";
+import { ProjectSwitcher } from "./components/project-switcher.js";
+import { MediaBrowser } from "./components/media-browser.js";
+import type { PlacedLibraryAsset } from "./components/media-library-dialog.js";
+import { ReleasePanel } from "./components/release-panel.js";
+import { Timeline } from "./components/timeline.js";
+import { ThemeToggle } from "./components/theme-toggle.js";
 import {
   artifactDurationSeconds,
   audioItemId,

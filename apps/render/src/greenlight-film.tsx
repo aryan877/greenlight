@@ -30,8 +30,8 @@ import {
 } from "remotion";
 
 import { accentColor, renderSpec } from "./design";
-import { TimedCaptions } from "./Captions";
-import type { RenderProject } from "./Root";
+import { TimedCaptions } from "./captions";
+import type { RenderProject } from "./root";
 
 export const FPS = renderSpec.format.fps;
 const AUDIO_EDGE_FADE_FRAMES = 2;

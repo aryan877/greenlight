@@ -10,7 +10,7 @@ afterAll(() => {
 
 describe("Producer event projection", () => {
   it("restores creator instructions without leaking editor context", async () => {
-    const { describeTurnInput } = await import("./trueforge.js");
+    const { describeTurnInput } = await import("./use-producer-agent.js");
 
     expect(
       describeTurnInput(
@@ -47,7 +47,7 @@ describe("Producer event projection", () => {
   });
 
   it("restores creator decisions and hides internal artifact handoffs", async () => {
-    const { describeTurnInput } = await import("./trueforge.js");
+    const { describeTurnInput } = await import("./use-producer-agent.js");
 
     expect(
       describeTurnInput(
@@ -82,7 +82,8 @@ describe("Producer event projection", () => {
   });
 
   it("keeps the full durable history even when messages have the same text", async () => {
-    const { appendUniqueStudioEvents } = await import("./trueforge.js");
+    const { appendUniqueStudioEvents } =
+      await import("./use-producer-agent.js");
     const history = Array.from({ length: 64 }, (_, index) => ({
       id: `event_${index}`,
       kind: "message" as const,
@@ -105,7 +106,7 @@ describe("Producer event projection", () => {
 
   it("projects a child thread into one durable subagent card", async () => {
     const { appendUniqueStudioEvents, describeEvent } =
-      await import("./trueforge.js");
+      await import("./use-producer-agent.js");
     const started = describeEvent({
       id: "thread_created",
       type: "thread.created",
@@ -179,7 +180,7 @@ describe("Producer event projection", () => {
 
   it("turns a completed script thread into a review document", async () => {
     const { appendUniqueStudioEvents, describeEvent } =
-      await import("./trueforge.js");
+      await import("./use-producer-agent.js");
     const started = describeEvent({
       type: "thread.created",
       thread_id: "script_draft",
@@ -216,7 +217,7 @@ describe("Producer event projection", () => {
   });
 
   it("shows a compaction milestone only when TrueForge emits one", async () => {
-    const { describeEvent } = await import("./trueforge.js");
+    const { describeEvent } = await import("./use-producer-agent.js");
 
     expect(
       describeEvent({
@@ -243,7 +244,8 @@ describe("Producer event projection", () => {
   });
 
   it("sends the whole cut and keeps the current selection as emphasis", async () => {
-    const { createProducerUserMessage } = await import("./trueforge.js");
+    const { createProducerUserMessage } =
+      await import("./use-producer-agent.js");
     const message = createProducerUserMessage("project_greenlight", {
       instruction: "Move the next clip before the selected one.",
       timeline: {
@@ -310,7 +312,8 @@ describe("Producer event projection", () => {
   });
 
   it("keeps creator cancellation explicit when resuming a paused question", async () => {
-    const { CREATOR_CANCELLED_QUESTION } = await import("./trueforge.js");
+    const { CREATOR_CANCELLED_QUESTION } =
+      await import("./use-producer-agent.js");
 
     expect(CREATOR_CANCELLED_QUESTION).toBe(
       "The creator cancelled this request. Stop here and make no changes.",
@@ -318,7 +321,8 @@ describe("Producer event projection", () => {
   });
 
   it("restores the latest response turn from the project's session chain", async () => {
-    const { latestProjectSessionTurn } = await import("./trueforge.js");
+    const { latestProjectSessionTurn } =
+      await import("./use-producer-agent.js");
     const root = {
       createdAt: "2026-08-24T10:00:00.000Z",
       input: [
@@ -349,7 +353,7 @@ describe("Producer event projection", () => {
 
   it("keeps clarification text visible and exposes the exact paused question", async () => {
     const { describeEvent, pendingQuestionsFromEvent } =
-      await import("./trueforge.js");
+      await import("./use-producer-agent.js");
     const source = {
       id: "model_question",
       type: "model.message",
@@ -396,7 +400,8 @@ describe("Producer event projection", () => {
   });
 
   it("extracts only absolute, deduplicated TrueForge sandbox outputs", async () => {
-    const { parseSandboxArtifactReferences } = await import("./trueforge.js");
+    const { parseSandboxArtifactReferences } =
+      await import("./use-producer-agent.js");
 
     expect(
       parseSandboxArtifactReferences(
@@ -413,7 +418,7 @@ describe("Producer event projection", () => {
   });
 
   it("hides routine context reads from the creator feed", async () => {
-    const { describeEvent } = await import("./trueforge.js");
+    const { describeEvent } = await import("./use-producer-agent.js");
     const read = (name: string) => ({
       id: `event_${name}`,
       type: "model.message",
@@ -431,7 +436,7 @@ describe("Producer event projection", () => {
   });
 
   it("reads the authoritative TrueForge terminal status", async () => {
-    const { terminalFailureMessage } = await import("./trueforge.js");
+    const { terminalFailureMessage } = await import("./use-producer-agent.js");
 
     expect(
       terminalFailureMessage({
@@ -454,7 +459,8 @@ describe("Producer event projection", () => {
   });
 
   it("derives durable reply duration from the TrueForge turn lifecycle", async () => {
-    const { describeEvent, turnDurationMs } = await import("./trueforge.js");
+    const { describeEvent, turnDurationMs } =
+      await import("./use-producer-agent.js");
     const created = {
       id: "turn_created",
       type: "turn.created",
@@ -502,7 +508,7 @@ describe("Producer event projection", () => {
 
   it("deduplicates provider-reported cost by durable turn", async () => {
     const { totalSessionCostInUsd, turnCostInUsd } =
-      await import("./trueforge.js");
+      await import("./use-producer-agent.js");
     const camelCost = turnCostInUsd({
       type: "turn.done",
       state: { metrics: { totalCostInUsd: 0.0042 } },
@@ -532,7 +538,7 @@ describe("Producer event projection", () => {
   });
 
   it("keeps runtime identifiers out without swallowing a valid reply", async () => {
-    const { describeEvent } = await import("./trueforge.js");
+    const { describeEvent } = await import("./use-producer-agent.js");
     const message = (content: string) => ({
       id: crypto.randomUUID(),
       type: "model.message",
@@ -571,7 +577,8 @@ describe("Producer event projection", () => {
   });
 
   it("ignores malformed tool references instead of breaking the feed", async () => {
-    const { pendingQuestionsFromEvent } = await import("./trueforge.js");
+    const { pendingQuestionsFromEvent } =
+      await import("./use-producer-agent.js");
 
     expect(
       pendingQuestionsFromEvent(

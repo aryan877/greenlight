@@ -1,138 +1,71 @@
 # Greenlight
 
-**An AI production crew inside a real video editor. It can research, write, edit, render, and prepare a YouTube release. It cannot publish behind your back.**
+Greenlight takes a sourced video idea to an editable cut and an unlisted YouTube review without taking release control away from the creator.
 
-Most video agents end at a generated file. Greenlight keeps going, but keeps the creator in control.
-
-You edit on a normal timeline. Video, audio, captions, gaps, and tracks remain independently selectable. The AI Producer sees the complete current cut, can focus the exact items it means, and can operate the same editing commands when asked. It researches through TrueForge, delegates independent questions to subagents, renders with Remotion, and stages the result on YouTube as unlisted. Public or scheduled release pauses for your approval.
+It combines a real multi-track editor with a TrueForge Producer agent. Direct editing stays immediate and local. Agent work stays visible, reviewable, and approval-gated. Remotion renders the exact timeline revision.
 
 ```text
-Topic
-  → sourced research
-  → editable scenes
-  → voice, timed captions, and media
-  → checked render
-  → unlisted YouTube review
-  → your greenlight
+idea → sourced script → editable timeline → checked render → unlisted review → creator approval
 ```
 
-## The product loop
+## What works
 
-1. Ask for a short video about a topic.
-2. The AI Producer searches the current web with Exa and can send separate questions to TrueForge subagents.
-3. Research becomes a claim-level evidence ledger, script, and editable storyboard.
-4. Video, voice, captions, and source ranges arrive as editable timeline items. Select them independently or marquee the aligned set when you want them together.
-5. Trim, split, reorder, change speed, mute tracks, edit metadata, or undo directly. These normal editor actions happen immediately without calling the model.
-6. Ask the AI Producer for a change. It focuses the intended range, previews the real result in Program and Timeline, and uses TrueForge approval before a consequential tool runs.
-7. Render the exact revision, run deterministic checks, and upload it as unlisted.
-8. Review the thumbnail, title, description, tags, disclosure, and release plan in the Release workspace.
-9. Approve the exact locked snapshot before it becomes public or scheduled.
+- Independent video, audio, caption, transition, track, gap, and selection state
+- Frame-aligned trim, split, move, reorder, mute, undo, redo, and timeline zoom
+- TrueForge sessions, subagents, skills, sandbox work, reconnect, compaction, and native approvals
+- One typed edit-command model shared by direct gestures and Producer proposals
+- Immutable content packages and media artifacts backed by SQLite
+- Remotion video and thumbnail rendering with deterministic quality checks
+- Optional provider-backed voice, transcription, image generation, B-roll, music, and effects
+- YouTube staging as unlisted with locked-snapshot approval before publish or scheduling
 
-The human using the editor is the **creator**. The AI running in TrueForge is the **AI Producer**.
+## Why TrueForge is central
 
-## Why TrueForge matters
+TrueForge runs the Producer loop rather than acting as a chat shell around another workflow. It owns turns, tool discovery, subagents, skills, Code Mode, approval pauses, session history, and context compaction.
 
-Greenlight does not use TrueForge as a chat box around a separate workflow. TrueForge is the agent runtime.
-
-| TrueForge capability  | What Greenlight uses it for                                                                                  |
-| --------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Models                | Runs the root AI Producer through the configured OpenRouter model                                            |
-| MCP connectors        | Greenlight production tools plus deferred Exa web search and page retrieval                                  |
-| Dynamic subagents     | Independent research and verification that return compact sourced findings                                   |
-| Skills                | Editorial writing, evidence work, release packaging, and transcript-aware edit decisions                     |
-| Sandbox and Code Mode | Generated Python reads real selected media in bounded, hash-verified chunks, then processes the sandbox copy |
-| Durable sessions      | Reconnects to the latest turn, question, or approval after a refresh                                         |
-| Context compaction    | Uses a threshold derived from the selected model's advertised context window                                 |
-| Native approvals      | Pauses exact edit, render, upload, publish, and schedule tool calls                                          |
-
-Exa comes from TrueForge's connector catalog and needs no API key. It stays deferred, so its tool schemas enter context only when research needs them.
-
-The judged build defaults to `google/gemini-3.7-flash` through OpenRouter. It keeps the large multimodal context Greenlight needs and passed the complete TrueForge child-thread path. The experimental DeepSeek vision endpoint remains an opt-in override, not the demo default, because repeated child calls closed upstream during live testing.
-
-### Live harness proof
-
-- **Real tool:** a TrueForge subagent read the latest Greenlight production through the deferred MCP boundary and returned its exact title and four-scene count to the root agent.
-- **Sandboxed code:** Code Mode reconstructed a real 2,107,931-byte video through bounded MCP reads, matched its SHA-256, and measured 31.07 seconds, 1920×1080 H.264 at 30 fps with AAC audio.
-- **Human stop:** a live `apply_editor_patch` call emitted TrueForge's native approval event; a denial resumed the exact paused turn and completed without changing the production.
-- **Durable session:** Studio rebuilds the full conversation from TrueForge session events and resubscribes to a running turn after reconnect. Compaction changes the model's working context, not the creator-visible history.
-
-TrueFoundry AI Gateway and MCP Gateway are intentionally not in the judged path. The event material positions them as production infrastructure after an agent has real users and explicitly says neither is needed for the hackathon. Adding them would duplicate routing and governance without making the harness proof clearer.
-
-### Judging map
-
-| Criterion            | Greenlight's proof                                                                                  |
-| -------------------- | --------------------------------------------------------------------------------------------------- |
-| Potential impact     | A creator can take one sourced short video from idea to an unlisted YouTube review                  |
-| Originality          | A professional editor the agent can operate, with a human licence to broadcast                      |
-| Technical excellence | Typed contracts, immutable revisions, independent tracks, deterministic rendering, and verification |
-| Sponsor tools        | TrueForge owns the loop; Qodo reviews the private pull-request trail                                |
-| Control and safety   | Sandboxed media work plus exact edit, render, upload, publish, and schedule approvals               |
-| Presentation         | The demo ends on a finished video and the visible public-release approval                           |
-
-## Editor capabilities
-
-- Square, borderless 16:9 Program monitor with playback, seek, volume, mute, and fullscreen
-- Resizable and collapsible media, timeline, and AI panels
-- Frame-aligned timeline with continuous zoom, adaptive ruler ticks, marquee selection, gaps, and one playhead
-- Independent video, named audio, and caption clips on persistent, reorderable tracks
-- Immediate drag reorder, trim, split, speed, mute, solo, export inclusion, undo, and redo
-- Independent transition items with live audition plus deterministic local sound-effect generation
-- License-aware Openverse audio search and capability-gated Pexels B-roll with immutable source/license records
-- Any-size multi-selection with exact clip, track, and gap context that can be dragged into the AI composer
-- Signature-checked local media import with real preview, size, duration, dimensions, and codec details
-- AI focus that can highlight the scenes or gap it believes the creator means before acting
-- One typed patch and revision system shared by direct edits and AI proposals
-- A first-class YouTube Release workspace controlled by both the creator and AI Producer
-
-## Media pipeline
-
-- **Visuals:** OpenMoji with license provenance, creator media, and an optional bounded Codex image route with live installed/authenticated status
-- **B-roll:** Pexels video search behind a server-only key; chosen clips are imported once with measured metadata and a license receipt
-- **Music and effects:** commercially compatible Openverse audio plus deterministic local sound synthesis
-- **Transitions:** a compact typed registry shared by the timeline, AI edit commands, Program preview, and Remotion
-- **Voice:** OpenRouter to Gemini TTS, one production provider with configurable model, voice, and locale
-- **Transcription:** OpenRouter `gpt-4o-mini-transcribe` for reference text and local `whisper.cpp` for measured word boundaries
-- **Captions:** Derived from measured words, never character-count timing
-- **Render:** Remotion with best-effort hardware encoding and safe software fallback
-- **Quality:** Contract, evidence, duration, frame, audio, and FFprobe checks
-- **Release:** Existing local YouTube OAuth profile, unlisted-first upload, and immutable release snapshots
-
-Direct GPT Image API routes are disabled by default. Setup and tests do not make paid media calls, upload to YouTube, or publish anything.
-
-## Architecture
+Greenlight supplies a typed HTTP MCP service for production state and trusted side effects. The model sees immutable artifact IDs, never credentials or host paths.
 
 ```text
 Creator
-  ↕ direct editing and approvals
-Greenlight Studio
-  ↕ TrueForge SDK event stream
-TrueForge AI Producer
-  ├─ Exa web research
+  ↕
+Studio editor
+  ↕ TrueForge SDK events
+TrueForge Producer
+  ├─ deferred research connectors
   ├─ bounded subagents
-  ├─ skills and sandbox
-  └─ typed Greenlight MCP calls
-       ├─ Zod contracts and patch reducer
-       ├─ SQLite and immutable artifacts
-       ├─ media providers and Remotion
-       └─ YouTube uploader
+  ├─ lazy editorial skills
+  ├─ sandboxed media work
+  └─ Greenlight MCP
+       ├─ contracts and revisions
+       ├─ SQLite and artifacts
+       ├─ providers and Remotion
+       └─ YouTube release controls
 ```
 
-TrueForge owns turns, subagents, tool discovery, sandbox work, reconnect, compaction, and approvals. Greenlight owns production state and constrained side effects. The model receives artifact IDs and project-relative references, never host paths, OAuth files, or API keys.
+## Repository layout
 
-When Code Mode needs raw media, it calls Greenlight's read-only `read_artifact_chunk` tool from inside the sandbox. The script assembles a bounded copy and verifies its SHA-256 before processing. Base64 and host paths never enter the creator conversation. Derived files return through TrueForge's `sandbox_artifacts` handoff and become new immutable Greenlight artifacts.
+```text
+apps/
+  studio/       React editor and release interface
+  mcp/          Runnable Greenlight MCP/API service
+  render/       Deterministic Remotion renderer
+packages/
+  contracts/    Shared Zod schemas and edit invariants
+agents/         TrueForge Producer definition and lazy skills
+scripts/        Local setup utilities
+```
 
+The MCP service belongs in `apps/` because TrueForge connects to it as an independently runnable HTTP process. Shared reusable types remain in `packages/contracts`.
 
-## Run locally
+## Local setup
 
 Requirements:
 
 - Node.js 22+
 - pnpm 9+
 - FFmpeg and FFprobe
-- `whisper-cli` plus a local Whisper model
-- standalone Git for TrueForge skill cloning (Homebrew Git on macOS)
 - TrueForge
-- an OpenRouter API key
+- An OpenAI-compatible model route, configured through OpenRouter by default
 
 ```bash
 pnpm install
@@ -140,84 +73,47 @@ cp .env.example .env
 openssl rand -hex 32
 ```
 
-Put the generated value in `GREENLIGHT_MCP_AUTH_TOKEN`. Put provider credentials only in the ignored `.env` file.
+Put the generated value in `GREENLIGHT_MCP_AUTH_TOKEN` and keep provider credentials only in the ignored `.env` file.
 
-The judged configuration uses OpenRouter, but TrueForge is not locked to it. Set `GREENLIGHT_ROOT_PROVIDER_NAME`, `GREENLIGHT_ROOT_BASE_URL`, `GREENLIGHT_ROOT_MODEL`, and `GREENLIGHT_ROOT_API_KEY` to any OpenAI-compatible provider route that supports the selected model. The configured provider name becomes the prefix in the root agent's model reference.
-
-Start TrueForge:
+Configure and run the stack:
 
 ```bash
-pnpm trueforge
-```
-
-The project pins TrueForge so every machine uses the same runtime. Greenlight's loopback LLM gateway maps OpenRouter's provider-reported `usage.cost` onto the AI SDK's `costInUSD` field before TrueForge receives the response. TrueForge then records its normal canonical cost metric; Greenlight never patches the runtime or estimates spend from token counts.
-
-Standalone TrueForge includes a local sandbox fallback on supported macOS and Linux hosts. Confirm it before a demo with `GET /api/v1/capabilities`; `sandbox.enabled` must be `true`. A cloud sandbox provider is optional for the local judged flow.
-
-Start Greenlight, then configure TrueForge:
-
-```bash
-pnpm dev
 pnpm trueforge:configure
+pnpm dev
 ```
 
-Open [http://127.0.0.1:4173](http://127.0.0.1:4173).
+Local services:
 
-Greenlight imports four optional custom playbooks from Git because that is TrueForge's skill boundary. The configured HTTPS repository and ref must be publicly cloneable before sandbox skill loading can work. `pnpm trueforge:configure` checks this with non-interactive Git and leaves the playbooks out of the live agent during private development, while the core Producer, tools, approvals, subagents, and Code Mode remain available. Make the repository public for the hackathon submission, then rerun the command to enable them. Never put a Git token in a skill URL.
+- TrueForge: `http://localhost:8790`
+- Greenlight MCP/API: `http://localhost:8941`
+- Studio: `http://localhost:4173`
 
-The optional Remotion authoring view is:
+## Development commands
 
 ```bash
-pnpm dev:render
+pnpm dev             # run Studio, MCP, and Render development processes
+pnpm dev:studio      # run only the editor
+pnpm dev:mcp         # run only the MCP/API service
+pnpm dev:render      # open Remotion Studio
+pnpm studio:seed     # create local sample production state
+pnpm verify          # format check, lint, typecheck, tests, and builds
 ```
 
-## Connect YouTube
+Tests use local fixtures and fake provider/process responses. They do not make paid media calls, upload videos, or publish anything.
 
-Greenlight wraps the existing uploader at `GREENLIGHT_YOUTUBE_UPLOADER` and uses the profile named by `GREENLIGHT_YOUTUBE_PROFILE`.
+## Release guarantees
 
-Authenticate that profile with the uploader, then set `GREENLIGHT_YOUTUBE_CHANNEL_ID` to the only channel Greenlight may use. The Studio shows the connected channel but never receives the OAuth credential path or token.
+- Uploads are always unlisted first.
+- Publish and schedule require approval for the exact current content, metadata, evidence, quality, render, destination, and release hashes.
+- Changed release state invalidates the prior approval.
+- Release operations are idempotent and atomically claimed before external work.
+- No video-delete or channel-wide mutation tool exists.
 
-Uploads are always unlisted first. Publishing and scheduling are separate TrueForge-approved actions. Greenlight exposes no delete-video tool.
+## Current limits
 
-## Verify without spending money
+- The judged flow targets short-form, single-creator production.
+- Word-accurate edits require measured transcription boundaries.
+- Optional media providers need owner-supplied credentials and capability checks.
+- Public release remains deliberately human-controlled.
 
-```bash
-pnpm verify
-```
-
-The gate runs formatting, lint, type checks, unit tests, and production builds. Provider tests inject fake responses. They do not call paid APIs or YouTube.
-
-## Safety model
-
-- Imported media is copied into content-addressed project storage. Originals stay untouched.
-- Every edit creates an immutable content revision.
-- Creator gestures save immediately and remain undoable.
-- AI edits preview against the same reducer that will persist them.
-- Generated files cross TrueForge's sandbox download boundary and Greenlight's media validator.
-- Word-accurate cuts require measured transcript timing. Missing timing fails instead of guessing.
-- Upload, publication, and scheduling are idempotent and channel-allowlisted.
-- A changed video or metadata snapshot requires fresh approval.
-- No credential, arbitrary host path, or raw chain-of-thought is shown to the model or creator UI.
-
-## Repository map
-
-- `apps/studio`: React, Tailwind, TanStack Query, timeline, Program, AI, and Release surfaces
-- `apps/mcp`: production tools, read API, providers, artifacts, rendering, and YouTube boundary
-- `apps/render`: Remotion composition and render entrypoint
-- `packages/contracts`: canonical Zod schemas, derived types, and pure patch reducer
-- `agents/producer`: TrueForge manifest and root instructions
-- `agents/skills`: four small Greenlight-specific TrueForge skills
-- `research`: dated hackathon, TrueForge, provider, Remotion, and design references
-
-## Honest limits
-
-- Greenlight targets 30 to 120 second evidence-led videos, not multi-hour productions.
-- It does not promise views, revenue, or autonomous channel growth.
-- Custom TrueForge skills require a public Git source at runtime.
-- The YouTube OAuth profile must be connected manually on the trusted host.
-- Codex image generation is a trusted-machine capability, not a hosted multi-tenant provider. Studio detects the local Codex login without spending an image generation request.
-- The final paid transcription, unlisted upload, and release rehearsal remain manual pre-submission gates.
-
-## Attribution and disclosure
-
-
+The product contract and acceptance criteria live in [PRD.md](PRD.md).

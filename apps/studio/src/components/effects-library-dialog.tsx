@@ -11,7 +11,7 @@ import { Blend, Check, Play, Volume2, X } from "lucide-react";
 import { useState } from "react";
 
 import { greenlightApi } from "../api/greenlight.js";
-import { useGenerateSoundEffect } from "../api/queries.js";
+import { useGenerateSoundEffect } from "../hooks/use-greenlight-queries.js";
 import { cx } from "./controls.js";
 
 type EffectsTab = "transitions" | "sounds";

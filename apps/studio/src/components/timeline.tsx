@@ -59,7 +59,7 @@ import {
   minimumTimelineItemStart,
 } from "../editor/operations.js";
 import { pointInsideProducer } from "../editor/pointer-target.js";
-import { TrackRail, type TrackDraft } from "./TrackRail.js";
+import { TrackRail, type TrackDraft } from "./track-rail.js";
 import { cx, IconButton } from "./controls.js";
 
 type Marquee = {

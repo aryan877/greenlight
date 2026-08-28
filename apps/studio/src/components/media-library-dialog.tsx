@@ -6,7 +6,7 @@ import {
   useImportMediaLibraryAsset,
   useMediaLibraryCapabilities,
   useMediaLibrarySearch,
-} from "../api/queries.js";
+} from "../hooks/use-greenlight-queries.js";
 import { cx } from "./controls.js";
 
 type LibraryUse = "broll" | "music" | "sound_effect";

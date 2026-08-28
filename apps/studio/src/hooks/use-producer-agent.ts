@@ -13,8 +13,8 @@ import {
 } from "@truefoundry/trueforge-sdk";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { greenlightApi } from "./greenlight.js";
-import { greenlightKeys } from "./queries.js";
+import { greenlightApi } from "../api/greenlight.js";
+import { greenlightKeys } from "../api/query-keys.js";
 
 export type StudioAgentEvent = {
   id: string;

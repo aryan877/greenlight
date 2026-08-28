@@ -5,7 +5,7 @@ import {
   captionClipRenderPlacement,
   getDurationInFrames,
   FPS,
-} from "../src/GreenlightFilm";
+} from "../src/greenlight-film";
 import { fixturePackage } from "../src/fixture";
 
 describe("GreenlightFilm", () => {

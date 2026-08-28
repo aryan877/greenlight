@@ -7,7 +7,7 @@ import {
   GreenlightFilm,
   GreenlightThumbnail,
   getDurationInFrames,
-} from "./GreenlightFilm";
+} from "./greenlight-film";
 import { renderSpec } from "./design";
 import { fixturePackage } from "./fixture";
 

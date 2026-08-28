@@ -1,25 +1,21 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  skipToken,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type {
   EditorPatchInput,
   GenerateSoundEffectInput,
   MediaLibraryResult,
 } from "@greenlight/contracts";
 
-import { greenlightApi } from "./greenlight.js";
+import { greenlightApi } from "../api/greenlight.js";
+import { greenlightKeys } from "../api/query-keys.js";
 
-export const greenlightKeys = {
-  all: ["greenlight"] as const,
-  projects: () => [...greenlightKeys.all, "projects"] as const,
-  project: (projectId: string) =>
-    [...greenlightKeys.projects(), projectId] as const,
-  artifact: (artifactId: string) =>
-    [...greenlightKeys.all, "artifacts", artifactId] as const,
-  imageGeneration: () => [...greenlightKeys.all, "image-generation"] as const,
-  voice: () => [...greenlightKeys.all, "voice"] as const,
-  youtube: () => [...greenlightKeys.all, "youtube"] as const,
-  mediaLibrary: () => [...greenlightKeys.all, "media-library"] as const,
-  mediaSearch: (query: string, use: string) =>
-    [...greenlightKeys.mediaLibrary(), "search", use, query] as const,
+const requireIdentifier = (value: string | null, name: string): string => {
+  if (!value) throw new Error(`${name}_not_selected`);
+  return value;
 };
 
 export const useProjects = () =>
@@ -31,9 +27,8 @@ export const useProjects = () =>
 
 export const useProject = (projectId: string | null) =>
   useQuery({
-    queryKey: greenlightKeys.project(projectId ?? "none"),
-    queryFn: () => greenlightApi.getProject(projectId!),
-    enabled: Boolean(projectId),
+    queryKey: greenlightKeys.project(projectId ?? "pending"),
+    queryFn: projectId ? () => greenlightApi.getProject(projectId) : skipToken,
     refetchInterval: 3_000,
   });
 
@@ -49,12 +44,13 @@ export const useCreateProject = () => {
 
 export const useContentPackage = (artifactId: string | null) =>
   useQuery({
-    queryKey: greenlightKeys.artifact(artifactId ?? "none"),
-    queryFn: async () => ({
-      artifactId: artifactId!,
-      content: await greenlightApi.getContentPackage(artifactId!),
-    }),
-    enabled: Boolean(artifactId),
+    queryKey: greenlightKeys.artifact(artifactId ?? "pending"),
+    queryFn: artifactId
+      ? async () => ({
+          artifactId,
+          content: await greenlightApi.getContentPackage(artifactId),
+        })
+      : skipToken,
   });
 
 export const useVoiceCapabilities = () =>
@@ -104,7 +100,10 @@ export const useImportMediaLibraryAsset = (projectId: string | null) => {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (result: MediaLibraryResult) =>
-      greenlightApi.importMediaLibraryAsset(projectId!, result),
+      greenlightApi.importMediaLibraryAsset(
+        requireIdentifier(projectId, "project"),
+        result,
+      ),
     onSuccess: async () => {
       if (!projectId) return;
       await client.invalidateQueries({
@@ -118,7 +117,10 @@ export const useGenerateSoundEffect = (projectId: string | null) => {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (input: Omit<GenerateSoundEffectInput, "project_id">) =>
-      greenlightApi.generateSoundEffect(projectId!, input),
+      greenlightApi.generateSoundEffect(
+        requireIdentifier(projectId, "project"),
+        input,
+      ),
     onSuccess: async () => {
       if (!projectId) return;
       await client.invalidateQueries({
@@ -140,7 +142,8 @@ export const useVoiceSample = (projectId: string) =>
 export const useUploadAsset = (projectId: string | null) => {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (file: File) => greenlightApi.uploadAsset(projectId!, file),
+    mutationFn: (file: File) =>
+      greenlightApi.uploadAsset(requireIdentifier(projectId, "project"), file),
     onSuccess: async () => {
       if (projectId) {
         await client.invalidateQueries({
@@ -155,7 +158,10 @@ export const useApplyEditorPatch = (projectId: string | null) => {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (patch: EditorPatchInput) =>
-      greenlightApi.applyEditorPatch(projectId!, patch),
+      greenlightApi.applyEditorPatch(
+        requireIdentifier(projectId, "project"),
+        patch,
+      ),
     onSuccess: async () => {
       if (!projectId) return;
       await Promise.all([
@@ -173,7 +179,7 @@ export const useRestoreContentRevision = (projectId: string | null) => {
   return useMutation({
     mutationFn: (input: { baseArtifactId: string; targetArtifactId: string }) =>
       greenlightApi.restoreContentRevision(
-        projectId!,
+        requireIdentifier(projectId, "project"),
         input.targetArtifactId,
         input.baseArtifactId,
       ),
