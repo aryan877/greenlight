@@ -40,8 +40,10 @@ Requirements: Node.js 22+, pnpm 9+, FFmpeg/FFprobe, and an owner-configured mode
 ```bash
 pnpm install
 cp .env.example .env
-openssl rand -hex 32 # set this as GREENLIGHT_MCP_AUTH_TOKEN in .env
+openssl rand -hex 32 # set output as GREENLIGHT_MCP_AUTH_TOKEN in .env
 ```
+
+Also set `GREENLIGHT_ROOT_API_KEY` in `.env` to the API key for the configured root model provider. Keep both values local; never commit them.
 
 Start TrueForge once, configure the saved Producer from another terminal, then run the judged stack:
 

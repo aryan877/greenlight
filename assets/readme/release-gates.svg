@@ -7,12 +7,12 @@
     </marker>
   </defs>
   <rect width="1200" height="275" rx="18" fill="#0B1110"/>
-  <text x="40" y="46" fill="#F3F7F5" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700">Release is a gated state machine</text>
-  <text x="1160" y="46" fill="#82928A" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="13">NO ONE-SHOT PUBLISH</text>
+  <text x="40" y="46" fill="#F3F7F5" font-family="Archivo, sans-serif" font-size="22" font-weight="700">Release is a gated state machine</text>
+  <text x="1160" y="46" fill="#82928A" text-anchor="end" font-family="Archivo, sans-serif" font-size="13">NO ONE-SHOT PUBLISH</text>
 
   <path d="M175 135h35M330 135h35M485 135h35M640 135h35M795 135h35M950 135h35" stroke="#69E0A7" stroke-width="2" marker-end="url(#gate-arrow)"/>
 
-  <g font-family="Arial, Helvetica, sans-serif">
+  <g font-family="Archivo, sans-serif">
     <rect x="35" y="82" width="140" height="106" rx="9" fill="#111B17" stroke="#294137"/>
     <text x="55" y="116" fill="#69E0A7" font-size="12" font-weight="700">01</text>
     <text x="55" y="143" fill="#F3F7F5" font-size="16" font-weight="700">Evidence</text>
