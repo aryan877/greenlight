@@ -157,9 +157,8 @@ export const ReleasePanel = ({
       track.clips.some((clip) => Boolean(clip.artifact_id)),
   );
   const captionsReady =
-    !spokenAudioNeedsCaptions ||
-    (hasTimedCaptions &&
-      (!qualityReport || checkByName.get("timed_captions")?.passed === true));
+    checkByName.get("timed_captions")?.passed ??
+    (!spokenAudioNeedsCaptions || hasTimedCaptions);
   const hasAudibleAudio = audibleTracks.some((track) =>
     track.clips.some((clip) => Boolean(clip.artifact_id)),
   );

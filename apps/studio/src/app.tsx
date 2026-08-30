@@ -221,15 +221,6 @@ export const App = () => {
     project.data?.artifacts
       .filter((artifact) => artifact.kind === "evidence_ledger")
       .at(-1) ?? null;
-  const videoArtifact =
-    project.data?.artifacts
-      .filter(
-        (artifact) =>
-          artifact.kind === "video" &&
-          artifact.provenance.content_package_artifact_id ===
-            contentArtifact?.id,
-      )
-      .at(-1) ?? null;
   const qualityArtifact =
     project.data?.artifacts
       .filter(
@@ -237,6 +228,16 @@ export const App = () => {
           artifact.kind === "quality_report" &&
           artifact.provenance.content_package_artifact_id ===
             contentArtifact?.id,
+      )
+      .at(-1) ?? null;
+  const videoArtifact =
+    project.data?.artifacts
+      .filter(
+        (artifact) =>
+          artifact.kind === "video" &&
+          (artifact.provenance.content_package_artifact_id ===
+            contentArtifact?.id ||
+            artifact.id === qualityArtifact?.provenance.video_artifact_id),
       )
       .at(-1) ?? null;
   const thumbnailArtifact =
