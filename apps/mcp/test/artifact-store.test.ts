@@ -8,6 +8,52 @@ import { ArtifactStore } from "../src/storage/artifacts.js";
 import { GreenlightStore } from "../src/storage/store.js";
 
 describe("artifact sandbox transfer", () => {
+  it("rehydrates an R2 original into the VPS cache and verifies its hash", async () => {
+    const root = await mkdtemp(join(tmpdir(), "greenlight-r2-cache-"));
+    const store = new GreenlightStore(":memory:");
+    try {
+      const project = store.createProject({
+        topic: "Remote editing workspace",
+        audience: "video creators",
+        goal: "Keep immutable originals remote and active files hot",
+        target_duration_seconds: 30,
+        tone: "clear",
+      });
+      const original = Buffer.from("canonical-r2-video-fixture");
+      const remoteKey = `demo/projects/${project.id}/uploads/source.mp4`;
+      const reads: string[] = [];
+      const artifacts = new ArtifactStore(root, store, async (key) => {
+        reads.push(key);
+        return new Response(original, {
+          headers: { "content-length": String(original.byteLength) },
+        });
+      });
+      const artifact = await artifacts.importBuffer({
+        projectId: project.id,
+        kind: "video",
+        filename: "source.mp4",
+        bytes: original,
+        provenance: { producer: "creator" },
+        storage: { backend: "r2", remoteKey },
+      });
+      const cachedPath = artifacts.resolveArtifact(artifact.id).absolutePath;
+      await rm(cachedPath);
+
+      await expect(
+        artifacts.readChunk(artifact.id, 0, original.byteLength),
+      ).resolves.toEqual(original);
+      expect(reads).toEqual([remoteKey]);
+      expect(store.getArtifactStorage(artifact.id)).toEqual({
+        backend: "r2",
+        remoteKey,
+      });
+      expect(JSON.stringify(artifact)).not.toContain(remoteKey);
+    } finally {
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("reconstructs immutable media from bounded chunks", async () => {
     const root = await mkdtemp(join(tmpdir(), "greenlight-artifact-"));
     const store = new GreenlightStore(":memory:");
@@ -65,9 +111,9 @@ describe("artifact sandbox transfer", () => {
         bytes: Buffer.from("generated-image-fixture"),
         generation: {
           media_type: "image",
-          provider: "codex_subscription",
+          provider: "openrouter",
           model: "gpt-image-current",
-          runtime: "codex app-server",
+          runtime: "openrouter_images_api",
           input_hashes: [promptHash],
           prompt_sha256: promptHash,
           width: 1920,
@@ -89,9 +135,9 @@ describe("artifact sandbox transfer", () => {
         bytes: Buffer.from("generated-image-fixture"),
         generation: {
           media_type: "image",
-          provider: "codex_subscription",
+          provider: "openrouter",
           model: "gpt-image-current",
-          runtime: "codex app-server",
+          runtime: "openrouter_images_api",
           input_hashes: [secondPromptHash],
           prompt_sha256: secondPromptHash,
           width: 1920,

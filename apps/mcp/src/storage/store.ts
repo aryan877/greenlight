@@ -50,6 +50,9 @@ type ReleaseRow = {
   created_at?: string;
 };
 
+export type ArtifactStorage =
+  { backend: "local"; remoteKey: null } | { backend: "r2"; remoteKey: string };
+
 const migrations = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -74,6 +77,16 @@ CREATE TABLE IF NOT EXISTS artifacts (
   generation_json TEXT,
   provenance_json TEXT NOT NULL,
   created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS artifact_storage (
+  artifact_id TEXT PRIMARY KEY REFERENCES artifacts(id) ON DELETE CASCADE,
+  backend TEXT NOT NULL CHECK (backend IN ('local', 'r2')),
+  remote_key TEXT,
+  CHECK (
+    (backend = 'local' AND remote_key IS NULL) OR
+    (backend = 'r2' AND length(remote_key) > 0)
+  )
 );
 
 CREATE TABLE IF NOT EXISTS project_content_heads (
@@ -277,31 +290,63 @@ export class GreenlightStore {
     return this.getProject(id)!;
   }
 
-  saveArtifact(artifact: Artifact): Artifact {
+  saveArtifact(
+    artifact: Artifact,
+    storage: ArtifactStorage = { backend: "local", remoteKey: null },
+  ): Artifact {
     const valid = artifactSchema.parse(artifact);
-    this.db
-      .prepare(
-        `INSERT INTO artifacts
-          (id, project_id, kind, sha256, relative_path, mime_type, byte_size, generation_json, provenance_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        valid.id,
-        valid.project_id,
-        valid.kind,
-        valid.sha256,
-        valid.relative_path,
-        valid.mime_type,
-        valid.byte_size,
-        valid.generation ? JSON.stringify(valid.generation) : null,
-        JSON.stringify(valid.provenance),
-        valid.created_at,
-      );
+    if (storage.backend === "r2" && storage.remoteKey.trim().length === 0) {
+      throw new Error("artifact_remote_key_required");
+    }
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO artifacts
+            (id, project_id, kind, sha256, relative_path, mime_type, byte_size, generation_json, provenance_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          valid.id,
+          valid.project_id,
+          valid.kind,
+          valid.sha256,
+          valid.relative_path,
+          valid.mime_type,
+          valid.byte_size,
+          valid.generation ? JSON.stringify(valid.generation) : null,
+          JSON.stringify(valid.provenance),
+          valid.created_at,
+        );
+      this.db
+        .prepare(
+          `INSERT INTO artifact_storage (artifact_id, backend, remote_key)
+           VALUES (?, ?, ?)`,
+        )
+        .run(valid.id, storage.backend, storage.remoteKey);
+    })();
     const saved = this.db
       .prepare("SELECT * FROM artifacts WHERE id = ?")
       .get(valid.id) as ArtifactRow | undefined;
     if (!saved) throw new Error("artifact_save_failed");
     return toArtifact(saved);
+  }
+
+  getArtifactStorage(id: string): ArtifactStorage | null {
+    const row = this.db
+      .prepare(
+        "SELECT backend, remote_key FROM artifact_storage WHERE artifact_id = ?",
+      )
+      .get(id) as
+      { backend: "local" | "r2"; remote_key: string | null } | undefined;
+    if (!row)
+      return this.getArtifact(id)
+        ? { backend: "local", remoteKey: null }
+        : null;
+    if (row.backend === "r2") {
+      if (!row.remote_key) throw new Error("artifact_storage_corrupt");
+      return { backend: "r2", remoteKey: row.remote_key };
+    }
+    return { backend: "local", remoteKey: null };
   }
 
   getArtifact(id: string): Artifact | null {

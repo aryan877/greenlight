@@ -15,8 +15,6 @@ services:
       GREENLIGHT_MCP_HOST: 0.0.0.0
       GREENLIGHT_MCP_PORT: 8941
       GREENLIGHT_OPENMOJI_ROOT: /opt/openmoji
-      GREENLIGHT_STUDIO_ORIGIN: https://greenlight.aryankumar.dev
-      GREENLIGHT_TRANSCRIPTION_PROVIDER: openrouter
       GREENLIGHT_WHISPER_BINARY: /usr/local/bin/whisper-cli
       GREENLIGHT_WHISPER_MODEL: /opt/whisper-models/ggml-base.bin
       GREENLIGHT_YOUTUBE_UPLOADER: /opt/youtube-uploader/bin/youtube-uploader

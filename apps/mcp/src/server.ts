@@ -19,21 +19,15 @@ import { loadConfig } from "./config.js";
 import { inspectImportedMedia } from "./media-import.js";
 import { sha256 } from "./lib/canonical.js";
 import { buildMcpServer } from "./mcp/tools.js";
-import { CodexImageProvider } from "./providers/codex-image.js";
+import { OpenRouterImageProvider } from "./providers/openrouter-image.js";
 import { QualityInspector } from "./providers/quality.js";
 import { OpenMojiToolkit } from "./providers/openmoji.js";
 import { probeImportedMedia } from "./providers/media-metadata.js";
 import { MediaLibraryProvider } from "./providers/media-library.js";
 import { LlmGatewayProvider } from "./providers/llm-gateway.js";
 import { RemotionRenderer } from "./providers/render.js";
-import {
-  DisabledTranscriptionProvider,
-  OpenRouterTranscriptionProvider,
-} from "./providers/transcription.js";
-import {
-  DisabledVoiceProvider,
-  OpenRouterVoiceProvider,
-} from "./providers/voice.js";
+import { OpenRouterTranscriptionProvider } from "./providers/transcription.js";
+import { OpenRouterVoiceProvider } from "./providers/voice.js";
 import { YouTubeUploader } from "./providers/youtube.js";
 import { ArtifactStore } from "./storage/artifacts.js";
 import { GreenlightStore } from "./storage/store.js";
@@ -49,19 +43,28 @@ mkdirSync(config.dataDir, { recursive: true });
 mkdirSync(config.artifactDir, { recursive: true });
 
 const store = new GreenlightStore(resolve(config.dataDir, "greenlight.sqlite"));
-const artifacts = new ArtifactStore(config.artifactDir, store);
-const image = new CodexImageProvider(config.codex, artifacts);
+const artifacts = new ArtifactStore(
+  config.artifactDir,
+  store,
+  config.r2Cache.readerUrl && config.r2Cache.readerToken
+    ? async (remoteKey) =>
+        fetch(config.r2Cache.readerUrl!, {
+          body: JSON.stringify({ key: remoteKey }),
+          headers: {
+            "content-type": "application/json",
+            "x-greenlight-origin-token": config.r2Cache.readerToken!,
+          },
+          method: "POST",
+          signal: AbortSignal.timeout(5 * 60_000),
+        })
+    : null,
+);
+const image = new OpenRouterImageProvider(config.image, artifacts);
 const openmoji = new OpenMojiToolkit(config.openMojiRoot, artifacts);
 const mediaLibrary = new MediaLibraryProvider(config.mediaLibrary);
 const llmGateway = new LlmGatewayProvider(config.llmGateway);
-const voice =
-  config.voice.provider === "openrouter"
-    ? new OpenRouterVoiceProvider(config.voice)
-    : new DisabledVoiceProvider();
-const transcription =
-  config.transcription.provider === "openrouter"
-    ? new OpenRouterTranscriptionProvider(config.transcription)
-    : new DisabledTranscriptionProvider();
+const voice = new OpenRouterVoiceProvider(config.voice);
+const transcription = new OpenRouterTranscriptionProvider(config.transcription);
 const renderer = new RemotionRenderer(config.workspaceRoot, artifacts);
 const quality = new QualityInspector(artifacts);
 const youtube = new YouTubeUploader(config.youtube);
@@ -155,24 +158,58 @@ app.get("/api/voice", (_request, response) => {
   response.json(voice.describe());
 });
 
-app.get("/api/image-generation", async (_request, response) => {
-  response.json(await image.describe());
-});
-
 app.get("/api/youtube", async (_request, response) => {
   try {
     const channel = await youtube.identity();
     response.json({
+      connect_available: youtube.canConnect(),
       connected: true,
       channel_title: channel.title,
       custom_url: channel.custom_url ?? null,
     });
   } catch {
     response.json({
+      connect_available: youtube.canConnect(),
       connected: false,
       channel_title: null,
       custom_url: null,
     });
+  }
+});
+
+const youtubeConnectRequestSchema = z.object({
+  return_path: z.string().regex(/^\/$|^\/projects\/[A-Za-z0-9_-]{3,100}$/u),
+});
+
+app.post("/api/youtube/connect", (request, response) => {
+  try {
+    const input = youtubeConnectRequestSchema.parse(request.body);
+    response.json({
+      authorization_url: youtube.connectionUrl(input.return_path),
+    });
+  } catch (error) {
+    const code =
+      error instanceof Error ? error.message : "youtube_oauth_failed";
+    response.status(code === "youtube_oauth_not_configured" ? 503 : 400).json({
+      error: code,
+    });
+  }
+});
+
+app.get("/api/youtube/callback", async (request, response) => {
+  try {
+    const code =
+      typeof request.query.code === "string" ? request.query.code : "";
+    const state =
+      typeof request.query.state === "string" ? request.query.state : "";
+    if (!code || !state) throw new Error("youtube_oauth_callback_incomplete");
+    const returnPath = await youtube.completeConnection(code, state);
+    response.redirect(
+      303,
+      `${config.studioOrigin}${returnPath}?youtube=connected`,
+    );
+  } catch {
+    response.redirect(303, `${config.studioOrigin}/?youtube=failed`);
   }
 });
 
@@ -261,7 +298,7 @@ const studioProject = (project: Project, artifactCount: number) => ({
   artifact_count: artifactCount,
   current_content_package_artifact_id:
     store.getCurrentContentArtifact(project.id)?.id ?? null,
-  workspace_path: `artifacts/${project.id}`,
+  workspace_path: `greenlight://projects/${project.id}`,
 });
 
 app.get("/api/projects", (_request, response) => {
@@ -451,6 +488,7 @@ app.post(
       }
       const filename = basename(decodeURIComponent(encodedFilename));
       const source = request.header("x-greenlight-source");
+      const r2Key = request.header("x-greenlight-r2-key")?.trim() || null;
       const sandboxSessionId = request.header("x-greenlight-session-id");
       const sandboxTurnId = request.header("x-greenlight-turn-id");
       const encodedSandboxPath = request.header("x-greenlight-sandbox-path");
@@ -465,6 +503,28 @@ app.post(
       ) {
         response.status(400).json({ error: "sandbox_origin_required" });
         return;
+      }
+      if (
+        fromR2 &&
+        (!r2Key ||
+          !r2Key.startsWith(`demo/projects/${project.id}/uploads/`) ||
+          r2Key.length > 600)
+      ) {
+        response.status(400).json({ error: "r2_origin_required" });
+        return;
+      }
+      if (fromR2 && r2Key) {
+        const existing = store
+          .listArtifacts(project.id)
+          .find(
+            (candidate) =>
+              store.getArtifactStorage(candidate.id)?.backend === "r2" &&
+              store.getArtifactStorage(candidate.id)?.remoteKey === r2Key,
+          );
+        if (existing) {
+          response.json({ artifact: existing, cached: true });
+          return;
+        }
       }
       const bytes = Buffer.isBuffer(request.body)
         ? request.body
@@ -495,8 +555,11 @@ app.post(
           media_metadata: metadata,
           media_probe_status: metadata ? "measured" : "unavailable",
         },
+        ...(fromR2 && r2Key
+          ? { storage: { backend: "r2" as const, remoteKey: r2Key } }
+          : {}),
       });
-      response.status(201).json({ artifact });
+      response.status(201).json({ artifact, cached: false });
     } catch (error) {
       const code =
         error instanceof Error ? error.message : "media_import_failed";
@@ -516,9 +579,9 @@ app.post(
   },
 );
 
-app.get("/api/artifacts/:id", (request, response) => {
+app.get("/api/artifacts/:id", async (request, response) => {
   try {
-    const resolvedArtifact = artifacts.resolveArtifact(request.params.id);
+    const resolvedArtifact = await artifacts.ensureLocal(request.params.id);
     response.type(resolvedArtifact.artifact.mime_type);
     response.setHeader("x-greenlight-sha256", resolvedArtifact.artifact.sha256);
     response.sendFile(resolvedArtifact.absolutePath);

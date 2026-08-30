@@ -247,18 +247,3 @@ export class OpenRouterTranscriptionProvider implements TranscriptionProvider {
     };
   }
 }
-
-export class DisabledTranscriptionProvider implements TranscriptionProvider {
-  describe() {
-    return {
-      available: false,
-      provider: "disabled",
-      transcription_model: null,
-      timing_model: null,
-    };
-  }
-
-  async transcribe(): Promise<never> {
-    throw new Error("transcription_provider_disabled");
-  }
-}

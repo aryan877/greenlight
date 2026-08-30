@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import type { IncomingMessage } from "node:http";
-import { request as httpsRequest } from "node:https";
+import { request as httpsRequest, type RequestOptions } from "node:https";
 import { isIP } from "node:net";
 import { extname } from "node:path";
 
@@ -194,19 +194,30 @@ const requestPinnedMedia = async (
 ): Promise<IncomingMessage> =>
   new Promise((resolvePromise, rejectPromise) => {
     const request = httpsRequest(
-      destination.url,
-      {
-        method: "GET",
-        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-        lookup: (_hostname, _options, callback) => {
-          callback(null, destination.address, destination.family);
-        },
-      },
+      pinnedMediaRequestOptions(destination),
       resolvePromise,
     );
     request.once("error", rejectPromise);
     request.end();
   });
+
+export const pinnedMediaRequestOptions = (destination: {
+  address: string;
+  family: 4 | 6;
+  url: URL;
+}): RequestOptions => ({
+  protocol: "https:",
+  hostname: destination.address,
+  port: destination.url.port || 443,
+  path: `${destination.url.pathname}${destination.url.search}`,
+  method: "GET",
+  family: destination.family,
+  headers: { Host: destination.url.host },
+  ...(isIP(destination.url.hostname) === 0
+    ? { servername: destination.url.hostname }
+    : {}),
+  signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+});
 
 const download = async (value: string, kind: "video" | "audio") => {
   let destination = await resolveSafeRemoteMediaUrl(value);
@@ -362,7 +373,7 @@ export class MediaLibraryProvider {
         throw new Error("pexels_video_only");
       if (!this.config.pexelsApiKey) throw new Error("pexels_not_configured");
       const url = new URL(
-        "/videos/search",
+        "/v1/videos/search",
         this.config.providers.pexels.apiBaseUrl,
       );
       url.searchParams.set("query", input.query);
@@ -401,7 +412,7 @@ export class MediaLibraryProvider {
       const body = pexelsVideoSchema.parse(
         await jsonRequest(
           new URL(
-            `/videos/videos/${encodeURIComponent(input.providerAssetId)}`,
+            `/v1/videos/videos/${encodeURIComponent(input.providerAssetId)}`,
             this.config.providers.pexels.apiBaseUrl,
           ),
           { headers: { Authorization: this.config.pexelsApiKey } },

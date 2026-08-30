@@ -37,7 +37,7 @@ Both creator edits and Producer edits resolve to `EditorPatchOperation`, so the 
 
 ![Greenlight release gates](assets/readme/release-gates.svg)
 
-The live deployment serves the Studio and signed multipart uploads from a Cloudflare Worker, keeps creator media in private R2, and reaches the containerized TrueForge + Greenlight origin through a header-gated Cloudflare Tunnel. The origin exposes no public service port.
+The live deployment serves the Studio and signed multipart uploads from a Cloudflare Worker. Private R2 is the canonical home for originals; Greenlight verifies and hydrates a project-scoped hot-file cache on the VPS before media work. A header-gated Cloudflare Tunnel reaches the containerized TrueForge + Greenlight origin, which exposes no public service port.
 
 ## Run locally
 
@@ -49,7 +49,7 @@ cp .env.example .env
 openssl rand -hex 32 # set output as GREENLIGHT_MCP_AUTH_TOKEN in .env
 ```
 
-Also set `GREENLIGHT_ROOT_API_KEY` in `.env` to the API key for the configured root model provider. Keep both values local; never commit them.
+Set `OPENROUTER_API_KEY` in `.env`. Greenlight uses that single local secret for the TrueForge root model, GPT Image 2, voice, and transcription. Never commit it.
 
 Start TrueForge once, configure the saved Producer from another terminal, then run the judged stack:
 

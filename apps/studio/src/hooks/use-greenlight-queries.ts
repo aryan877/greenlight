@@ -76,15 +76,6 @@ export const useVoiceCapabilities = () =>
     staleTime: 60_000,
   });
 
-export const useImageGenerationCapabilities = () =>
-  useQuery({
-    queryKey: greenlightKeys.imageGeneration(),
-    queryFn: greenlightApi.getImageGenerationCapabilities,
-    refetchInterval: 60_000,
-    retry: false,
-    staleTime: 30_000,
-  });
-
 export const useYouTubeConnection = () =>
   useQuery({
     queryKey: greenlightKeys.youtube(),

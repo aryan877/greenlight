@@ -178,6 +178,59 @@ describe("Producer event projection", () => {
     ]);
   });
 
+  it("turns internal project recovery into a creator-facing subagent card", async () => {
+    const { appendUniqueStudioEvents, describeEvent } =
+      await import("./use-producer-agent.js");
+    const started = describeEvent({
+      type: "thread.created",
+      thread_id: "project_lookup",
+      title: "Current head lookup",
+      agent_info: {
+        input:
+          "Call the MCP get_project tool for project_greenlight and return its content package artifact ID.",
+      },
+    });
+    const working = describeEvent({
+      type: "model.message",
+      thread_id: "project_lookup",
+      tool_calls: [
+        { id: "exec", function: { name: "exec", arguments: "{}" } },
+        {
+          id: "project",
+          function: { name: "get_project", arguments: "{}" },
+        },
+      ],
+    });
+    const finished = describeEvent({
+      type: "thread.done",
+      thread_id: "project_lookup",
+      title: "Current head lookup",
+      state: {
+        status: "done",
+        output: { content: "artifact_content is the current package." },
+      },
+    });
+    const read = describeEvent({
+      type: "tool.response",
+      thread_id: "project_lookup",
+      tool_call_id: "project",
+    });
+
+    const [event] = [working, read, finished].reduce(
+      appendUniqueStudioEvents,
+      started,
+    );
+    expect(event).toMatchObject({
+      label: "Reviewing the current edit",
+      detail: "Done",
+      subagent: {
+        brief: "",
+        steps: [{ label: "Reading the current project", status: "done" }],
+        result: "",
+      },
+    });
+  });
+
   it("turns a completed script thread into a review document", async () => {
     const { appendUniqueStudioEvents, describeEvent } =
       await import("./use-producer-agent.js");
@@ -185,7 +238,10 @@ describe("Producer event projection", () => {
       type: "thread.created",
       thread_id: "script_draft",
       title: "Script · Chapters and draft",
-      agent_info: { input: "Write the chapter plan and spoken script." },
+      agent_info: {
+        input:
+          "You are the script writer. PROJECT CONTEXT: Build a six-scene chapter plan, exact narration, visual treatment, timing, evidence mapping, metadata, and every internal production constraint supplied by the parent agent.",
+      },
     });
     const finished = describeEvent({
       type: "thread.done",
@@ -201,6 +257,7 @@ describe("Producer event projection", () => {
     });
 
     const [event] = appendUniqueStudioEvents(started, finished);
+    expect(event?.subagent?.brief).toBe("");
     expect(event?.document).toEqual({
       title: "Script draft",
       subtitle: "Review the chapters and wording before production starts",
@@ -241,6 +298,22 @@ describe("Producer event projection", () => {
         reason: "manual",
       }),
     ).toEqual([]);
+  });
+
+  it("hides internal runtime and tool commentary from the creator", async () => {
+    const { describeEvent } = await import("./use-producer-agent.js");
+
+    for (const content of [
+      "Sandbox code mode is blocked by a proxy error.",
+      "I have the authoritative content package.",
+      "The durations must align to the production frame rate (30fps).",
+      "generatevoice and transcribeaudio are available.",
+      "| Scene 5 | Thumbs up | 1F44D | | Scene 6 | Green circle | 1F7E2 |",
+      "The six OpenMoji visuals have been attached across all six scenes with the OpenMoji treatment: 1. **Scene 1:** Robot",
+      "Scene 1 (scenehook): Robot 2.",
+    ]) {
+      expect(describeEvent({ type: "model.message", content })).toEqual([]);
+    }
   });
 
   it("sends the whole cut and keeps the current selection as emphasis", async () => {
@@ -455,7 +528,7 @@ describe("Producer event projection", () => {
         type: "turn.done",
         state: { status: "cancelled" },
       }),
-    ).toContain("stopped");
+    ).toBeNull();
   });
 
   it("derives durable reply duration from the TrueForge turn lifecycle", async () => {
@@ -557,6 +630,26 @@ describe("Producer event projection", () => {
         message("Frame math confirmed: frames 0–78, gapAfter 5.0 seconds."),
       ),
     ).toEqual([]);
+    expect(describeEvent(message('"} entries.'))).toEqual([]);
+    expect(
+      describeEvent(
+        message(
+          "The user cancelled the research subagents and handed me two links.",
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      describeEvent(
+        message("All capabilities are wired: Pexels, OpenMoji, and voice."),
+      ),
+    ).toEqual([]);
+    expect(describeEvent(message("jq isn't on PATH here."))).toEqual([]);
+    expect(
+      describeEvent(message("The ID just needs to be at least 8 characters.")),
+    ).toEqual([]);
+    expect(describeEvent(message("I now have a solid evidence base."))).toEqual(
+      [],
+    );
     expect(
       describeEvent(message("Patch applied successfully."))[0]?.label,
     ).toBe("Change applied.");

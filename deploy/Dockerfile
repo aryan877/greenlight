@@ -34,6 +34,12 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends bubblewrap ripgrep socat \
   && rm -rf /var/lib/apt/lists/*
 
+RUN python3 -m venv /tmp/greenlight-wheel-downloader \
+  && mkdir -p /usr/local/share/greenlight-python-wheels \
+  && /tmp/greenlight-wheel-downloader/bin/pip download --no-cache-dir \
+    --dest /usr/local/share/greenlight-python-wheels pydantic==2.12.5 \
+  && rm -rf /tmp/greenlight-wheel-downloader
+
 COPY --from=whisper /src/build/bin/whisper-cli /usr/local/bin/whisper-cli
 
 WORKDIR /app
@@ -47,6 +53,8 @@ RUN pnpm install --frozen-lockfile \
     git+https://github.com/aryan877/youtube-uploader.git@e2b6a38d6539e835e18aa419f90bd6881a869b23 \
   && apt-get purge -y --auto-remove build-essential \
   && rm -rf /var/lib/apt/lists/* /root/.cache
+
+COPY deploy/pip.conf /etc/pip.conf
 
 ENTRYPOINT ["tini", "--"]
 CMD ["node", "apps/mcp/dist/server.js"]

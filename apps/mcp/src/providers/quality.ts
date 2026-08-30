@@ -49,7 +49,7 @@ export class QualityInspector {
     projectId: string;
     videoArtifactId: string;
   }) {
-    const video = this.artifacts.resolveArtifact(input.videoArtifactId);
+    const video = await this.artifacts.ensureLocal(input.videoArtifactId);
     const contentArtifact = this.artifacts.resolveArtifact(
       input.contentPackageArtifactId,
     );

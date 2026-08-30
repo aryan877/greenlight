@@ -5,7 +5,6 @@ export const greenlightKeys = {
     [...greenlightKeys.projects(), projectId] as const,
   artifact: (artifactId: string) =>
     [...greenlightKeys.all, "artifacts", artifactId] as const,
-  imageGeneration: () => [...greenlightKeys.all, "image-generation"] as const,
   voice: () => [...greenlightKeys.all, "voice"] as const,
   youtube: () => [...greenlightKeys.all, "youtube"] as const,
   mediaLibrary: () => [...greenlightKeys.all, "media-library"] as const,

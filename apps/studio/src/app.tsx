@@ -18,12 +18,7 @@ import {
   type TransitionPresetId,
   type TransitionTimelineClip,
 } from "@greenlight/contracts";
-import {
-  LockKeyhole,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
-} from "lucide-react";
+import { PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useProducerAgent } from "./hooks/use-producer-agent.js";
@@ -33,7 +28,6 @@ import {
   useEvidenceLedger,
   useApplyEditorPatch,
   useCreateProject,
-  useImageGenerationCapabilities,
   useProject,
   useProjects,
   useQualityReport,
@@ -41,15 +35,9 @@ import {
   useUploadAsset,
   useYouTubeConnection,
 } from "./hooks/use-greenlight-queries.js";
-import {
-  GeminiIcon,
-  GreenlightMark,
-  RemotionIcon,
-  TrueForgeIcon,
-  YouTubeIcon,
-} from "./brand-icons.js";
+import { GreenlightMark, YouTubeIcon } from "./brand-icons.js";
+import { AccountMenu } from "./components/account-menu.js";
 import { IconButton, ResizeHandle, cx } from "./components/controls.js";
-import { CodexConnectionStatus } from "./components/codex-connection-status.js";
 import { InspectorPanel } from "./components/inspector-panel.js";
 import {
   ProducerPanel,
@@ -93,6 +81,7 @@ import {
   removeProducerReference,
   type ProducerReferenceId,
 } from "./editor/producer-references.js";
+import { projectIdFromPathname, projectPath } from "./editor/project-route.js";
 import { useMediaController } from "./editor/use-media-controller.js";
 import { timelineAudioSources } from "./editor/timeline-audio.js";
 import { useWorkspaceLayout } from "./editor/use-workspace-layout.js";
@@ -115,7 +104,9 @@ const emptyProducerReferences = (): ProducerReferenceId[] => [];
 export const App = () => {
   const projects = useProjects();
   const createProject = useCreateProject();
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(() =>
+    projectIdFromPathname(window.location.pathname),
+  );
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [selectedTrackIds, setSelectedTrackIds] = useState<string[]>([]);
   const [selectedGapIds, setSelectedGapIds] = useState<string[]>([]);
@@ -143,16 +134,78 @@ export const App = () => {
   const layout = useWorkspaceLayout();
   const media = useMediaController();
 
+  const selectProject = useCallback(
+    (nextProjectId: string, replace = false) => {
+      setProjectId(nextProjectId);
+      const nextPath = projectPath(nextProjectId);
+      if (window.location.pathname === nextPath) return;
+      window.history[replace ? "replaceState" : "pushState"](
+        null,
+        "",
+        `${nextPath}${window.location.search}`,
+      );
+    },
+    [],
+  );
+
   useEffect(() => {
-    if (!projectId && projects.data?.[0]) setProjectId(projects.data[0].id);
+    const available = projects.data;
+    const firstProject = available?.[0];
+    if (!available || !firstProject) return;
+    const routedProjectId = projectIdFromPathname(window.location.pathname);
+    const nextProjectId =
+      (routedProjectId &&
+      available.some((candidate) => candidate.id === routedProjectId)
+        ? routedProjectId
+        : null) ??
+      (projectId && available.some((candidate) => candidate.id === projectId)
+        ? projectId
+        : firstProject.id);
+    if (projectId !== nextProjectId) setProjectId(nextProjectId);
+    if (window.location.pathname !== projectPath(nextProjectId)) {
+      window.history.replaceState(
+        null,
+        "",
+        `${projectPath(nextProjectId)}${window.location.search}`,
+      );
+    }
   }, [projectId, projects.data]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const routedProjectId = projectIdFromPathname(window.location.pathname);
+      if (
+        routedProjectId &&
+        projects.data?.some((candidate) => candidate.id === routedProjectId)
+      ) {
+        setProjectId(routedProjectId);
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [projects.data]);
 
   const project = useProject(projectId);
   const youtubeConnection = useYouTubeConnection();
-  const imageGeneration = useImageGenerationCapabilities();
   const uploadAsset = useUploadAsset(projectId);
   const applyDirectPatch = useApplyEditorPatch(projectId);
   const restoreRevision = useRestoreContentRevision(projectId);
+
+  useEffect(() => {
+    const parameters = new URLSearchParams(window.location.search);
+    const youtubeResult = parameters.get("youtube");
+    if (!youtubeResult) return;
+    setRightTab("release");
+    layout.setRightOpen(true);
+    void youtubeConnection.refetch();
+    parameters.delete("youtube");
+    const query = parameters.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}`,
+    );
+  }, []);
   const contentArtifact =
     project.data?.artifacts.find(
       (artifact) =>
@@ -310,12 +363,6 @@ export const App = () => {
     ],
     [editorGaps, editorItems, selectedGapIds, selectedItemIds],
   );
-  const releaseThumbnailArtifact =
-    project.data?.artifacts.find(
-      (artifact) =>
-        artifact.id === editorContent?.release.thumbnail_artifact_id,
-    ) ?? thumbnailArtifact;
-
   const updateHistorySize = useCallback(() => {
     setHistorySize({
       undo: undoStack.current.length,
@@ -720,6 +767,26 @@ export const App = () => {
       setDraftIntent({ id: crypto.randomUUID(), text, mode: "replace" });
     },
     [layout],
+  );
+
+  const runProducer = useCallback(
+    (instruction: string) => {
+      setRightTab("producer");
+      layout.setRightOpen(true);
+      void producer.send({
+        instruction,
+        selection,
+        references: producerReferenceSelection,
+        timeline: timelineContext,
+      });
+    },
+    [
+      layout,
+      producer.send,
+      producerReferenceSelection,
+      selection,
+      timelineContext,
+    ],
   );
 
   const persistDirectOperations = useCallback(
@@ -1545,7 +1612,7 @@ export const App = () => {
           projects={projects.data ?? []}
           activeId={projectId}
           creating={createProject.isPending}
-          onSelect={setProjectId}
+          onSelect={selectProject}
           onCreate={async (topic) => {
             const created = await createProject.mutateAsync({
               topic,
@@ -1555,17 +1622,13 @@ export const App = () => {
               tone: "clear, curious, cinematic",
             });
             setSelectedItemIds([]);
-            setProjectId(created.id);
+            selectProject(created.id);
           }}
         />
 
         <div className="ml-auto mr-1.5">
           <ThemeToggle />
         </div>
-        <CodexConnectionStatus
-          capabilities={imageGeneration.data ?? null}
-          checking={imageGeneration.isLoading && !imageGeneration.data}
-        />
         <button
           type="button"
           onClick={() => {
@@ -1573,34 +1636,20 @@ export const App = () => {
             layout.setRightOpen(true);
           }}
           className={cx(
-            "flex h-8 items-center gap-2 rounded-full border border-line-subtle px-3 text-[10px] font-medium text-ink-secondary hover:border-ink-caption hover:text-ink",
+            "ml-1.5 flex h-8 max-w-48 items-center gap-2 border border-line-subtle px-3 text-[10px] font-medium text-ink-secondary hover:border-ink-caption hover:text-ink",
             rightTab === "release" && "border-action text-action",
           )}
         >
           <YouTubeIcon className="size-4" />
-          Release
-          <span className="capitalize text-ink-caption">
-            {project.data?.release?.privacy ?? "draft"}
+          <span className="truncate">
+            {youtubeConnection.data?.connected
+              ? youtubeConnection.data.channel_title
+              : "Connect YouTube"}
           </span>
         </button>
-        <div className="ml-1.5 flex items-center gap-1.5 rounded-full border border-line-subtle px-2 py-1 text-ink-tertiary">
-          <TrueForgeIcon className="size-4" />
-          <GeminiIcon className="size-4" />
-          <RemotionIcon className="size-4" />
-          <YouTubeIcon className="size-4" />
+        <div className="ml-1.5">
+          <AccountMenu />
         </div>
-        <button
-          type="button"
-          onClick={() =>
-            directProducer(
-              "Prepare the current cut for review. Run only the missing quality and staging steps, and stop for TrueForge confirmation before rendering, uploading, or publishing.",
-            )
-          }
-          className="ml-2 flex h-8 items-center gap-2 rounded-full bg-surface-sunken px-3 text-[10px] font-medium text-ink-secondary hover:bg-active"
-        >
-          <LockKeyhole size={13} />
-          {project.data?.project.stage ?? "Not ready"}
-        </button>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -1821,6 +1870,8 @@ export const App = () => {
                     isSending={producer.isSending}
                     isApproving={producer.isApproving}
                     isAnswering={producer.isAnswering}
+                    canStop={producer.canStop}
+                    isStopping={producer.isStopping}
                     onSend={(instruction) =>
                       producer.send({
                         instruction,
@@ -1829,6 +1880,7 @@ export const App = () => {
                         timeline: timelineContext,
                       })
                     }
+                    onStop={producer.stop}
                     onRetryInstruction={producer.retryInstruction}
                     onApproval={(pending, status, reason) =>
                       producer.decideApproval({ pending, status, reason })
@@ -1866,6 +1918,11 @@ export const App = () => {
                         current.filter((id) => id !== artifactId),
                       )
                     }
+                    onClearSelection={() => {
+                      setSelectedItemIds([]);
+                      setSelectedTrackIds([]);
+                      setSelectedGapIds([]);
+                    }}
                     onClearReferences={() => {
                       setProducerReferences(emptyProducerReferences());
                       setAttachedArtifactIds([]);
@@ -1892,7 +1949,6 @@ export const App = () => {
                       connection={youtubeConnection.data ?? null}
                       content={visibleContent}
                       evidence={evidence.data ?? null}
-                      latestThumbnail={releaseThumbnailArtifact}
                       qualityReport={quality.data ?? null}
                       releasePrivacy={project.data?.release?.privacy ?? null}
                       releaseStudioUrl={
@@ -1910,7 +1966,7 @@ export const App = () => {
                           });
                           return;
                         }
-                        directProducer(
+                        runProducer(
                           "Prepare the exact current unlisted release snapshot for public publication. Recheck the locked snapshot and request TrueForge approval for publish_video. Do not publish until I approve that exact tool call.",
                         );
                       }}
@@ -1924,14 +1980,12 @@ export const App = () => {
                         });
                       }}
                       onGenerateThumbnails={() => {
-                        setRightTab("producer");
-                        directProducer(
-                          "Create three distinct, accurate 16:9 YouTube thumbnail candidates for the current locked cut. Use only licensed or generated visual artifacts, keep claims truthful, attach all three to the release test set, and leave the final choice to me.",
+                        runProducer(
+                          "Generate exactly three genuinely different 16:9 YouTube thumbnails for this cut with GPT Image 2 at low quality. Make A subject-led, B object-or-detail-led, and C a bold graphic concept; vary composition, focal point, and color treatment rather than making minor variants. Attach exactly those three artifacts to the release test set and leave the final choice to me.",
                         );
                       }}
                       onPrepare={() => {
-                        setRightTab("producer");
-                        directProducer(
+                        runProducer(
                           project.data?.release?.privacy === "unlisted"
                             ? visibleContent.release.destination === "scheduled"
                               ? "Prepare the current unlisted release for its scheduled time. Check the locked snapshot and stop for approval before scheduling it."
@@ -1939,6 +1993,21 @@ export const App = () => {
                                 ? "Prepare the current unlisted release for public publication. Check the locked snapshot and stop for approval before publishing it."
                                 : "Open the current unlisted review and tell me what still needs attention."
                             : "Prepare this cut for an unlisted YouTube review. Run only missing quality or render steps and stop for approval before upload.",
+                        );
+                      }}
+                      onSchedule={(publishAt) => {
+                        updateRelease(
+                          {
+                            type: "update_release",
+                            release: {
+                              destination: "scheduled",
+                              publish_at: publishAt,
+                            },
+                          },
+                          "Set the YouTube schedule",
+                        );
+                        runProducer(
+                          `Prepare the exact current unlisted release for ${publishAt}. Recheck the locked snapshot and request TrueForge approval for schedule_video. Do not schedule it until I approve that exact tool call.`,
                         );
                       }}
                       publicApprovalPending={Boolean(

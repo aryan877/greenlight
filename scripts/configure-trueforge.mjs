@@ -8,21 +8,11 @@ const trueForgeUrl = (
   process.env.TRUEFORGE_API_URL ?? "http://localhost:8790"
 ).replace(/\/$/, "");
 const mcpUrl = process.env.GREENLIGHT_MCP_URL ?? "http://localhost:8941/mcp";
-const rootProviderName =
-  process.env.GREENLIGHT_ROOT_PROVIDER_NAME ?? "greenlight";
-const rootProviderBaseUrl = (
-  process.env.GREENLIGHT_ROOT_BASE_URL ?? "https://openrouter.ai/api/v1"
-).replace(/\/$/, "");
-const llmGatewayBaseUrl = (
-  process.env.GREENLIGHT_LLM_GATEWAY_URL?.trim() ||
-  `${process.env.GREENLIGHT_MCP_URL ?? "http://localhost:8941/mcp"}`.replace(
-    /\/mcp\/?$/,
-    "/api/llm/v1",
-  )
-).replace(/\/$/, "");
+const rootProviderName = "greenlight";
+const llmGatewayBaseUrl = mcpUrl.replace(/\/mcp\/?$/, "/api/llm/v1");
 const mcpAuthToken = process.env.GREENLIGHT_MCP_AUTH_TOKEN;
 const upstreamModel =
-  process.env.GREENLIGHT_ROOT_MODEL ?? "google/gemini-3.7-flash";
+  process.env.GREENLIGHT_ROOT_MODEL ?? "deepseek/deepseek-v4-flash-vision-exp";
 const skillsRepoUrl =
   process.env.GREENLIGHT_SKILLS_REPO_URL ??
   "https://github.com/aryan877/greenlight.git";
@@ -56,35 +46,10 @@ const skillManifests = [
   },
 ];
 
-if (!/^[a-z0-9][a-z0-9_-]{2,63}$/.test(rootProviderName)) {
-  throw new Error(
-    "GREENLIGHT_ROOT_PROVIDER_NAME must be a lowercase provider identifier.",
-  );
-}
-let parsedRootProviderUrl;
-try {
-  parsedRootProviderUrl = new URL(rootProviderBaseUrl);
-} catch {
-  throw new Error("GREENLIGHT_ROOT_BASE_URL must be a valid HTTP(S) URL.");
-}
-if (
-  !["http:", "https:"].includes(parsedRootProviderUrl.protocol) ||
-  parsedRootProviderUrl.username ||
-  parsedRootProviderUrl.password
-) {
-  throw new Error(
-    "GREENLIGHT_ROOT_BASE_URL must be an HTTP(S) URL without embedded credentials.",
-  );
-}
-const isOpenRouter =
-  parsedRootProviderUrl.origin === "https://openrouter.ai" &&
-  parsedRootProviderUrl.pathname.replace(/\/+$/, "") === "/api/v1";
-const rootApiKey =
-  process.env.GREENLIGHT_ROOT_API_KEY?.trim() ||
-  (isOpenRouter ? process.env.OPENROUTER_API_KEY?.trim() : undefined);
+const rootApiKey = process.env.OPENROUTER_API_KEY?.trim();
 if (!rootApiKey) {
   throw new Error(
-    "GREENLIGHT_ROOT_API_KEY is required. Put it in ignored .env and rerun the command.",
+    "OPENROUTER_API_KEY is required. Put it in ignored .env and rerun the command.",
   );
 }
 if (!mcpAuthToken || mcpAuthToken.length < 32) {
@@ -162,7 +127,7 @@ const gitSkillsAreAvailable = async () => {
 const resolveCompactionThreshold = async () => {
   const fallback = 50_000;
   try {
-    const response = await fetch(`${rootProviderBaseUrl}/models`, {
+    const response = await fetch(`${llmGatewayBaseUrl}/models`, {
       headers: { authorization: `Bearer ${rootApiKey}` },
       signal: AbortSignal.timeout(5_000),
     });

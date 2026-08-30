@@ -40,9 +40,10 @@ export type GreenlightConfig = {
   studioOrigin: string;
   workspaceRoot: string;
   openMojiRoot: string;
-  codex: {
-    binaryPath: string;
-    model: string | null;
+  image: {
+    apiKey: string | null;
+    model: string;
+    upstreamBaseUrl: string;
   };
   llmGateway: {
     apiKey: string | null;
@@ -51,12 +52,10 @@ export type GreenlightConfig = {
   voice: {
     apiKey: string | null;
     model: string;
-    provider: "openrouter" | "disabled";
     voiceId: string;
   };
   transcription: {
     apiKey: string | null;
-    provider: "openrouter" | "disabled";
     transcriptionModel: string;
     timingBinaryPath: string;
     timingModelPath: string;
@@ -65,9 +64,17 @@ export type GreenlightConfig = {
     pexelsApiKey: string | null;
     providers: typeof MEDIA_LIBRARY_PROVIDERS;
   };
+  r2Cache: {
+    readerToken: string | null;
+    readerUrl: string | null;
+  };
   youtube: {
-    allowedChannelId: string | null;
+    oauthClientId: string | null;
+    oauthClientSecret: string | null;
+    oauthRedirectUri: string;
     profile: string;
+    stateSecret: string;
+    tokenPath: string;
     uploaderPath: string;
   };
 };
@@ -83,15 +90,16 @@ export const loadConfig = (): GreenlightConfig => {
   const artifactDir = workspacePath(
     process.env.GREENLIGHT_ARTIFACT_DIR ?? "artifacts",
   );
-  const configuredVoiceProvider =
-    process.env.GREENLIGHT_VOICE_PROVIDER ?? "openrouter";
-  if (!["openrouter", "disabled"].includes(configuredVoiceProvider)) {
-    throw new Error("unsupported_voice_provider");
-  }
-  const configuredTranscriptionProvider =
-    process.env.GREENLIGHT_TRANSCRIPTION_PROVIDER ?? "openrouter";
-  if (!["openrouter", "disabled"].includes(configuredTranscriptionProvider)) {
-    throw new Error("unsupported_transcription_provider");
+  const studioOrigin = new URL(
+    process.env.GREENLIGHT_STUDIO_ORIGIN ?? "http://127.0.0.1:4173",
+  ).origin;
+  const youtubeProfile = process.env.GREENLIGHT_YOUTUBE_PROFILE ?? "main";
+  const r2ReaderUrl = process.env.GREENLIGHT_R2_READER_URL?.trim() || null;
+  const r2ReaderToken = process.env.GREENLIGHT_ORIGIN_TOKEN?.trim() || null;
+  if (Boolean(r2ReaderUrl) !== Boolean(r2ReaderToken)) {
+    throw new Error(
+      "GREENLIGHT_R2_READER_URL and GREENLIGHT_ORIGIN_TOKEN must be configured together",
+    );
   }
 
   return {
@@ -100,41 +108,29 @@ export const loadConfig = (): GreenlightConfig => {
     host: process.env.GREENLIGHT_MCP_HOST?.trim() || "127.0.0.1",
     mcpAuthToken,
     port: parseMcpPort(process.env.GREENLIGHT_MCP_PORT),
-    studioOrigin: new URL(
-      process.env.GREENLIGHT_STUDIO_ORIGIN ?? "http://127.0.0.1:4173",
-    ).origin,
+    studioOrigin,
     workspaceRoot,
     openMojiRoot: workspacePath(
       process.env.GREENLIGHT_OPENMOJI_ROOT ??
         resolve(homedir(), "trueforge-hackathon/openmoji"),
     ),
-    codex: {
-      binaryPath: process.env.GREENLIGHT_CODEX_BINARY ?? "codex",
-      model: process.env.GREENLIGHT_CODEX_MODEL || null,
+    image: {
+      apiKey: process.env.OPENROUTER_API_KEY?.trim() || null,
+      model: "openai/gpt-image-2",
+      upstreamBaseUrl: "https://openrouter.ai/api/v1",
     },
     llmGateway: {
-      apiKey:
-        process.env.GREENLIGHT_ROOT_API_KEY?.trim() ||
-        process.env.OPENROUTER_API_KEY?.trim() ||
-        null,
-      upstreamBaseUrl: (
-        process.env.GREENLIGHT_ROOT_BASE_URL ?? "https://openrouter.ai/api/v1"
-      ).replace(/\/$/, ""),
+      apiKey: process.env.OPENROUTER_API_KEY?.trim() || null,
+      upstreamBaseUrl: "https://openrouter.ai/api/v1",
     },
     voice: {
       apiKey: process.env.OPENROUTER_API_KEY || null,
-      model:
-        process.env.GREENLIGHT_VOICE_MODEL ??
-        "google/gemini-3.1-flash-tts-preview",
-      provider: configuredVoiceProvider as "openrouter" | "disabled",
+      model: "google/gemini-3.1-flash-tts-preview",
       voiceId: process.env.GREENLIGHT_VOICE_ID ?? "Kore",
     },
     transcription: {
       apiKey: process.env.OPENROUTER_API_KEY || null,
-      provider: configuredTranscriptionProvider as "openrouter" | "disabled",
-      transcriptionModel:
-        process.env.GREENLIGHT_TRANSCRIPTION_MODEL ??
-        "openai/gpt-4o-mini-transcribe",
+      transcriptionModel: "openai/gpt-4o-mini-transcribe",
       timingBinaryPath: process.env.GREENLIGHT_WHISPER_BINARY ?? "whisper-cli",
       timingModelPath:
         process.env.GREENLIGHT_WHISPER_MODEL ||
@@ -144,9 +140,25 @@ export const loadConfig = (): GreenlightConfig => {
       pexelsApiKey: process.env.PEXELS_API_KEY || null,
       providers: MEDIA_LIBRARY_PROVIDERS,
     },
+    r2Cache: {
+      readerToken: r2ReaderToken,
+      readerUrl: r2ReaderUrl,
+    },
     youtube: {
-      allowedChannelId: process.env.GREENLIGHT_YOUTUBE_CHANNEL_ID || null,
-      profile: process.env.GREENLIGHT_YOUTUBE_PROFILE ?? "main",
+      oauthClientId: process.env.GREENLIGHT_YOUTUBE_CLIENT_ID?.trim() || null,
+      oauthClientSecret:
+        process.env.GREENLIGHT_YOUTUBE_CLIENT_SECRET?.trim() || null,
+      oauthRedirectUri:
+        process.env.GREENLIGHT_YOUTUBE_REDIRECT_URI?.trim() ||
+        `${studioOrigin}/greenlight-api/youtube/callback`,
+      profile: youtubeProfile,
+      stateSecret: mcpAuthToken,
+      tokenPath:
+        process.env.GREENLIGHT_YOUTUBE_TOKEN_PATH ||
+        resolve(
+          homedir(),
+          `.config/youtube-uploader/tokens/${youtubeProfile}.json`,
+        ),
       uploaderPath:
         process.env.GREENLIGHT_YOUTUBE_UPLOADER || "youtube-uploader",
     },

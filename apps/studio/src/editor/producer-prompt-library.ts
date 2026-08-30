@@ -1,58 +1,58 @@
 export const producerPromptTemplates = [
   {
-    group: "Evidence",
-    label: "Verify selected scene",
-    description: "Primary sources into the scene evidence lens.",
+    group: "Start",
+    label: "Research and script",
+    description: "Build an evidence-backed script before touching the cut.",
     prompt:
-      "Audit every factual claim in the current scene. Use current-web primary sources, update the evidence ledger, and do not change the cut.",
+      "Research this topic with primary or authoritative sources, write a concise YouTube script, and leave the completed script open for my approval before production.",
+  },
+  {
+    group: "Evidence",
+    label: "Verify this scene",
+    description: "Check every factual claim and attach its sources.",
+    prompt:
+      "Audit every factual claim in the selected scene, use current primary sources, update its evidence ledger, and do not change the cut.",
   },
   {
     group: "Edit",
-    label: "Tighten with preview",
-    description: "Measured, word-accurate cuts with review first.",
+    label: "Tighten pacing",
+    description: "Remove dead air with measured, reviewable cuts.",
     prompt:
-      "Tighten the current selection using measured word boundaries. Preserve other lanes and show the typed edit preview before Apply.",
+      "Tighten the selected section using measured word boundaries. Preserve every other lane and show the edit preview before applying it.",
   },
   {
     group: "Edit",
     label: "Match the look",
-    description: "One restrained deterministic look across scenes.",
+    description: "Apply one restrained visual treatment across scenes.",
     prompt:
-      "Review the current cut and propose one restrained look preset per scene. Keep captions readable and show the patch before applying it.",
+      "Propose one restrained look across the current cut, keep skin tones and captions readable, and show the visual patch before applying it.",
   },
   {
     group: "Audio",
-    label: "Mix narration",
-    description: "Normalize dialogue and duck the music bed.",
+    label: "Mix dialogue and music",
+    description: "Normalize speech and duck music underneath it.",
     prompt:
-      "Normalize narration for consistent perceived loudness, enable -12 dB ducking on music under narration, then run the audio quality check.",
+      "Normalize the dialogue, enable music ducking under speech, preserve intentional silence, and run the audio quality check.",
   },
   {
-    group: "Release",
-    label: "Three thumbnails",
-    description: "Create three truthful 16:9 test candidates.",
+    group: "Audio",
+    label: "Dub this video",
+    description: "Audition a voice before creating the timed dub.",
     prompt:
-      "Create three distinct, accurate 16:9 YouTube thumbnail candidates for the locked cut. Attach all three to the release test set and leave the final choice to me.",
+      "Dub the current video. Ask for the target language, audition one voice sample, and wait for my choice before generating or placing the dub track.",
   },
   {
-    group: "Release",
-    label: "Readiness pass",
-    description: "Fill only missing release checks.",
+    group: "Captions",
+    label: "Create captions",
+    description: "Add timed captions from measured speech boundaries.",
     prompt:
-      "Inspect release readiness. Run only missing evidence, caption, audio, black-frame, metadata, render, and disclosure checks. Stop before upload.",
+      "Create accurate timed captions for the current dialogue, keep them inside YouTube-safe areas, and show the caption track before applying it.",
   },
   {
-    group: "TrueForge",
-    label: "Refresh-safe research",
-    description: "A durable child thread for the reconnect demo.",
+    group: "YouTube",
+    label: "Create three thumbnails",
+    description: "Generate three genuinely different 16:9 concepts.",
     prompt:
-      "Start a bounded research thread for the strongest unsupported claim, save meaningful progress, and continue through a browser refresh. Pause when sources are ready for my review.",
-  },
-  {
-    group: "TrueForge",
-    label: "Stage unlisted",
-    description: "Lock hashes and request exact approval.",
-    prompt:
-      "Lock the current render, evidence, metadata, thumbnail, and disclosure snapshot. Run final checks, then request exact approval before staging an unlisted YouTube review.",
+      "Generate exactly three distinct 16:9 YouTube thumbnails for this cut with GPT Image 2: one human or subject-led concept, one object or detail-led concept, and one bold graphic concept. Use different compositions, not minor variants, and leave the final choice to me.",
   },
 ] as const;

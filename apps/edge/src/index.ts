@@ -87,6 +87,53 @@ const verifySignedValue = async (token: string, secret: string) => {
   }
 };
 
+const encryptionKey = async (secret: string) => {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(secret));
+  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, [
+    "decrypt",
+    "encrypt",
+  ]);
+};
+
+const sealedValue = async (value: string, secret: string) => {
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { iv: nonce, name: "AES-GCM" },
+    await encryptionKey(secret),
+    encoder.encode(value),
+  );
+  return `${base64Url(nonce)}.${base64Url(new Uint8Array(ciphertext))}`;
+};
+
+const unsealValue = async (token: string, secret: string) => {
+  const [encodedNonce, encodedCiphertext, extra] = token.split(".");
+  if (!encodedNonce || !encodedCiphertext || extra) return null;
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      { iv: parseBase64Url(encodedNonce), name: "AES-GCM" },
+      await encryptionKey(secret),
+      parseBase64Url(encodedCiphertext),
+    );
+    return new TextDecoder().decode(plaintext);
+  } catch {
+    return null;
+  }
+};
+
+const secretsMatch = async (received: string | null, expected: string) => {
+  if (!received) return false;
+  const [receivedDigest, expectedDigest] = await Promise.all([
+    sign("greenlight-internal-r2", received),
+    sign("greenlight-internal-r2", expected),
+  ]);
+  let mismatch = 0;
+  for (let index = 0; index < expectedDigest.length; index += 1) {
+    mismatch |=
+      receivedDigest.charCodeAt(index) ^ expectedDigest.charCodeAt(index);
+  }
+  return mismatch === 0;
+};
+
 const cookies = (request: Request) =>
   Object.fromEntries(
     (request.headers.get("cookie") ?? "")
@@ -234,7 +281,7 @@ const uploadGrant = async (request: Request, env: Env) => {
   return json({
     expires_at: new Date(grant.expires_at).toISOString(),
     part_size_bytes: PART_SIZE_BYTES,
-    token: await signedValue(JSON.stringify(grant), env.SESSION_SECRET),
+    token: await sealedValue(JSON.stringify(grant), env.SESSION_SECRET),
   });
 };
 
@@ -244,7 +291,7 @@ const verifiedGrant = async (request: Request, env: Env, token?: unknown) => {
       ? token
       : new URL(request.url).searchParams.get("token");
   if (!raw) throw new Error("upload_token_required");
-  const value = await verifySignedValue(raw, env.SESSION_SECRET);
+  const value = await unsealValue(raw, env.SESSION_SECRET);
   if (!value) throw new Error("invalid_upload_token");
   const grant = JSON.parse(value) as UploadGrant;
   if (grant.expires_at <= Date.now()) throw new Error("upload_token_expired");
@@ -288,6 +335,7 @@ const importCompletedUpload = async (grant: UploadGrant, env: Env) => {
       "x-greenlight-filename": encodeURIComponent(grant.filename),
       "x-greenlight-mime": grant.mime_type,
       "x-greenlight-origin-token": env.ORIGIN_SHARED_SECRET,
+      "x-greenlight-r2-key": grant.key,
       "x-greenlight-source": "cloudflare_r2",
     },
     method: "POST",
@@ -325,8 +373,11 @@ const completeUpload = async (request: Request, env: Env) => {
   ) {
     throw new Error("invalid_upload_parts");
   }
-  const upload = env.MEDIA.resumeMultipartUpload(grant.key, grant.upload_id);
-  const object = await upload.complete(parts);
+  let object = await env.MEDIA.head(grant.key);
+  if (!object) {
+    const upload = env.MEDIA.resumeMultipartUpload(grant.key, grant.upload_id);
+    object = await upload.complete(parts);
+  }
   if (object.size !== grant.size) throw new Error("uploaded_size_mismatch");
   return json(await importCompletedUpload(grant, env), { status: 201 });
 };
@@ -336,6 +387,35 @@ const abortUpload = async (request: Request, env: Env) => {
   const grant = await verifiedGrant(request, env, body.token);
   await env.MEDIA.resumeMultipartUpload(grant.key, grant.upload_id).abort();
   return new Response(null, { status: 204 });
+};
+
+const readInternalR2Object = async (request: Request, env: Env) => {
+  if (
+    !(await secretsMatch(
+      request.headers.get("x-greenlight-origin-token"),
+      env.ORIGIN_SHARED_SECRET,
+    ))
+  ) {
+    return new Response(null, { status: 404 });
+  }
+  const body = (await request.json()) as { key?: unknown };
+  const key = typeof body.key === "string" ? body.key : "";
+  if (
+    !/^demo\/projects\/[A-Za-z0-9_-]{3,100}\/uploads\/[A-Za-z0-9._ -]{1,240}$/u.test(
+      key,
+    )
+  ) {
+    return json({ error: "invalid_object_key" }, { status: 400 });
+  }
+  const object = await env.MEDIA.get(key);
+  if (!object?.body) return new Response(null, { status: 404 });
+  const headers = new Headers({
+    "cache-control": "private, no-store",
+    "content-length": String(object.size),
+    etag: object.httpEtag,
+  });
+  object.writeHttpMetadata(headers);
+  return new Response(object.body, { headers });
 };
 
 const handleAuthenticated = async (request: Request, env: Env) => {
@@ -374,6 +454,9 @@ export default {
       if (url.pathname === "/auth/login" && request.method === "POST") {
         return secureHeaders(await login(request, env));
       }
+      if (url.pathname === "/internal/r2" && request.method === "POST") {
+        return secureHeaders(await readInternalR2Object(request, env));
+      }
       const email = await sessionEmail(request, env);
       if (!email) {
         if (url.pathname === "/healthz") {
@@ -395,4 +478,10 @@ export default {
   },
 };
 
-export const edgeInternals = { sign, signedValue, verifySignedValue };
+export const edgeInternals = {
+  sealedValue,
+  sign,
+  signedValue,
+  unsealValue,
+  verifySignedValue,
+};

@@ -65,13 +65,15 @@ export class RemotionRenderer {
         ].filter((id): id is string => Boolean(id)),
       );
       const assetFiles = Object.fromEntries(
-        [...assetIds].map((id) => {
-          const resolved = this.artifacts.resolveArtifact(id);
-          if (resolved.artifact.project_id !== input.projectId) {
-            throw new Error("render_asset_project_mismatch");
-          }
-          return [id, resolved.absolutePath];
-        }),
+        await Promise.all(
+          [...assetIds].map(async (id) => {
+            const resolved = await this.artifacts.ensureLocal(id);
+            if (resolved.artifact.project_id !== input.projectId) {
+              throw new Error("render_asset_project_mismatch");
+            }
+            return [id, resolved.absolutePath];
+          }),
+        ),
       );
       await writeFile(assetManifestPath, JSON.stringify(assetFiles));
       await this.execute(

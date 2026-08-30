@@ -113,6 +113,7 @@ try {
     audioCodec: "aac",
     hardwareAcceleration: "if-possible",
     videoBitrate: "8M",
+    concurrency: 2,
     outputLocation: outputPath,
     inputProps,
     onProgress: ({ progress }) => {

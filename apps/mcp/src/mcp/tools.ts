@@ -31,7 +31,7 @@ import { extname } from "node:path";
 import { z } from "zod";
 
 import { createId, hashJson, now } from "../lib/canonical.js";
-import type { CodexImageProvider } from "../providers/codex-image.js";
+import type { OpenRouterImageProvider } from "../providers/openrouter-image.js";
 import type { QualityInspector } from "../providers/quality.js";
 import type { OpenMojiToolkit } from "../providers/openmoji.js";
 import type { MediaLibraryProvider } from "../providers/media-library.js";
@@ -47,7 +47,7 @@ import { generateSoundEffectArtifact } from "../services/sound-design.js";
 
 type ToolDependencies = {
   artifacts: ArtifactStore;
-  image: CodexImageProvider;
+  image: OpenRouterImageProvider;
   mediaLibrary: MediaLibraryProvider;
   openmoji: OpenMojiToolkit;
   quality: QualityInspector;
@@ -115,7 +115,7 @@ export const buildMcpServer = ({
     },
     async () =>
       result({
-        image: await image.describe(),
+        image: image.describe(),
         openmoji: openmoji.describe(),
         media_library: mediaLibrary.describe(),
         voice: voice.describe(),
@@ -518,7 +518,7 @@ export const buildMcpServer = ({
     {
       title: "Generate one editorial image",
       description:
-        "Use the owner's authenticated Codex subscription and built-in imagegen skill to create one bounded visual or thumbnail artifact.",
+        "Generate one bounded visual or thumbnail artifact with GPT Image 2 at low quality through OpenRouter.",
       inputSchema: generateImageInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -618,7 +618,7 @@ export const buildMcpServer = ({
       if (!store.getProject(request.project_id)) {
         throw new Error("project_not_found");
       }
-      const audio = artifacts.resolveArtifact(request.audio_artifact_id);
+      const audio = await artifacts.ensureLocal(request.audio_artifact_id);
       if (
         audio.artifact.project_id !== request.project_id ||
         !["narration", "video"].includes(audio.artifact.kind)
@@ -879,7 +879,7 @@ export const buildMcpServer = ({
       const request = stageVideoInputSchema.parse(input);
       const project = store.getProject(request.project_id);
       if (!project) throw new Error("project_not_found");
-      const video = artifacts.resolveArtifact(request.video_artifact_id);
+      const video = await artifacts.ensureLocal(request.video_artifact_id);
       const content = artifacts.resolveArtifact(
         request.content_package_artifact_id,
       );
@@ -923,7 +923,7 @@ export const buildMcpServer = ({
       if (!contentPackage.release.thumbnail_artifact_id) {
         throw new Error("release_thumbnail_required");
       }
-      const thumbnail = artifacts.resolveArtifact(
+      const thumbnail = await artifacts.ensureLocal(
         contentPackage.release.thumbnail_artifact_id,
       );
       if (

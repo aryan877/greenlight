@@ -291,7 +291,7 @@ export const terminalFailureMessage = (event: WireEvent): string | null => {
     return "The model stopped before replying. Retry this message.";
   }
   if (state?.status === "cancelled") {
-    return "AI Producer stopped before answering. Retry when you’re ready.";
+    return null;
   }
   return null;
 };
@@ -363,6 +363,45 @@ const trueforge = new TrueForge({
   baseUrl: `${window.location.origin}/trueforge`,
   timeoutInSeconds: 600,
 });
+
+const turnSequenceStorageKey = (projectId: string, turnId: string) =>
+  `greenlight:producer-sequence:${projectId}:${turnId}`;
+
+const storedTurnSequence = (projectId: string, turnId: string): number => {
+  try {
+    const value = Number(
+      window.localStorage.getItem(turnSequenceStorageKey(projectId, turnId)),
+    );
+    return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+};
+
+const storeTurnSequence = (
+  projectId: string,
+  turnId: string,
+  value: string | undefined,
+) => {
+  const sequence = Number(value);
+  if (!Number.isSafeInteger(sequence) || sequence < 0) return;
+  try {
+    window.localStorage.setItem(
+      turnSequenceStorageKey(projectId, turnId),
+      String(sequence),
+    );
+  } catch {
+    // Event replay still deduplicates safely when storage is unavailable.
+  }
+};
+
+const clearTurnSequence = (projectId: string, turnId: string) => {
+  try {
+    window.localStorage.removeItem(turnSequenceStorageKey(projectId, turnId));
+  } catch {
+    // Stale sequence metadata is harmless because terminal turns are not resumed.
+  }
+};
 
 const textContent = (content: unknown): string => {
   if (typeof content === "string") return content;
@@ -678,12 +717,41 @@ const subagentInfo = (event: WireEvent) => {
     : null;
 };
 
-const subagentToolLabel = (toolName: string): string => {
+const creatorFacingSubagentTitle = (value: string): string => {
+  const title = cleanConversationText(value);
+  if (/current head|head lookup|get project|project state/i.test(title)) {
+    return "Reviewing the current edit";
+  }
+  return title || "Background work";
+};
+
+const creatorFacingSubagentBrief = (value: string): string => {
+  const brief = cleanConversationText(value);
+  return brief.length > 180 ||
+    /^(?:you are|your task|project context|instructions?|deliverable)\b/i.test(
+      brief,
+    ) ||
+    /(?:project[_-][a-z0-9]+|artifact[_-][a-z0-9]+|mcp|tool|content.?package|host path|credentials?|environment variables?|code.?mode)/i.test(
+      brief,
+    )
+    ? ""
+    : brief;
+};
+
+const subagentToolLabel = (toolName: string): string | null => {
   if (/search|exa/i.test(toolName)) return "Searching the web";
   if (/crawl|fetch|read|contents?/i.test(toolName)) return "Reading a source";
   if (/evidence|claim|source/i.test(toolName)) return "Organizing findings";
   if (/script|story|content_package/i.test(toolName))
     return "Shaping the draft";
+  if (/get_project/i.test(toolName)) return "Reading the current project";
+  if (
+    /^(?:exec|call_tool|get_tool_info|get_tool_output_schema|list_tools)$/i.test(
+      toolName,
+    )
+  ) {
+    return null;
+  }
   return cleanConversationText(toolName.replaceAll("_", " "));
 };
 
@@ -696,13 +764,18 @@ const subagentResult = (event: WireEvent): string => {
     state?.output && typeof state.output === "object"
       ? (state.output as Record<string, unknown>)
       : null;
-  return textContent(output?.content)
+  const result = textContent(output?.content)
     .replace(/```(?:markdown|md)?/gi, "")
     .replace(/```/g, "")
     .replace(/^#{1,6}\s+/gm, "")
     .replace(/^\s*[-*]\s+/gm, "• ")
     .trim()
     .slice(0, 12_000);
+  return /(?:project[_-][a-z0-9]+|artifact[_-][a-z0-9]+|content.?package|tool|mcp|host path|credentials?|environment variables?)/i.test(
+    result,
+  )
+    ? ""
+    : result;
 };
 
 const subagentDocument = (
@@ -728,7 +801,7 @@ const describeSubagentEvent = (event: WireEvent): StudioAgentEvent[] | null => {
   if (type === "thread.created") {
     const childThreadId = String(threadId ?? event.id ?? "");
     const info = subagentInfo(event);
-    const title = cleanConversationText(
+    const title = creatorFacingSubagentTitle(
       String(event.title ?? info?.name ?? "Subagent"),
     );
     return [
@@ -741,7 +814,7 @@ const describeSubagentEvent = (event: WireEvent): StudioAgentEvent[] | null => {
         status: "running",
         subagent: {
           threadId: childThreadId,
-          brief: cleanConversationText(String(info?.input ?? "")),
+          brief: creatorFacingSubagentBrief(String(info?.input ?? "")),
           steps: [],
           result: "",
         },
@@ -752,11 +825,10 @@ const describeSubagentEvent = (event: WireEvent): StudioAgentEvent[] | null => {
   if (!threadId || threadId === "main") return null;
 
   if (type === "model.message") {
-    const steps = toolCallsOf(event).map((call) => ({
-      id: call.id,
-      label: subagentToolLabel(call.function.name),
-      status: "running" as const,
-    }));
+    const steps = toolCallsOf(event).flatMap((call) => {
+      const label = subagentToolLabel(call.function.name);
+      return label ? [{ id: call.id, label, status: "running" as const }] : [];
+    });
     return steps.length > 0
       ? [
           {
@@ -795,7 +867,7 @@ const describeSubagentEvent = (event: WireEvent): StudioAgentEvent[] | null => {
   }
 
   if (type === "thread.done") {
-    const title = cleanConversationText(String(event.title ?? "Subagent"));
+    const title = creatorFacingSubagentTitle(String(event.title ?? "Subagent"));
     const state =
       event.state && typeof event.state === "object"
         ? (event.state as Record<string, unknown>)
@@ -822,6 +894,13 @@ const describeSubagentEvent = (event: WireEvent): StudioAgentEvent[] | null => {
 const creatorFacingSentence = (value: string): string | null => {
   const content = cleanConversationText(value);
   if (!content) return null;
+  if (
+    /\b(?:sandbox|code mode|proxy error|pydantic|mcp tools?|tool protocol|generate_?voice|transcribe_?audio|content package|artifact id|frame rate|30\s?fps|capabilities are wired|jq|on path|the id just needs|technical anchor)\b/i.test(
+      content,
+    )
+  ) {
+    return null;
+  }
   if (/^(done|patch applied successfully)\.?$/i.test(content)) {
     return "Change applied.";
   }
@@ -835,7 +914,10 @@ const creatorFacingSentence = (value: string): string | null => {
   if (/^(?:yes|confirmed)\b.*\bcurrent cut\b/i.test(content)) {
     return "Yes. I can see the current cut.";
   }
-  if (/^frame math\b/i.test(content)) return null;
+  if (/^frame math\b|durations? must align/i.test(content)) return null;
+  if (/\buser cancelled (?:the )?research subagents?\b/i.test(content)) {
+    return null;
+  }
   const sentences =
     content
       .match(/[^.!?]+[.!?](?:\s|$)|[^.!?]+$/g)
@@ -844,10 +926,16 @@ const creatorFacingSentence = (value: string): string | null => {
     sentences.find(
       (sentence) =>
         sentence.length <= 180 &&
+        /[A-Za-z]{3}/.test(sentence) &&
+        /^[A-Za-z0-9]/.test(sentence) &&
+        !/[|`]/.test(sentence) &&
+        !/:\s*\d+\.$/.test(sentence) &&
+        !/^(?:scene|clip|track)\s+\d+\b/i.test(sentence) &&
+        !/^#{1,6}\s/.test(sentence) &&
         !/(?:\bartifact[_-]?[a-z0-9]+|\bscene_[a-z0-9_-]+|frame math|frames? \d|gapafter|base_content_package|content_package_artifact|sha256|current revision)/i.test(
           sentence,
         ) &&
-        !/^(got it|on it|understood|okay|let me|i(?:'ll| will)|now i|first[, ]|to begin)/i.test(
+        !/^(got it|on it|understood|okay|let me|i(?:'ll| will| now)|now i|first[, ]|to begin)/i.test(
           sentence,
         ),
     ) ?? null
@@ -1212,10 +1300,11 @@ export const useProducerAgent = (
         ReturnType<typeof trueforge.sessions.createTurnStream>
       >,
       streamProjectId: string,
+      initialTurnId: string | null = null,
     ) => {
       let stream = initialStream;
       for (let handoff = 0; handoff < 4; handoff += 1) {
-        let turnId: string | null = null;
+        let turnId: string | null = handoff === 0 ? initialTurnId : null;
         let sawTerminalEvent = false;
         const references: SandboxArtifactReference[] = [];
         for await (const envelope of stream.withMetadata()) {
@@ -1226,6 +1315,12 @@ export const useProducerAgent = (
           if (terminalFailure) throw new Error(terminalFailure);
           if (incoming.type === "turn.created") {
             turnId = String(incoming.turnId ?? incoming.turn_id ?? "") || null;
+          }
+          if (turnId) {
+            storeTurnSequence(streamProjectId, turnId, envelope.id);
+            if (incoming.type === "turn.done") {
+              clearTurnSequence(streamProjectId, turnId);
+            }
           }
           const event = ingest(incoming, turnId);
           if (!event) continue;
@@ -1352,10 +1447,12 @@ export const useProducerAgent = (
         const stream = await trueforge.sessions.subscribeToTurn(
           restoredSessionId,
           latestTurn.id,
-          { afterSequenceNumber: 0 },
+          {
+            afterSequenceNumber: storedTurnSequence(projectId, latestTurn.id),
+          },
           { abortSignal: restoreController.signal },
         );
-        await consume(stream, projectId);
+        await consume(stream, projectId, latestTurn.id);
         await replaySessionHistory(restoredSessionId, projectId);
         return;
       }
@@ -1538,6 +1635,26 @@ export const useProducerAgent = (
     },
     [pendingApprovals.length, pendingQuestions.length, send],
   );
+
+  const stop = useMutation({
+    mutationFn: async () => {
+      if (!sessionId.current) throw new Error("producer_session_missing");
+      await trueforge.sessions.cancel(sessionId.current);
+    },
+    onMutate: () => setActivity("Stopping…"),
+    onError: () => {
+      setActivity(null);
+      appendEvents([
+        {
+          id: `producer-stop-error-${crypto.randomUUID()}`,
+          kind: "message",
+          label: "Couldn’t stop the current run. Try again.",
+          detail: "",
+          sceneIds: [],
+        },
+      ]);
+    },
+  });
 
   type ApprovalInput = {
     pending: PendingToolApproval;
@@ -1726,6 +1843,16 @@ export const useProducerAgent = (
     sessionCostInUsd,
     sessionId: sessionId.current,
     send: sendInstruction,
+    stop: () => stop.mutate(),
+    canStop:
+      Boolean(
+        sessionId.current &&
+        (activity ||
+          send.isPending ||
+          approval.isPending ||
+          question.isPending),
+      ) && !stop.isPending,
+    isStopping: stop.isPending,
     retryInstruction,
     isSending: send.isPending || isRestoring,
     decideApproval: approval.mutate,

@@ -4,6 +4,7 @@ import {
   assertSafeRemoteMediaUrl,
   isPublicMediaAddress,
   MediaLibraryProvider,
+  pinnedMediaRequestOptions,
 } from "../src/providers/media-library.js";
 
 const openverseResult = (input: {
@@ -71,6 +72,24 @@ describe("MediaLibraryProvider", () => {
     await expect(
       assertSafeRemoteMediaUrl("https://127.0.0.1/private.mp4"),
     ).rejects.toThrow("media_download_host_not_allowed");
+  });
+
+  it("pins media downloads to the verified address while preserving TLS and Host", () => {
+    expect(
+      pinnedMediaRequestOptions({
+        address: "203.0.113.9",
+        family: 4,
+        url: new URL("https://cdn.example.com:8443/audio/file.mp3?download=1"),
+      }),
+    ).toMatchObject({
+      protocol: "https:",
+      hostname: "203.0.113.9",
+      port: "8443",
+      path: "/audio/file.mp3?download=1",
+      family: 4,
+      headers: { Host: "cdn.example.com:8443" },
+      servername: "cdn.example.com",
+    });
   });
 
   it("normalizes Openverse milliseconds and rejects non-commercial licenses", async () => {
@@ -145,6 +164,7 @@ describe("MediaLibraryProvider", () => {
     const [request, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
     expect(request.searchParams.get("query")).toBe("editing desk");
     expect(request.searchParams.get("orientation")).toBe("landscape");
+    expect(request.pathname).toBe("/v1/videos/search");
     expect(init.headers).toEqual({ Authorization: "test-key" });
     expect(JSON.stringify(results)).not.toContain("test-key");
   });

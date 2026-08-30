@@ -1,10 +1,11 @@
-import type {
-  Artifact,
-  ContentPackage,
-  EditorSelection,
-  EditorTimelineGap,
-  EditorTimelineItem,
-  EditorTimelineTrack,
+import {
+  editorPatchInputSchema,
+  type Artifact,
+  type ContentPackage,
+  type EditorSelection,
+  type EditorTimelineGap,
+  type EditorTimelineItem,
+  type EditorTimelineTrack,
 } from "@greenlight/contracts";
 import {
   Blend,
@@ -23,6 +24,7 @@ import {
   Play,
   RotateCcw,
   Search,
+  Square,
   SlidersHorizontal,
   Split,
   Sparkles,
@@ -46,8 +48,8 @@ import type {
 import { MEDIA_ACCEPT, MEDIA_ARTIFACT_MIME } from "../editor/media-transfer.js";
 import { shouldSubmitProducerInstruction } from "../editor/producer-composer.js";
 import type { ProducerDraftIntent } from "../editor/producer-draft.js";
-import { producerPromptTemplates } from "../editor/producer-prompt-library.js";
 import { cx } from "./controls.js";
+import { PromptLibraryModal } from "./prompt-library-modal.js";
 
 const eventIcon: Partial<
   Record<StudioAgentEvent["kind"], typeof SlidersHorizontal>
@@ -82,6 +84,64 @@ const AgentMark = ({ thinking = false }: { thinking?: boolean }) => (
   </span>
 );
 
+const CreatorMessage = ({
+  event,
+  isSending,
+  onRetry,
+}: {
+  event: StudioAgentEvent;
+  isSending: boolean;
+  onRetry: () => void;
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible =
+    event.label.length > 320 || event.label.split("\n").length > 6;
+  return (
+    <div className="flex justify-end py-0.5">
+      <div
+        className={cx(
+          "max-w-[86%] rounded-[14px] rounded-br-[4px] bg-message-user px-3.5 py-2.5 text-message-user-ink",
+          event.delivery === "failed" &&
+            "border border-warning/30 bg-warning-soft text-ink",
+        )}
+      >
+        <p
+          className={cx(
+            "whitespace-pre-wrap text-[14px] leading-6",
+            collapsible && !expanded && "line-clamp-6",
+          )}
+        >
+          {event.label}
+        </p>
+        {collapsible ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((current) => !current)}
+            className="mt-1 text-[11px] font-medium opacity-65 hover:opacity-100"
+          >
+            {expanded ? "Show less" : "Show full prompt"}
+          </button>
+        ) : null}
+        {event.delivery === "failed" ? (
+          <div className="mt-2 border-t border-warning/20 pt-2">
+            <p className="text-[12px] leading-5 text-ink-secondary">
+              {event.detail || "The AI couldn’t answer."}
+            </p>
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={isSending}
+              className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-warning hover:underline disabled:opacity-40"
+            >
+              <RotateCcw size={10} /> Retry
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
 const SubagentMark = ({
   running,
   failed,
@@ -91,7 +151,7 @@ const SubagentMark = ({
 }) => (
   <span
     className={cx(
-      "relative grid size-7 shrink-0 place-items-center rounded-full bg-action-soft text-action",
+      "relative grid size-7 shrink-0 place-items-center rounded-full bg-track-voice text-track-voice-strong",
       failed && "bg-warning-soft text-warning",
     )}
   >
@@ -100,7 +160,12 @@ const SubagentMark = ({
       strokeWidth={1.9}
       className={cx(running && "motion-safe:animate-spin")}
     />
-    <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full border-2 border-surface bg-action" />
+    <span
+      className={cx(
+        "absolute -bottom-0.5 -right-0.5 size-2 rounded-full border-2 border-surface bg-track-voice-strong",
+        failed && "bg-warning",
+      )}
+    />
   </span>
 );
 
@@ -113,7 +178,7 @@ const SubagentCard = ({
 }) => {
   const running = event.status === "running";
   const failed = event.status === "error";
-  const shouldStayOpen = running || Boolean(event.document);
+  const shouldStayOpen = Boolean(event.document);
   const [open, setOpen] = useState(shouldStayOpen);
   const previousStatus = useRef(event.status);
   const document = event.document;
@@ -129,19 +194,30 @@ const SubagentCard = ({
 
   const run = event.subagent;
   return (
-    <section className="ml-8 w-[calc(100%-2rem)] overflow-hidden rounded-xl border border-line bg-surface">
+    <section className="ml-8 w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-line bg-surface-sunken">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left hover:bg-surface-raised"
+        className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-surface-raised"
       >
         <SubagentMark running={running} failed={failed} />
         <span className="min-w-0 flex-1">
-          <strong className="block truncate text-[12px] font-medium leading-5 text-ink">
+          <span className="block text-[10px] text-track-voice-strong">
+            Subagent
+          </span>
+          <strong className="mt-0.5 block truncate text-[13px] font-medium leading-5 text-ink">
             {event.label}
           </strong>
-          <span className="text-[11px] text-ink-tertiary">{event.detail}</span>
+        </span>
+        <span
+          className={cx(
+            "flex shrink-0 items-center gap-1 text-[10px] font-medium text-ink-tertiary",
+            failed && "text-warning",
+          )}
+        >
+          {!running && !failed ? <Check size={11} /> : null}
+          {event.detail}
         </span>
         <ChevronDown
           size={14}
@@ -264,36 +340,6 @@ const ReferenceToken = ({
   );
 };
 
-const quickIntents = [
-  {
-    label: "Cut at a word",
-    prompt: "Cut this when the speaker says ",
-  },
-  {
-    label: "Tighten pacing",
-    prompt:
-      "Tighten the pacing in this selection and show me the proposed cuts.",
-  },
-  {
-    label: "Add B-roll",
-    prompt:
-      "Add relevant B-roll to this selection without changing the narration.",
-  },
-  {
-    label: "Fix captions",
-    prompt: "Correct and retime the captions in this selection.",
-  },
-  {
-    label: "Dub this",
-    prompt: "Dub this selection. Ask me to choose and audition a voice first.",
-  },
-  {
-    label: "Prepare release",
-    prompt:
-      "Prepare the YouTube title, description, thumbnail, and unlisted release for review.",
-  },
-] as const;
-
 const QuestionCard = ({
   pending,
   busy,
@@ -364,14 +410,31 @@ const QuestionCard = ({
   );
 };
 
-const approvalCopy = (
+type ApprovalCopy = {
+  title: string;
+  detail: string;
+  action: string;
+  blocked?: boolean;
+};
+
+export const approvalCopy = (
   pending: PendingToolApproval,
   content: ContentPackage | null,
-) => {
+  artifacts: Artifact[] = [],
+): ApprovalCopy => {
   if (pending.toolName === "apply_editor_patch") {
-    const operations = Array.isArray(pending.arguments.operations)
-      ? (pending.arguments.operations as Array<Record<string, unknown>>)
-      : [];
+    const parsed = editorPatchInputSchema.safeParse(pending.arguments);
+    if (!parsed.success) {
+      return {
+        title: "Preview is not ready",
+        detail: "Ask AI Producer to rebuild this change before applying it.",
+        action: "Unavailable",
+        blocked: true,
+      };
+    }
+    const operations = parsed.data.operations as unknown as Array<
+      Record<string, unknown>
+    >;
     const sceneIds = [
       ...new Set(
         operations.flatMap((operation) =>
@@ -389,14 +452,38 @@ const approvalCopy = (
     const updatesRelease = operations.some(
       (operation) => operation.type === "update_release",
     );
+    const updatesNarration = operations.some(
+      (operation) =>
+        operation.narration_artifact_id !== undefined ||
+        operation.captions_artifact_id !== undefined ||
+        operation.transcript_artifact_id !== undefined ||
+        (operation.type === "upsert_audio_track" &&
+          (operation.track as Record<string, unknown> | undefined)?.role ===
+            "narration"),
+    );
+    const updatesVisuals = operations.some(
+      (operation) => operation.visual !== undefined,
+    );
+    const audioTracks = operations
+      .filter((operation) => operation.type === "upsert_audio_track")
+      .map((operation) => operation.track)
+      .filter(
+        (track): track is Record<string, unknown> =>
+          Boolean(track) && typeof track === "object",
+      );
+    const dubTrack = audioTracks.find((track) => track.role === "dub");
+    const musicTrack = audioTracks.find((track) => track.role === "music");
     for (const operation of operations) {
       if (operation.title !== undefined) fields.add("title");
       if (operation.claim_ids !== undefined) fields.add("sources");
       if (operation.narration !== undefined) fields.add("script");
       if (operation.narration_artifact_id !== undefined) fields.add("voice");
-      if (operation.captions_artifact_id !== undefined) fields.add("captions");
-      if (operation.transcript_artifact_id !== undefined)
-        fields.add("transcript");
+      if (
+        operation.captions_artifact_id !== undefined ||
+        operation.transcript_artifact_id !== undefined
+      ) {
+        fields.add("timed captions");
+      }
       if (operation.duration_seconds !== undefined) fields.add("timing");
       if (operation.gap_after_seconds !== undefined) fields.add("gap");
       if (operation.source_clip !== undefined) fields.add("source range");
@@ -412,11 +499,84 @@ const approvalCopy = (
         fields.add("audio track");
       }
     }
+    if (dubTrack) {
+      const locale = typeof dubTrack.locale === "string" ? dubTrack.locale : "";
+      const language = locale.toLowerCase().startsWith("hi")
+        ? "Hindi"
+        : locale || "alternate-language";
+      const clipCount = Array.isArray(dubTrack.clips)
+        ? dubTrack.clips.length
+        : content?.scenes.length || 1;
+      return {
+        title: `Add the ${language} dub`,
+        detail: `${clipCount} separate voice clips will follow the existing scene cuts. The original narration stays available and video timing does not change.`,
+        action: `Add ${language} dub`,
+      };
+    }
+    if (musicTrack) {
+      return {
+        title: "Add background music",
+        detail:
+          "Place one licensed music bed under the full cut, keep speech clear with ducking, and leave every video cut unchanged.",
+        action: "Add music",
+      };
+    }
+    if (updatesNarration) {
+      const count = sceneIds.length || content?.scenes.length || 1;
+      const allScenes = count === content?.scenes.length;
+      return {
+        title: `Add narration to ${allScenes ? "all " : ""}${count} ${count === 1 ? "scene" : "scenes"}`,
+        detail:
+          "Use the chosen voice, add measured captions, normalize speech, and duck the music. Script, visuals, thumbnail, and release stay unchanged.",
+        action: "Add narration",
+      };
+    }
+    if (updatesVisuals) {
+      const count = sceneIds.length || content?.scenes.length || 1;
+      const allScenes = count === content?.scenes.length;
+      const visualArtifactIds = operations.flatMap((operation) => {
+        const visual = operation.visual;
+        if (!visual || typeof visual !== "object") return [];
+        const ids = (visual as { artifact_ids?: unknown }).artifact_ids;
+        return Array.isArray(ids)
+          ? ids.filter((id): id is string => typeof id === "string")
+          : [];
+      });
+      const visualSources = visualArtifactIds.flatMap((id) => {
+        const artifact = artifacts.find((candidate) => candidate.id === id);
+        const provider = artifact?.provenance.provider;
+        const source = artifact?.provenance.source;
+        return [provider, source].filter(
+          (value): value is string => typeof value === "string",
+        );
+      });
+      const usesPexels = visualSources.some((value) => /pexels/i.test(value));
+      const usesOpenMoji = visualSources.some((value) =>
+        /openmoji/i.test(value),
+      );
+      return {
+        title: `Add visuals to ${allScenes ? "all " : ""}${count} ${count === 1 ? "scene" : "scenes"}`,
+        detail: usesPexels
+          ? `Place licensed Pexels B-roll${usesOpenMoji ? " and OpenMoji illustrations" : ""} into the selected scenes. Script, narration, captions, and release stay unchanged.`
+          : "Place licensed OpenMoji illustrations in the selected scenes. Script, narration, captions, and release stay unchanged.",
+        action: "Add visuals",
+      };
+    }
+    if (updatesRelease) {
+      return {
+        title: "Update the YouTube package",
+        detail:
+          "Save the reviewed thumbnail or metadata choice. The cut itself stays unchanged.",
+        action: "Save release",
+      };
+    }
     const target = updatesRelease
       ? "the YouTube release"
       : names.length > 0
-        ? `“${names.join("”, “")}”`
-        : "the selected scene";
+        ? names.length === 1
+          ? `“${names[0]}”`
+          : `${names.length} scenes`
+        : "the selected edit";
     const changes = fields.size > 0 ? [...fields].join(", ") : "scene content";
     return {
       title: `Update ${target}`,
@@ -424,11 +584,79 @@ const approvalCopy = (
       action: "Apply change",
     };
   }
+  if (pending.toolName === "generate_voice") {
+    const sceneId =
+      typeof pending.arguments.scene_id === "string"
+        ? pending.arguments.scene_id
+        : null;
+    const scene = content?.scenes.find((candidate) => candidate.id === sceneId);
+    const locale =
+      typeof pending.arguments.locale === "string"
+        ? pending.arguments.locale
+        : null;
+    return {
+      title: `Generate voice${scene ? ` for “${scene.title}”` : ""}`,
+      detail: `Create one synthetic ${locale?.toLowerCase().startsWith("hi") ? "Hindi dub" : "narration"} clip. It will not enter the timeline until you approve the edit preview.`,
+      action: "Generate voice",
+    };
+  }
+  if (pending.toolName === "transcribe_audio") {
+    const sceneId =
+      typeof pending.arguments.scene_id === "string"
+        ? pending.arguments.scene_id
+        : null;
+    const scene = content?.scenes.find((candidate) => candidate.id === sceneId);
+    return {
+      title: `Create timed captions${scene ? ` for “${scene.title}”` : ""}`,
+      detail:
+        "Measure the spoken words and create synchronized captions. The audio and cut remain unchanged.",
+      action: "Create captions",
+    };
+  }
+  if (pending.toolName === "generate_image") {
+    const kind =
+      pending.arguments.kind === "thumbnail" ? "thumbnail" : "visual";
+    return {
+      title: `Generate one ${kind}`,
+      detail:
+        "Create one new GPT Image 2 asset at low quality. It will not enter the cut or release until you approve a separate edit.",
+      action: `Generate ${kind}`,
+    };
+  }
+  if (pending.toolName === "generate_sound_effect") {
+    return {
+      title: "Generate one sound effect",
+      detail:
+        "Create a short synthetic sound. It will not enter the timeline until you approve the edit preview.",
+      action: "Generate sound",
+    };
+  }
   if (pending.toolName === "render_video") {
     return {
       title: "Render the current cut",
       detail: "Create a new MP4 from this revision.",
       action: "Render",
+    };
+  }
+  if (pending.toolName === "import_media_library_asset") {
+    const provider = String(pending.arguments.provider ?? "");
+    const use = String(pending.arguments.use ?? "");
+    if (provider === "pexels" && use === "broll") {
+      return {
+        title: "Import licensed Pexels B-roll",
+        detail:
+          "Save one selected video and its Pexels license receipt to this project. It will not enter the timeline yet.",
+        action: "Import B-roll",
+      };
+    }
+    return {
+      title:
+        use === "sound_effect"
+          ? "Import a licensed sound effect"
+          : "Import licensed music",
+      detail:
+        "Save one commercially usable Openverse asset and its license receipt to this project. Nothing is added to the timeline yet.",
+      action: use === "sound_effect" ? "Import sound" : "Import music",
     };
   }
   if (pending.toolName === "stage_video_unlisted") {
@@ -462,22 +690,24 @@ const approvalCopy = (
 const ApprovalCard = ({
   pending,
   content,
+  artifacts,
   busy,
   onDecision,
 }: {
   pending: PendingToolApproval;
   content: ContentPackage | null;
+  artifacts: Artifact[];
   busy: boolean;
   onDecision: (status: "allow" | "deny", reason?: string) => void;
 }) => {
-  const copy = approvalCopy(pending, content);
+  const copy = approvalCopy(pending, content, artifacts);
   const [refining, setRefining] = useState(false);
   const [reason, setReason] = useState("");
   return (
-    <div className="mx-3 my-4 overflow-hidden rounded-xl border border-warning/25 bg-warning-soft">
-      <div className="border-l-2 border-warning p-4">
-        <div className="flex items-center gap-2 text-[12px] font-medium text-warning">
-          Needs your approval
+    <div className="mx-3 my-4 overflow-hidden rounded-lg border border-line bg-surface-raised p-4 shadow-sm">
+      <div>
+        <div className="flex items-center gap-2 text-[10px] font-medium text-action">
+          Review before continuing
         </div>
         <p className="mt-2 text-[14px] font-medium leading-5 text-ink">
           {copy.title}
@@ -493,7 +723,7 @@ const ApprovalCard = ({
               onChange={(event) => setReason(event.target.value)}
               placeholder="What should change?"
               rows={2}
-              className="w-full resize-none rounded-lg border border-warning/25 bg-surface px-3 py-2 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-caption"
+              className="w-full resize-none border border-line bg-surface px-3 py-2 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-caption focus:border-action"
             />
             <div className="mt-2 flex justify-end gap-2">
               <button
@@ -509,27 +739,32 @@ const ApprovalCard = ({
                 onClick={() => onDecision("deny", reason.trim())}
                 className="h-8 rounded-lg bg-control px-3 text-[11px] font-medium text-control-ink disabled:opacity-30"
               >
-                Refine
+                Send changes
               </button>
             </div>
           </div>
         ) : (
           <div className="mt-3 flex items-center gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onDecision("allow")}
-              className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-lg bg-control text-[12px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-40"
-            >
-              <Check size={13} /> {copy.action}
-            </button>
+            {!copy.blocked ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onDecision("allow")}
+                className="flex h-9 flex-1 items-center justify-center gap-1.5 border border-action bg-action-soft text-[12px] font-medium text-action hover:bg-action-soft/70 disabled:opacity-40"
+              >
+                <Check size={13} /> {copy.action}
+              </button>
+            ) : null}
             <button
               type="button"
               disabled={busy}
               onClick={() => setRefining(true)}
-              className="h-9 rounded-lg border border-line bg-surface px-3 text-[11px] text-ink-secondary hover:bg-hover disabled:opacity-40"
+              className={cx(
+                "h-9 rounded-lg border border-line bg-surface px-3 text-[11px] text-ink-secondary hover:bg-hover disabled:opacity-40",
+                copy.blocked && "flex-1",
+              )}
             >
-              Refine
+              {copy.blocked ? "Rebuild" : "Change"}
             </button>
             <button
               type="button"
@@ -808,7 +1043,10 @@ export const ProducerPanel = ({
   isSending,
   isApproving,
   isAnswering,
+  canStop,
+  isStopping,
   onSend,
+  onStop,
   onRetryInstruction,
   onApproval,
   onAnswerQuestion,
@@ -817,6 +1055,7 @@ export const ProducerPanel = ({
   onRemoveTrack,
   onRemoveGap,
   onRemoveArtifact,
+  onClearSelection,
   onClearReferences,
   onAttachArtifact,
   onImportFiles,
@@ -839,7 +1078,10 @@ export const ProducerPanel = ({
   isSending: boolean;
   isApproving: boolean;
   isAnswering: boolean;
+  canStop: boolean;
+  isStopping: boolean;
   onSend: (instruction: string) => void;
+  onStop: () => void;
   onRetryInstruction: (eventId: string) => void;
   onApproval: (
     pending: PendingToolApproval,
@@ -852,6 +1094,7 @@ export const ProducerPanel = ({
   onRemoveTrack: (trackId: string) => void;
   onRemoveGap: (gapId: string) => void;
   onRemoveArtifact: (artifactId: string) => void;
+  onClearSelection: () => void;
   onClearReferences: () => void;
   onAttachArtifact: (artifactId: string) => void;
   onImportFiles: (files: File[]) => Promise<string[]>;
@@ -860,10 +1103,12 @@ export const ProducerPanel = ({
   const [instruction, setInstruction] = useState("");
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [selectionHasMore, setSelectionHasMore] = useState(false);
   const [openDocument, setOpenDocument] = useState<StudioReviewDocument | null>(
     null,
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const selectionScrollRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
   const followConversationRef = useRef(true);
   const lastCreatorEventIdRef = useRef<string | null>(null);
@@ -872,6 +1117,22 @@ export const ProducerPanel = ({
     if (!draftIntent) return;
     setInstruction(draftIntent.text);
   }, [draftIntent]);
+  useLayoutEffect(() => {
+    const scroller = selectionScrollRef.current;
+    if (!scroller) {
+      setSelectionHasMore(false);
+      return;
+    }
+    const update = () => {
+      setSelectionHasMore(
+        scroller.scrollTop + scroller.clientHeight < scroller.scrollHeight - 4,
+      );
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [liveSelection.length]);
   const latestCreatorEventId = [...events]
     .reverse()
     .find((event) => event.kind === "instruction")?.id;
@@ -914,7 +1175,9 @@ export const ProducerPanel = ({
       ?.slice(0, 220) ??
     "Every edit stays intentional, reversible, and ready to share.";
   const isVoiceQuestion = (pending: PendingQuestion) =>
-    /\b(?:voice|narrat|dub|speaker)\b/i.test(pending.question);
+    /\b(?:choose|pick|select|audition)\b.{0,80}\b(?:voice|speaker)\b|\b(?:voice|speaker)\b.{0,80}\b(?:choose|pick|select|audition)\b/i.test(
+      pending.question,
+    );
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -938,34 +1201,12 @@ export const ProducerPanel = ({
             {events.map((event) => {
               if (event.kind === "instruction") {
                 return (
-                  <div key={event.id} className="flex justify-end py-0.5">
-                    <div
-                      className={cx(
-                        "max-w-[86%] rounded-[14px] rounded-br-[4px] bg-message-user px-3.5 py-2.5 text-message-user-ink",
-                        event.delivery === "failed" &&
-                          "border border-warning/30 bg-warning-soft text-ink",
-                      )}
-                    >
-                      <p className="whitespace-pre-wrap text-[14px] leading-6">
-                        {event.label}
-                      </p>
-                      {event.delivery === "failed" ? (
-                        <div className="mt-2 border-t border-warning/20 pt-2">
-                          <p className="text-[12px] leading-5 text-ink-secondary">
-                            {event.detail || "The AI couldn’t answer."}
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => onRetryInstruction(event.id)}
-                            disabled={isSending}
-                            className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-warning hover:underline disabled:opacity-40"
-                          >
-                            <RotateCcw size={10} /> Retry
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
+                  <CreatorMessage
+                    key={event.id}
+                    event={event}
+                    isSending={isSending}
+                    onRetry={() => onRetryInstruction(event.id)}
+                  />
                 );
               }
               if (event.kind === "system") {
@@ -1083,7 +1324,12 @@ export const ProducerPanel = ({
               sampleScript={sampleScript}
               prompt={pending.question}
               onCancel={() => onCancelQuestion(pending)}
-              onChoose={(voice) => onAnswerQuestion(pending, voice.id)}
+              onChoose={(voice) =>
+                onAnswerQuestion(
+                  pending,
+                  `Approved. Use ${voice.id} for this production and continue.`,
+                )
+              }
             />
           ) : (
             <QuestionCard
@@ -1101,6 +1347,7 @@ export const ProducerPanel = ({
             key={pending.toolCallId}
             pending={pending}
             content={content}
+            artifacts={artifacts}
             busy={isApproving}
             onDecision={(status, reason) => onApproval(pending, status, reason)}
           />
@@ -1149,31 +1396,71 @@ export const ProducerPanel = ({
         }}
       >
         {liveSelection.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-line-subtle px-3 py-2">
-            <span className="font-mono text-[9px] text-ink-caption">
-              {liveSelection.length} selected
-            </span>
-            {liveSelection.map((reference) => {
-              const label =
-                reference.type === "item"
-                  ? reference.value.label
-                  : reference.type === "track"
-                    ? reference.value.name
-                    : reference.value.label;
-              const kind =
-                reference.type === "gap" ? "gap" : reference.value.kind;
-              return (
-                <ReferenceToken
-                  key={`selection:${reference.type}:${reference.value.id}`}
-                  kind={kind}
-                  label={label}
-                />
-              );
-            })}
+          <div className="relative border-b border-line-subtle">
+            <div className="flex h-9 items-center justify-between px-3">
+              <span className="font-mono text-[9px] text-ink-caption">
+                {liveSelection.length} selected
+              </span>
+              <button
+                type="button"
+                aria-label="Clear editor selection"
+                title="Clear selection"
+                onClick={onClearSelection}
+                className="grid size-6 place-items-center rounded-full text-ink-caption hover:bg-hover hover:text-ink"
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <div
+              ref={selectionScrollRef}
+              onScroll={(event) => {
+                const scroller = event.currentTarget;
+                setSelectionHasMore(
+                  scroller.scrollTop + scroller.clientHeight <
+                    scroller.scrollHeight - 4,
+                );
+              }}
+              className="no-scrollbar flex max-h-36 flex-wrap content-start gap-1.5 overflow-y-auto px-3 pb-3"
+            >
+              {liveSelection.map((reference) => {
+                const label =
+                  reference.type === "item"
+                    ? reference.value.label
+                    : reference.type === "track"
+                      ? reference.value.name
+                      : reference.value.label;
+                const kind =
+                  reference.type === "gap" ? "gap" : reference.value.kind;
+                return (
+                  <ReferenceToken
+                    key={`selection:${reference.type}:${reference.value.id}`}
+                    kind={kind}
+                    label={label}
+                  />
+                );
+              })}
+            </div>
+            {selectionHasMore ? (
+              <button
+                type="button"
+                aria-label="Show more selected items"
+                onClick={() => {
+                  const scroller = selectionScrollRef.current;
+                  if (!scroller) return;
+                  scroller.scrollTo({
+                    top: scroller.scrollTop + scroller.clientHeight * 0.72,
+                    behavior: "smooth",
+                  });
+                }}
+                className="absolute inset-x-0 bottom-0 flex h-10 items-end justify-center bg-[linear-gradient(to_bottom,transparent,var(--color-surface-raised)_72%)] pb-1 text-ink-caption hover:text-ink"
+              >
+                <ChevronDown size={13} />
+              </button>
+            ) : null}
           </div>
         ) : null}
         {!conversationPaused ? (
-          <div className="no-scrollbar flex gap-1.5 overflow-x-auto border-b border-line-subtle px-3 py-2">
+          <div className="flex gap-1.5 border-b border-line-subtle px-3 py-2">
             <button
               type="button"
               aria-expanded={libraryOpen}
@@ -1195,48 +1482,16 @@ export const ProducerPanel = ({
                 Fill this gap
               </button>
             ) : null}
-            {quickIntents.map((intent) => (
-              <button
-                key={intent.label}
-                type="button"
-                onClick={() => setInstruction(intent.prompt)}
-                className="shrink-0 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-[10px] font-medium text-ink-secondary hover:border-action hover:text-ink"
-              >
-                {intent.label}
-              </button>
-            ))}
           </div>
         ) : null}
         {libraryOpen && !conversationPaused ? (
-          <div className="max-h-56 overflow-y-auto border-b border-line-subtle bg-surface-sunken p-2">
-            <div className="mb-2 flex items-center gap-2 px-1 text-[9px] text-ink-tertiary">
-              <TrueForgeIcon className="size-3" />
-              TrueForge playbooks · fill the composer, never auto-send
-            </div>
-            <div className="grid grid-cols-2 gap-px overflow-hidden border border-line-subtle bg-line-subtle">
-              {producerPromptTemplates.map((template) => (
-                <button
-                  key={template.label}
-                  type="button"
-                  onClick={() => {
-                    setInstruction(template.prompt);
-                    setLibraryOpen(false);
-                  }}
-                  className="min-h-16 bg-surface px-2.5 py-2 text-left hover:bg-hover"
-                >
-                  <span className="block font-mono text-[8px] uppercase tracking-wider text-action">
-                    {template.group}
-                  </span>
-                  <strong className="mt-0.5 block text-[10px] font-medium text-ink">
-                    {template.label}
-                  </strong>
-                  <span className="mt-0.5 block text-[9px] leading-3.5 text-ink-tertiary">
-                    {template.description}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+          <PromptLibraryModal
+            onClose={() => setLibraryOpen(false)}
+            onChoose={(prompt) => {
+              setInstruction(prompt);
+              setLibraryOpen(false);
+            }}
+          />
         ) : null}
         <div className="flex min-h-[88px] flex-col gap-2 px-3 pt-3">
           {references.length > 0 || contextArtifacts.length > 0 ? (
@@ -1380,14 +1635,26 @@ export const ProducerPanel = ({
           >
             <Paperclip size={14} />
           </button>
-          <button
-            type="submit"
-            aria-label="Send instruction"
-            disabled={!instruction.trim() || isSending || conversationPaused}
-            className="ml-1 grid size-8 place-items-center rounded-full bg-control text-control-ink transition-colors hover:bg-control-hover disabled:cursor-not-allowed disabled:opacity-30"
-          >
-            <ArrowUp size={15} strokeWidth={2.2} />
-          </button>
+          {canStop || isStopping ? (
+            <button
+              type="button"
+              aria-label="Stop current run"
+              onClick={onStop}
+              disabled={isStopping}
+              className="ml-1 grid size-8 place-items-center rounded-full border border-line-strong bg-surface text-ink-secondary transition-colors hover:bg-hover hover:text-ink disabled:cursor-wait disabled:opacity-50"
+            >
+              <Square size={11} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              aria-label="Send instruction"
+              disabled={!instruction.trim() || isSending || conversationPaused}
+              className="ml-1 grid size-8 place-items-center rounded-full bg-control text-control-ink transition-colors hover:bg-control-hover disabled:cursor-not-allowed disabled:opacity-30"
+            >
+              <ArrowUp size={15} strokeWidth={2.2} />
+            </button>
+          )}
         </div>
       </form>
       {openDocument ? (

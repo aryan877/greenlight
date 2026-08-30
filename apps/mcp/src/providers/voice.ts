@@ -178,24 +178,6 @@ export class OpenRouterVoiceProvider implements VoiceProvider {
   }
 }
 
-export class DisabledVoiceProvider implements VoiceProvider {
-  describe() {
-    return {
-      available: false,
-      model: null,
-      provider: "disabled",
-      supports_locale_auto_detection: false,
-      supports_voice_override: false,
-      voice_id: null,
-      voices: [],
-    };
-  }
-
-  async generate(): Promise<never> {
-    throw new Error("voice_provider_disabled");
-  }
-}
-
 export class TestVoiceProvider implements VoiceProvider {
   describe() {
     return {

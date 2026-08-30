@@ -1,4 +1,13 @@
-import { mkdir, open, readFile, stat, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, extname, relative, resolve, sep } from "node:path";
 
 import {
@@ -9,7 +18,9 @@ import {
 } from "@greenlight/contracts";
 
 import { createId, now, sha256 } from "../lib/canonical.js";
-import type { GreenlightStore } from "./store.js";
+import type { ArtifactStorage, GreenlightStore } from "./store.js";
+
+export type RemoteArtifactReader = (remoteKey: string) => Promise<Response>;
 
 const mimeByExtension: Record<string, string> = {
   ".aac": "audio/aac",
@@ -32,9 +43,12 @@ const mimeByExtension: Record<string, string> = {
 };
 
 export class ArtifactStore {
+  private readonly hydrationByArtifactId = new Map<string, Promise<void>>();
+
   constructor(
     private readonly root: string,
     private readonly store: GreenlightStore,
+    private readonly readRemoteArtifact: RemoteArtifactReader | null = null,
   ) {}
 
   async importBuffer(input: {
@@ -44,6 +58,7 @@ export class ArtifactStore {
     bytes: Uint8Array;
     generation?: GeneratedArtifactMetadata;
     provenance: Record<string, unknown>;
+    storage?: ArtifactStorage;
   }): Promise<Artifact> {
     const kind = artifactKindSchema.parse(input.kind);
     const extension = extname(input.filename).toLowerCase();
@@ -71,7 +86,7 @@ export class ArtifactStore {
       provenance: input.provenance,
       created_at: now(),
     };
-    return this.store.saveArtifact(artifact);
+    return this.store.saveArtifact(artifact, input.storage);
   }
 
   async importJson(input: {
@@ -106,7 +121,7 @@ export class ArtifactStore {
   }
 
   async readJson<T>(id: string): Promise<T> {
-    const { absolutePath } = this.resolveArtifact(id);
+    const { absolutePath } = await this.ensureLocal(id);
     return JSON.parse(await readFile(absolutePath, "utf8")) as T;
   }
 
@@ -115,7 +130,7 @@ export class ArtifactStore {
     offsetBytes: number,
     lengthBytes: number,
   ): Promise<Buffer> {
-    const { artifact, absolutePath } = this.resolveArtifact(id);
+    const { artifact, absolutePath } = await this.ensureLocal(id);
     if (offsetBytes > artifact.byte_size) {
       throw new Error("artifact_offset_out_of_range");
     }
@@ -139,6 +154,89 @@ export class ArtifactStore {
     } finally {
       await handle.close();
     }
+  }
+
+  async ensureLocal(
+    id: string,
+  ): Promise<{ artifact: Artifact; absolutePath: string }> {
+    const resolved = this.resolveArtifact(id);
+    try {
+      const info = await stat(resolved.absolutePath);
+      if (info.isFile() && info.size === resolved.artifact.byte_size) {
+        return resolved;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    const storage = this.store.getArtifactStorage(id);
+    if (!storage || storage.backend !== "r2") {
+      throw new Error("artifact_file_missing");
+    }
+    if (!this.readRemoteArtifact) throw new Error("artifact_cache_unavailable");
+
+    const existing = this.hydrationByArtifactId.get(id);
+    if (existing) {
+      await existing;
+      return this.resolveArtifact(id);
+    }
+    const hydration = this.hydrateFromRemote(resolved, storage.remoteKey);
+    this.hydrationByArtifactId.set(id, hydration);
+    try {
+      await hydration;
+    } finally {
+      this.hydrationByArtifactId.delete(id);
+    }
+    return this.resolveArtifact(id);
+  }
+
+  private async hydrateFromRemote(
+    resolved: { artifact: Artifact; absolutePath: string },
+    remoteKey: string,
+  ): Promise<void> {
+    const response = await this.readRemoteArtifact!(remoteKey);
+    if (!response.ok || !response.body) {
+      throw new Error(`artifact_remote_read_failed:${String(response.status)}`);
+    }
+    const declaredSize = Number(response.headers.get("content-length"));
+    if (
+      Number.isFinite(declaredSize) &&
+      declaredSize !== resolved.artifact.byte_size
+    ) {
+      throw new Error("artifact_remote_size_mismatch");
+    }
+
+    await mkdir(dirname(resolved.absolutePath), { recursive: true });
+    const temporaryPath = `${resolved.absolutePath}.${randomUUID()}.partial`;
+    const handle = await open(temporaryPath, "wx", 0o600);
+    const digest = createHash("sha256");
+    let byteSize = 0;
+    try {
+      for await (const value of response.body) {
+        const chunk = Buffer.from(value);
+        byteSize += chunk.byteLength;
+        if (byteSize > resolved.artifact.byte_size) {
+          throw new Error("artifact_remote_size_mismatch");
+        }
+        digest.update(chunk);
+        await handle.write(chunk);
+      }
+      await handle.sync();
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    await handle.close();
+    if (byteSize !== resolved.artifact.byte_size) {
+      await rm(temporaryPath, { force: true });
+      throw new Error("artifact_remote_size_mismatch");
+    }
+    if (digest.digest("hex") !== resolved.artifact.sha256) {
+      await rm(temporaryPath, { force: true });
+      throw new Error("artifact_remote_hash_mismatch");
+    }
+    await rename(temporaryPath, resolved.absolutePath);
   }
 
   private resolveRelative(relativePath: string): string {

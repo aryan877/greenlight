@@ -208,6 +208,16 @@ export const MediaLibraryDialog = ({
                           .filter(Boolean)
                           .join(" · ")}
                       </p>
+                      <a
+                        href={result.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-block text-[9px] text-action underline-offset-2 hover:underline"
+                      >
+                        {result.provider === "pexels"
+                          ? "View on Pexels"
+                          : "View licensed source"}
+                      </a>
                       <button
                         type="button"
                         disabled={busy || importAsset.isPending}
