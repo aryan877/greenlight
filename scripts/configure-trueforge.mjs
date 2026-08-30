@@ -12,7 +12,7 @@ const rootProviderName = "greenlight";
 const llmGatewayBaseUrl = mcpUrl.replace(/\/mcp\/?$/, "/api/llm/v1");
 const mcpAuthToken = process.env.GREENLIGHT_MCP_AUTH_TOKEN;
 const upstreamModel =
-  process.env.GREENLIGHT_ROOT_MODEL ?? "deepseek/deepseek-v4-flash-vision-exp";
+  process.env.GREENLIGHT_ROOT_MODEL ?? "google/gemini-3.7-flash";
 const skillsRepoUrl =
   process.env.GREENLIGHT_SKILLS_REPO_URL ??
   "https://github.com/aryan877/greenlight.git";

@@ -721,13 +721,20 @@ export const App = () => {
     if (!visibleContent) return selectedScene;
     return sceneAtTimelineTime(visibleContent, media.currentTime);
   }, [media.currentTime, selectedScene, visibleContent]);
-  const visibleSceneStartSeconds = useMemo(() => {
-    if (!visibleContent || !visibleScene) return 0;
-    const index = visibleContent.scenes.findIndex(
-      (scene) => scene.id === visibleScene.id,
+  const activeVideoClip = useMemo(() => {
+    if (!visibleContent) return null;
+    return (
+      effectiveVideoTracks(visibleContent)
+        .filter((track) => track.visible)
+        .flatMap((track) => track.clips ?? [])
+        .find(
+          (clip) =>
+            media.currentTime >= clip.timeline_start_seconds &&
+            media.currentTime <
+              clip.timeline_start_seconds + clip.duration_seconds,
+        ) ?? null
     );
-    return index < 0 ? 0 : sceneOffset(visibleContent.scenes, index);
-  }, [visibleContent, visibleScene]);
+  }, [media.currentTime, visibleContent]);
   const activeCaption = useMemo(() => {
     if (!visibleContent) return null;
     return (
@@ -1709,10 +1716,10 @@ export const App = () => {
             poster={thumbnailArtifact}
             media={media}
             duration={programDuration}
-            sceneStartSeconds={visibleSceneStartSeconds}
             previewing={Boolean(previewContent)}
             previewUsesCanvas={previewUsesCanvas}
             transition={activeTransition}
+            videoClip={activeVideoClip}
             transitionReview={null}
             captionText={activeCaption?.label ?? null}
             timelineOpen={layout.timelineOpen}

@@ -1,6 +1,7 @@
 import {
   applyEditorPatch,
   effectiveAudioTracks,
+  effectiveCaptionTracks,
   type Artifact,
   type ContentPackage,
 } from "@greenlight/contracts";
@@ -241,7 +242,33 @@ describe("editor selection", () => {
     expect(selection.scene_ids).toEqual(
       narration.clips.map((clip) => clip.scene_id),
     );
+    expect(selection.item_ids).toEqual([]);
     expect(effectiveAudioTracks(revised)[0]?.muted).toBe(true);
+  });
+
+  it("keeps whole caption-track changes out of item selection", () => {
+    const captions = effectiveCaptionTracks(content)[0]!;
+    const operation = {
+      type: "upsert_caption_track" as const,
+      track: { ...captions, visible: false },
+    };
+    const selection = createSelection({
+      projectId: content.project_id,
+      contentArtifactId: "artifact_content",
+      content,
+      sceneIds: trackOperationSceneIds([operation]),
+      trackIds: ["caption", captions.id],
+      sourceLedgerArtifact: null,
+    });
+
+    expect(selection.item_ids).toEqual([]);
+    expect(selection.scene_ids).toEqual(
+      captions.clips.map((clip) => clip.scene_id),
+    );
+    expect(selection.time_range_seconds).toEqual({
+      start: 0,
+      end: totalDuration(content),
+    });
   });
 
   it("keeps narration and captions fixed when only video is trimmed", () => {

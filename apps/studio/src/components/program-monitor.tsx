@@ -2,6 +2,7 @@ import type {
   Artifact,
   Scene,
   TransitionTimelineClip,
+  VideoTimelineClip,
 } from "@greenlight/contracts";
 import {
   Maximize2,
@@ -85,36 +86,34 @@ const TransitionOverlay = ({
 
 const TimelineVideo = ({
   artifactId,
-  source,
-  sceneStartSeconds,
+  timelineClip,
   timelineTime,
   playing,
-  playbackRate,
 }: {
   artifactId: string;
-  source: Scene["source_clip"] | null;
-  sceneStartSeconds: number;
+  timelineClip: VideoTimelineClip;
   timelineTime: number;
   playing: boolean;
-  playbackRate: number;
 }) => {
   const ref = useRef<HTMLVideoElement>(null);
   const sync = () => {
     const video = ref.current;
     if (!video || !Number.isFinite(video.duration)) return;
-    const elapsed = Math.max(0, timelineTime - sceneStartSeconds);
-    const expected = source
-      ? source.in_seconds + elapsed * playbackRate
-      : (elapsed * playbackRate) % Math.max(video.duration, 1 / 30);
+    const elapsed = Math.max(
+      0,
+      timelineTime - timelineClip.timeline_start_seconds,
+    );
+    const expected =
+      timelineClip.source_in_seconds + elapsed * timelineClip.playback_rate;
     if (Math.abs(video.currentTime - expected) > 0.12) {
       video.currentTime = Math.min(expected, video.duration);
     }
-    video.playbackRate = playbackRate;
+    video.playbackRate = timelineClip.playback_rate;
     if (playing) void video.play().catch(() => undefined);
     else video.pause();
   };
 
-  useEffect(sync, [playing, playbackRate, sceneStartSeconds, timelineTime]);
+  useEffect(sync, [playing, timelineClip, timelineTime]);
 
   return (
     <video
@@ -123,7 +122,11 @@ const TimelineVideo = ({
       muted
       playsInline
       onLoadedMetadata={sync}
-      className="size-full object-cover"
+      className="size-full"
+      style={{
+        objectFit: timelineClip.fit,
+        opacity: timelineClip.opacity,
+      }}
     />
   );
 };
@@ -132,14 +135,14 @@ export const SceneCanvas = ({
   scene,
   artifacts,
   captionText,
-  sceneStartSeconds,
+  videoClip,
   timelineTime,
   playing,
 }: {
   scene: Scene;
   artifacts: Artifact[];
   captionText: string | null;
-  sceneStartSeconds: number;
+  videoClip: VideoTimelineClip | null;
   timelineTime: number;
   playing: boolean;
 }) => {
@@ -160,23 +163,17 @@ export const SceneCanvas = ({
         >
           {visuals.map((visual) => {
             const artifact = byId.get(visual);
-            const source =
-              visual === scene.source_clip?.artifact_id
-                ? scene.source_clip
-                : null;
             return (
               <div
                 key={visual}
                 className="grid min-h-0 place-items-center rounded-[7%] bg-[#ecf2ef] p-[9%]"
               >
                 {artifact?.mime_type.startsWith("video/") ? (
-                  <TimelineVideo
-                    artifactId={visual}
-                    source={source}
-                    sceneStartSeconds={sceneStartSeconds}
-                    timelineTime={timelineTime}
-                    playing={playing}
-                    playbackRate={source ? scene.playback_rate : 1}
+                  <video
+                    src={greenlightApi.artifactUrl(visual)}
+                    muted
+                    playsInline
+                    className="size-full object-cover"
                   />
                 ) : (
                   <img
@@ -200,8 +197,18 @@ export const SceneCanvas = ({
           {scene.title}
         </h1>
       </div>
+      {videoClip ? (
+        <div className="absolute inset-0 z-10">
+          <TimelineVideo
+            artifactId={videoClip.artifact_id}
+            timelineClip={videoClip}
+            timelineTime={timelineTime}
+            playing={playing}
+          />
+        </div>
+      ) : null}
       {captionText ? (
-        <div className="absolute inset-x-[8%] bottom-[5%] flex justify-center">
+        <div className="absolute inset-x-[8%] bottom-[5%] z-20 flex justify-center">
           <span className="max-w-[88%] rounded-lg bg-black/88 px-3 py-2 text-center text-[clamp(9px,1vw,14px)] font-medium leading-snug text-white">
             {captionText}
           </span>
@@ -218,11 +225,11 @@ export const ProgramMonitor = ({
   poster,
   media,
   duration,
-  sceneStartSeconds,
   timelineOpen,
   previewing,
   previewUsesCanvas,
   transition,
+  videoClip,
   transitionReview,
   captionText,
   onToggleTimeline,
@@ -233,11 +240,11 @@ export const ProgramMonitor = ({
   poster: Artifact | null;
   media: MediaController;
   duration: number;
-  sceneStartSeconds: number;
   timelineOpen: boolean;
   previewing: boolean;
   previewUsesCanvas: boolean;
   transition: TransitionTimelineClip | null;
+  videoClip: VideoTimelineClip | null;
   transitionReview: {
     label: string;
     onApply: () => void;
@@ -312,9 +319,9 @@ export const ProgramMonitor = ({
               scene={scene}
               artifacts={artifacts}
               captionText={captionText}
-              sceneStartSeconds={sceneStartSeconds}
               timelineTime={media.currentTime}
               playing={media.playing}
+              videoClip={videoClip}
             />
           ) : duration > 0 ? (
             <div

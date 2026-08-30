@@ -48,6 +48,12 @@ export const trackOperationSceneIds = (
       if (operation.type === "upsert_audio_track") {
         return operation.track.clips.map((clip) => clip.scene_id);
       }
+      if (
+        operation.type === "upsert_video_track" ||
+        operation.type === "upsert_caption_track"
+      ) {
+        return (operation.track.clips ?? []).map((clip) => clip.scene_id);
+      }
       if (operation.type === "upsert_localized_track") {
         return [operation.track.scene_id];
       }
@@ -477,13 +483,14 @@ export const createSelection = (input: {
   const allItems = timelineItems(input.content);
   const requestedItemIds = new Set(input.itemIds ?? []);
   const requestedSceneIds = new Set(input.sceneIds ?? []);
+  const requestedTrackIds = new Set(input.trackIds ?? []);
   const allGaps = timelineGaps(input.content);
   const requestedGapIds = new Set(input.gapIds ?? []);
   const selectedGaps = allGaps.filter((gap) => requestedGapIds.has(gap.id));
   const selectedItems = allItems.filter((item) =>
     requestedItemIds.size > 0
       ? requestedItemIds.has(item.id)
-      : requestedSceneIds.has(item.scene_id),
+      : requestedTrackIds.size === 0 && requestedSceneIds.has(item.scene_id),
   );
   const selectedSceneIds = new Set([
     ...requestedSceneIds,
@@ -493,7 +500,6 @@ export const createSelection = (input: {
   const selected = input.content.scenes
     .map((scene, index) => ({ scene, index }))
     .filter(({ scene }) => selectedSceneIds.has(scene.id));
-  const requestedTrackIds = new Set(input.trackIds ?? []);
   if (
     selected.length === 0 &&
     requestedTrackIds.size === 0 &&
