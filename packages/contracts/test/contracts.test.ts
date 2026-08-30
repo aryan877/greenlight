@@ -9,7 +9,9 @@ import {
   editorTimelineItemSchema,
   effectiveAudioTracks,
   evidenceLedgerSchema,
+  isYoutubeReviewPrivacy,
   productionDurationSeconds,
+  productionPlanInputSchema,
   projectBriefSchema,
   sceneStartSeconds,
   videoTimelineItemId,
@@ -36,6 +38,39 @@ describe("Greenlight contracts", () => {
 
     expect(brief.target_duration_seconds).toBe(60);
     expect(brief.tone).toContain("curious");
+  });
+
+  it("keeps production plans concise with one active step", () => {
+    expect(
+      productionPlanInputSchema.parse({
+        plan_id: "phone_explainer",
+        steps: [
+          { id: "research", label: "Research the topic", status: "completed" },
+          { id: "edit", label: "Build the first cut", status: "in_progress" },
+          { id: "review", label: "Render and check", status: "pending" },
+        ],
+      }).title,
+    ).toBe("Production plan");
+
+    expect(
+      productionPlanInputSchema.safeParse({
+        plan_id: "phone_explainer",
+        steps: [
+          {
+            id: "research",
+            label: "Research the topic",
+            status: "in_progress",
+          },
+          { id: "edit", label: "Build the first cut", status: "in_progress" },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts only safe YouTube review privacy states", () => {
+    expect(isYoutubeReviewPrivacy("private")).toBe(true);
+    expect(isYoutubeReviewPrivacy("unlisted")).toBe(true);
+    expect(isYoutubeReviewPrivacy("public")).toBe(false);
   });
 
   it("rejects claims that cite missing sources", () => {

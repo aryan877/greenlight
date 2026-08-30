@@ -5,6 +5,7 @@ import {
   effectiveCaptionTracks,
   effectiveTransitionTracks,
   effectiveVideoTracks,
+  isYoutubeReviewPrivacy,
   soundEffectPresetRegistry,
   transitionPresetRegistry,
   VIDEO_FPS,
@@ -687,7 +688,7 @@ export const App = () => {
   const visibleContent = previewContent ?? editorContent;
   const pendingPublicReleaseApproval = useMemo(() => {
     const release = project.data?.release;
-    if (!release || release.privacy !== "unlisted") return null;
+    if (!release || !isYoutubeReviewPrivacy(release.privacy)) return null;
     return (
       producer.pendingApprovals.find(
         (approval) =>
@@ -719,6 +720,13 @@ export const App = () => {
     if (!visibleContent) return selectedScene;
     return sceneAtTimelineTime(visibleContent, media.currentTime);
   }, [media.currentTime, selectedScene, visibleContent]);
+  const visibleSceneStartSeconds = useMemo(() => {
+    if (!visibleContent || !visibleScene) return 0;
+    const index = visibleContent.scenes.findIndex(
+      (scene) => scene.id === visibleScene.id,
+    );
+    return index < 0 ? 0 : sceneOffset(visibleContent.scenes, index);
+  }, [visibleContent, visibleScene]);
   const activeCaption = useMemo(() => {
     if (!visibleContent) return null;
     return (
@@ -1700,6 +1708,7 @@ export const App = () => {
             poster={thumbnailArtifact}
             media={media}
             duration={programDuration}
+            sceneStartSeconds={visibleSceneStartSeconds}
             previewing={Boolean(previewContent)}
             previewUsesCanvas={previewUsesCanvas}
             transition={activeTransition}
@@ -1967,7 +1976,7 @@ export const App = () => {
                           return;
                         }
                         runProducer(
-                          "Prepare the exact current unlisted release snapshot for public publication. Recheck the locked snapshot and request TrueForge approval for publish_video. Do not publish until I approve that exact tool call.",
+                          "Prepare the exact current review snapshot for public publication. Recheck the locked snapshot and request approval before publishing.",
                         );
                       }}
                       onCancelPublicRelease={() => {
@@ -1986,13 +1995,13 @@ export const App = () => {
                       }}
                       onPrepare={() => {
                         runProducer(
-                          project.data?.release?.privacy === "unlisted"
+                          isYoutubeReviewPrivacy(project.data?.release?.privacy)
                             ? visibleContent.release.destination === "scheduled"
-                              ? "Prepare the current unlisted release for its scheduled time. Check the locked snapshot and stop for approval before scheduling it."
+                              ? "Prepare this reviewed video for its scheduled time. Check the locked snapshot and ask before scheduling it."
                               : visibleContent.release.destination === "public"
-                                ? "Prepare the current unlisted release for public publication. Check the locked snapshot and stop for approval before publishing it."
-                                : "Open the current unlisted review and tell me what still needs attention."
-                            : "Prepare this cut for an unlisted YouTube review. Run only missing quality or render steps and stop for approval before upload.",
+                                ? "Prepare this reviewed video for public release. Check the locked snapshot and ask before publishing it."
+                                : "Open the current YouTube review and tell me what still needs attention."
+                            : "Prepare this cut for YouTube review. Run only missing checks and ask before uploading it.",
                         );
                       }}
                       onSchedule={(publishAt) => {
@@ -2007,7 +2016,7 @@ export const App = () => {
                           "Set the YouTube schedule",
                         );
                         runProducer(
-                          `Prepare the exact current unlisted release for ${publishAt}. Recheck the locked snapshot and request TrueForge approval for schedule_video. Do not schedule it until I approve that exact tool call.`,
+                          `Prepare the exact current review snapshot for ${publishAt}. Recheck it and ask before scheduling.`,
                         );
                       }}
                       publicApprovalPending={Boolean(

@@ -174,7 +174,7 @@ describe("GreenlightStore", () => {
     expect(now()).toMatch(/Z$/);
   });
 
-  it("claims an unlisted release exactly once", () => {
+  it("claims a private review release exactly once", () => {
     const store = new GreenlightStore(":memory:");
     const project = store.createProject({
       topic: "One deliberate public release boundary",
@@ -193,16 +193,16 @@ describe("GreenlightStore", () => {
       metadata_sha256: "b".repeat(64),
       quality_report_sha256: "c".repeat(64),
       evidence_ledger_sha256: "d".repeat(64),
-      privacy: "unlisted",
+      privacy: "private",
       created_at: now(),
     });
 
     store.claimRelease(release.id, "publishing");
     expect(() => store.claimRelease(release.id, "publishing")).toThrow(
-      "release_not_unlisted",
+      "release_not_staged",
     );
     store.rollbackReleaseClaim(release.id, "publishing");
-    expect(store.getRelease(release.id)?.privacy).toBe("unlisted");
+    expect(store.getRelease(release.id)?.privacy).toBe("private");
     expect(() => store.rollbackReleaseClaim(release.id, "publishing")).toThrow(
       "release_rollback_failed",
     );

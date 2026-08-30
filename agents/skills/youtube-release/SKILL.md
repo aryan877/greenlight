@@ -25,4 +25,4 @@ The thumbnail must already exist as an immutable Greenlight artifact. Greenlight
 
 ## Safety
 
-Stage as unlisted first. Treat the unlisted URL as a review artifact. Public or scheduled release requires approval for the exact locked snapshot. A changed snapshot requires new approval.
+Request unlisted staging first, then use the privacy state returned by YouTube. An unaudited API project may enforce private staging; treat private or unlisted as the review artifact. Public or scheduled release requires approval for the exact locked snapshot. A changed snapshot requires new approval.

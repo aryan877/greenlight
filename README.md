@@ -4,7 +4,7 @@
 
 <h1 align="center">Greenlight</h1>
 
-<p align="center"><strong>A TrueForge-native YouTube production studio where evidence, editing, rendering, and release share one controlled loop.</strong></p>
+<p align="center"><strong>The trustworthy agentic video editor: every claim, cut, approval, render, and release stays inside one visible TrueForge loop.</strong></p>
 
 <p align="center">
   Research → sourced script → editable timeline → checked render → unlisted review
@@ -14,9 +14,11 @@
   <a href="https://greenlight.aryankumar.dev"><strong>Open the live demo</strong></a> · Judge credentials are prefilled on the login screen
 </p>
 
-Greenlight is a real multi-track editor with a visible Producer agent. Direct gestures and Producer proposals use the same typed edit contract, every accepted change creates an immutable revision, and the creator keeps final release control.
+Most AI video tools hide the work behind a prompt. Greenlight makes the work inspectable. It is a real multi-track editor with a visible Producer agent, durable research, reviewable approvals, deterministic rendering, and a release gate the model cannot bypass.
 
-## The demo surface
+Direct gestures and Producer proposals use the same typed edit contract. Every accepted change creates an immutable revision. The creator keeps final release control.
+
+## Why it is different
 
 - **Evidence Lens** — click a scene to inspect its supported claims and source links.
 - **Reviewable agent work** — research, scripts, questions, progress, and approvals remain visible in the durable TrueForge thread.

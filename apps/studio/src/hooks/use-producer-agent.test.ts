@@ -9,6 +9,63 @@ afterAll(() => {
 });
 
 describe("Producer event projection", () => {
+  it("projects a durable production plan as one updating event", async () => {
+    const { appendUniqueStudioEvents, describeEvent } =
+      await import("./use-producer-agent.js");
+    const planCall = (
+      callId: string,
+      statuses: Array<"pending" | "in_progress" | "completed">,
+    ) =>
+      describeEvent({
+        id: `message-${callId}`,
+        type: "model.message",
+        tool_calls: [
+          {
+            id: callId,
+            function: {
+              name: "update_production_plan",
+              arguments: JSON.stringify({
+                plan_id: "phone_explainer",
+                title: "Phone heat explainer",
+                steps: statuses.map((status, index) => ({
+                  id: `step_${index}`,
+                  label: [
+                    "Research the facts",
+                    "Build the cut",
+                    "Check the render",
+                  ][index],
+                  status,
+                })),
+              }),
+            },
+          },
+        ],
+      });
+
+    const started = planCall("plan_one", ["in_progress", "pending", "pending"]);
+    const updated = planCall("plan_two", [
+      "completed",
+      "in_progress",
+      "pending",
+    ]);
+    const projected = appendUniqueStudioEvents(started, updated);
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0]).toMatchObject({
+      id: "production-plan-phone_explainer",
+      kind: "plan",
+      status: "running",
+      plan: {
+        title: "Phone heat explainer",
+        steps: [
+          { id: "step_0", status: "completed" },
+          { id: "step_1", status: "in_progress" },
+          { id: "step_2", status: "pending" },
+        ],
+      },
+    });
+  });
+
   it("restores creator instructions without leaking editor context", async () => {
     const { describeTurnInput } = await import("./use-producer-agent.js");
 
@@ -37,6 +94,7 @@ describe("Producer event projection", () => {
     ).toEqual([
       {
         id: "turn-input-turn_one-0",
+        turnId: "turn_one",
         kind: "instruction",
         label: "Tighten the opening hook.",
         detail: "",
@@ -72,6 +130,7 @@ describe("Producer event projection", () => {
     ).toEqual([
       {
         id: "turn-input-turn_two-1",
+        turnId: "turn_two",
         kind: "instruction",
         label: "Use the shorter version",
         detail: "",
@@ -225,7 +284,10 @@ describe("Producer event projection", () => {
       detail: "Done",
       subagent: {
         brief: "",
-        steps: [{ label: "Reading the current project", status: "done" }],
+        steps: [
+          { label: "Analyzing the findings", status: "done" },
+          { label: "Reading the current project", status: "done" },
+        ],
         result: "",
       },
     });
@@ -311,9 +373,37 @@ describe("Producer event projection", () => {
       "| Scene 5 | Thumbs up | 1F44D | | Scene 6 | Green circle | 1F7E2 |",
       "The six OpenMoji visuals have been attached across all six scenes with the OpenMoji treatment: 1. **Scene 1:** Robot",
       "Scene 1 (scenehook): Robot 2.",
+      "The project state is large.",
+      "The artifact IDs are confirmed.",
+      "I have the hook scene ID (sceneheathook).",
+      "0s across 6 scenes.",
+      "Schema confirmed.",
+      "My strict-check flagged the rounded display values, but the real frame-grid values are exact.",
+      "The package is intact and corrected.",
+      "The full corrected payload is ready.",
+      "Audio durations are now exact frame multiples.",
+      "For licensed music the configured adapter is openverse (use=music).",
+      "Licensed music needs a licensed asset, so let me discover what music tools Greenlight exposes before I patch anything.",
     ]) {
       expect(describeEvent({ type: "model.message", content })).toEqual([]);
     }
+
+    expect(
+      describeEvent({
+        type: "model.message",
+        content: "The patch is internally consistent. I will regenerate it.",
+        tool_calls: [
+          {
+            id: "call_internal",
+            type: "function",
+            function: {
+              name: "exec",
+              arguments: JSON.stringify({ command: "true" }),
+            },
+          },
+        ],
+      }),
+    ).toEqual([]);
   });
 
   it("sends the whole cut and keeps the current selection as emphasis", async () => {
@@ -490,7 +580,7 @@ describe("Producer event projection", () => {
     ).toEqual([{ name: "tight-cut.mp4", path: "/workspace/tight-cut.mp4" }]);
   });
 
-  it("hides routine context reads from the creator feed", async () => {
+  it("shows trusted state reads with human labels and MCP ownership", async () => {
     const { describeEvent } = await import("./use-producer-agent.js");
     const read = (name: string) => ({
       id: `event_${name}`,
@@ -504,8 +594,105 @@ describe("Producer event projection", () => {
       ],
     });
 
-    expect(describeEvent(read("get_project"))).toEqual([]);
-    expect(describeEvent(read("get_artifact"))).toEqual([]);
+    expect(describeEvent(read("get_project"))).toMatchObject([
+      {
+        label: "Read the current production",
+        tool: { name: "get_project", server: "greenlight" },
+      },
+    ]);
+    expect(describeEvent(read("get_artifact"))).toMatchObject([
+      {
+        label: "Read managed media",
+        tool: { name: "get_artifact", server: "greenlight" },
+      },
+    ]);
+  });
+
+  it("renders a production script without Markdown or internal claim labels", async () => {
+    const { scriptReviewDocument } = await import("./use-producer-agent.js");
+    const document = scriptReviewDocument(
+      "Script · Chapters and draft",
+      [
+        "PART 2 — SCRIPT",
+        "",
+        '**1. HOOK (5s)** — *image* • **Narration:** "Your phone gets hot, then slow. Why?" • **Claims:** claim_heat_sources • **Visual detail:** Pexels b-roll; type card: **HOT → SLOW?**',
+        "",
+        '**2. EVIDENCE (6s)** — *openmoji* • **Narration:** "Gaming, video, GPS in the sun." • **Claims:** claim_heat_sources • **Visual detail:** OpenMoji appears one by one.',
+        "",
+        "**Summary:** 2 scenes with checked facts.",
+      ].join("\n"),
+    );
+
+    expect(document?.sections[0]).toEqual({
+      title: "1 · Hook · 5s",
+      lines: [
+        "Narration · Your phone gets hot, then slow. Why?",
+        "Visual · Pexels b-roll; type card: HOT → SLOW?",
+      ],
+    });
+    expect(JSON.stringify(document)).not.toMatch(/\*\*|claim_heat|\*image\*/);
+  });
+
+  it("renders a titled chapter script as clean scene cards", async () => {
+    const { scriptReviewDocument } = await import("./use-producer-agent.js");
+    const document = scriptReviewDocument(
+      "Script · Chapters and draft",
+      [
+        "## CHAPTER PLAN + SCRIPT DRAFT",
+        "",
+        '### 1. HOOK · "Your Phone Is Fighting the Heat"',
+        '**Narration:** "That lag when your phone gets hot? It is protecting itself."',
+        "**Duration:** 6s",
+        "**Claims:** claim_heat",
+        "",
+        '### 2. EVIDENCE · "35% Gone"',
+        '**Narration:** "A measured stress test lost about 35% of peak performance."',
+        "**Duration:** 6s",
+        "**Claims:** claim_test",
+        "",
+        "## EVIDENCE-TO-CLAIM MAPPING",
+        "Internal production notes.",
+      ].join("\n"),
+    );
+
+    expect(document?.sections).toEqual([
+      {
+        title: "1 · Your Phone Is Fighting the Heat · 6s",
+        lines: [
+          "Narration · That lag when your phone gets hot? It is protecting itself.",
+        ],
+      },
+      {
+        title: "2 · 35% Gone · 6s",
+        lines: [
+          "Narration · A measured stress test lost about 35% of peak performance.",
+        ],
+      },
+    ]);
+    expect(JSON.stringify(document)).not.toMatch(/claim_|CHAPTER|MAPPING/);
+  });
+
+  it("keeps every distinct progress update within a durable turn", async () => {
+    const { compactStudioEvents } = await import("./use-producer-agent.js");
+    const messages = ["Checking.", "Found it.", "The cut is ready."].map(
+      (label, index) => ({
+        id: `reply-${index}`,
+        turnId: "turn_one",
+        kind: "message" as const,
+        label,
+        detail: "",
+        sceneIds: [],
+      }),
+    );
+
+    expect(compactStudioEvents(messages).map((event) => event.label)).toEqual([
+      "Checking.",
+      "Found it.",
+      "The cut is ready.",
+    ]);
+    expect(
+      compactStudioEvents([...messages, { ...messages[2]!, id: "last" }]),
+    ).toHaveLength(3);
   });
 
   it("reads the authoritative TrueForge terminal status", async () => {
@@ -529,6 +716,33 @@ describe("Producer event projection", () => {
         state: { status: "cancelled" },
       }),
     ).toBeNull();
+  });
+
+  it("keeps failed tool validation truthful in the durable steps", async () => {
+    const { toolResponseFailure } = await import("./use-producer-agent.js");
+
+    expect(
+      toolResponseFailure({
+        type: "tool.response",
+        content: JSON.stringify({
+          error: [{ type: "text", text: "artifact_outside_selection" }],
+        }),
+      }),
+    ).toBe("The preview did not include its complete scope.");
+    expect(
+      toolResponseFailure({
+        type: "tool.response",
+        content: JSON.stringify({ ok: true }),
+      }),
+    ).toBeNull();
+    expect(
+      toolResponseFailure({
+        type: "tool.response",
+        content: JSON.stringify({
+          error: [{ type: "text", text: "Input validation error" }],
+        }),
+      }),
+    ).toBe("One detail needed a correction before this step could be saved.");
   });
 
   it("derives durable reply duration from the TrueForge turn lifecycle", async () => {

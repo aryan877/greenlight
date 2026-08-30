@@ -3,6 +3,9 @@ interface Env {
   MEDIA: R2Bucket;
   DEMO_EMAIL: string;
   DEMO_PASSWORD: string;
+  GOOGLE_LOGIN_CLIENT_ID: string;
+  GOOGLE_LOGIN_CLIENT_SECRET: string;
+  GOOGLE_LOGIN_REDIRECT_URI: string;
   ORIGIN_SHARED_SECRET: string;
   ORIGIN_URL: string;
   SESSION_SECRET: string;
@@ -21,11 +24,16 @@ type UploadGrant = {
 type UploadedPart = { etag: string; part_number: number };
 
 const SESSION_COOKIE = "greenlight_session";
+const GOOGLE_STATE_COOKIE = "greenlight_google_state";
 const SESSION_TTL_SECONDS = 12 * 60 * 60;
+const GOOGLE_STATE_TTL_SECONDS = 10 * 60;
 const UPLOAD_TTL_SECONDS = 60 * 60;
 const PART_SIZE_BYTES = 8 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 256 * 1024 * 1024;
 const encoder = new TextEncoder();
+const GOOGLE_AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
 
 const json = (value: unknown, init: ResponseInit = {}) => {
   const headers = new Headers(init.headers);
@@ -142,13 +150,28 @@ const cookies = (request: Request) =>
       .filter(([name, value]) => Boolean(name && value)),
   );
 
+const html = (value: string) =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+
+const sessionCookie = async (email: string, env: Env) => {
+  const expiresAt = Date.now() + SESSION_TTL_SECONDS * 1000;
+  const token = await signedValue(`${email}|${expiresAt}`, env.SESSION_SECRET);
+  return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_SECONDS}`;
+};
+
 const sessionEmail = async (request: Request, env: Env) => {
   const token = cookies(request)[SESSION_COOKIE];
   if (!token) return null;
   const value = await verifySignedValue(token, env.SESSION_SECRET);
   if (!value) return null;
-  const [email, expiresAt] = value.split("|", 2);
-  return email === env.DEMO_EMAIL && Number(expiresAt) > Date.now()
+  const separator = value.lastIndexOf("|");
+  const email = value.slice(0, separator);
+  const expiresAt = Number(value.slice(separator + 1));
+  return separator > 0 && /\S+@\S+\.\S+/u.test(email) && expiresAt > Date.now()
     ? email
     : null;
 };
@@ -166,9 +189,9 @@ const secureHeaders = (response: Response) => {
   });
 };
 
-const loginPage = (env: Env, invalid = false) =>
+const loginPage = (env: Env, error: "credentials" | "google" | null = null) =>
   new Response(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Greenlight demo</title><style>*{box-sizing:border-box}body{margin:0;background:#0b0d0c;color:#f3f5f2;font:15px Archivo,system-ui,sans-serif;display:grid;min-height:100vh;place-items:center}.card{border:1px solid #343936;background:#111411;padding:24px;width:min(380px,calc(100vw - 32px))}h1{font-size:24px;margin:0 0 8px}p{color:#aeb5af;line-height:1.5;margin:0 0 20px}label{display:block;font-size:12px;margin:14px 0 6px;text-transform:uppercase;letter-spacing:.08em}input,button{border:1px solid #3e4640;border-radius:0;font:inherit;width:100%;padding:11px 12px}input{background:#0b0d0c;color:#fff}button{background:#c8ff3d;border-color:#c8ff3d;color:#10130e;font-weight:700;margin-top:18px;cursor:pointer}.error{color:#ff8c82;margin-bottom:12px}.hint{font:12px ui-monospace,SFMono-Regular,monospace;color:#8f988f;margin-top:14px}</style></head><body><main class="card"><h1>Greenlight</h1><p>Private hackathon demo. Use the test account below.</p>${invalid ? '<div class="error">That login did not match.</div>' : ""}<form method="post" action="/auth/login"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" value="${env.DEMO_EMAIL}" required><label for="password">Password</label><input id="password" name="password" type="text" autocomplete="current-password" value="${env.DEMO_PASSWORD}" required><button type="submit">Enter Studio</button></form><div class="hint">Credentials are intentionally shared for judging.</div></main></body></html>`,
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · Greenlight</title><style>:root{color-scheme:dark;font-family:Archivo,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0d100e;color:#eef3f0;display:grid;place-items:center;padding:24px}.shell{width:min(440px,100%)}.brand{display:flex;align-items:center;gap:12px;margin-bottom:28px}.brand svg{width:30px;height:30px}.brand strong{font-size:18px;letter-spacing:-.02em}.card{border:1px solid #303733;background:#151917;padding:32px}h1{font-size:30px;line-height:1.1;letter-spacing:-.04em;margin:0 0 10px}p{color:#a1aaa5;line-height:1.55;margin:0}.google,.primary{display:flex;width:100%;height:46px;align-items:center;justify-content:center;gap:10px;border:1px solid #3b443f;border-radius:2px;font:600 14px inherit;text-decoration:none;cursor:pointer}.google{background:#eef3f0;color:#151917;margin-top:26px}.google svg{width:18px;height:18px}.divider{display:flex;align-items:center;gap:12px;color:#747d78;font-size:11px;margin:24px 0}.divider:before,.divider:after{content:"";height:1px;background:#2c332f;flex:1}.section-title{font-size:12px;color:#c5cdc9;margin-bottom:14px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}label{display:grid;gap:6px;color:#89928d;font-size:10px;letter-spacing:.06em;text-transform:uppercase}input{height:42px;width:100%;min-width:0;border:1px solid #333b36;border-radius:2px;background:#101310;color:#eef3f0;padding:0 11px;font:12px "IBM Plex Mono",ui-monospace,monospace}.primary{background:#5ac0a4;border-color:#5ac0a4;color:#0d1713;margin-top:14px}.primary:hover,.google:hover{filter:brightness(1.05)}.error{border-left:2px solid #f07878;color:#f3aaaa;font-size:12px;line-height:1.45;margin:18px 0 0;padding:2px 0 2px 10px}.foot{color:#747d78;font:11px "IBM Plex Mono",ui-monospace,monospace;margin-top:16px;text-align:center}@media(max-width:480px){.card{padding:24px}.fields{grid-template-columns:1fr}}</style></head><body><main class="shell"><div class="brand"><svg viewBox="0 0 96 96" fill="none" aria-hidden="true"><circle cx="48" cy="48" r="40" stroke="#69E0A7" stroke-width="7"/><path d="m57.24 32 22.96 39.76M38.76 32h45.92M29.52 48 52.48 8.24M38.76 64 15.8 24.24M57.24 64H11.32M66.48 48 43.52 87.76" stroke="#69E0A7" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg><strong>Greenlight</strong></div><section class="card"><h1>Enter the studio</h1><p>Research, edit, render, and prepare a YouTube release in one controlled workspace.</p><a class="google" href="/auth/google"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M21.35 12.19c0-.64-.06-1.25-.16-1.84H12v3.48h5.25a4.49 4.49 0 0 1-1.95 2.94v2.26h3.16c1.85-1.7 2.89-4.21 2.89-6.84Z"/><path fill="#34A853" d="M12 21.73c2.64 0 4.86-.88 6.48-2.38l-3.16-2.26c-.88.59-2 .94-3.32.94-2.55 0-4.71-1.72-5.48-4.04H3.26v2.33A9.78 9.78 0 0 0 12 21.73Z"/><path fill="#FBBC05" d="M6.52 13.99A5.88 5.88 0 0 1 6.21 12c0-.69.12-1.36.31-1.99V7.68H3.26A9.78 9.78 0 0 0 2.27 12c0 1.57.38 3.05.99 4.32l3.26-2.33Z"/><path fill="#EA4335" d="M12 5.97c1.44 0 2.72.49 3.73 1.46l2.81-2.81A9.42 9.42 0 0 0 12 2.27a9.78 9.78 0 0 0-8.74 5.41l3.26 2.33C7.29 7.69 9.45 5.97 12 5.97Z"/></svg>Continue with Google</a><div class="divider">or use judge access</div><form method="post" action="/auth/login"><div class="fields"><label for="email">Email<input id="email" name="email" type="email" autocomplete="username" value="${html(env.DEMO_EMAIL)}" required></label><label for="password">Password<input id="password" name="password" type="text" autocomplete="current-password" value="${html(env.DEMO_PASSWORD)}" required></label></div><button class="primary" type="submit">Open demo workspace</button></form>${error === "credentials" ? '<div class="error">Those judge credentials did not match.</div>' : error === "google" ? '<div class="error">Google sign-in did not finish. Use judge access or try again.</div>' : ""}</section><p class="foot">Judge credentials are intentionally prefilled.</p></main></body></html>`,
     {
       headers: {
         "cache-control": "no-store",
@@ -195,21 +218,106 @@ const login = async (request: Request, env: Env) => {
   if (email !== env.DEMO_EMAIL || password !== env.DEMO_PASSWORD) {
     return contentType.includes("application/json")
       ? json({ error: "invalid_login" }, { status: 401 })
-      : loginPage(env, true);
+      : loginPage(env, "credentials");
   }
-  const expiresAt = Date.now() + SESSION_TTL_SECONDS * 1000;
-  const token = await signedValue(`${email}|${expiresAt}`, env.SESSION_SECRET);
   const headers = new Headers({
     location: "/",
-    "set-cookie": `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_SECONDS}`,
+    "set-cookie": await sessionCookie(email, env),
   });
+  return new Response(null, { headers, status: 303 });
+};
+
+const startGoogleLogin = async (env: Env) => {
+  const state = base64Url(crypto.getRandomValues(new Uint8Array(24)));
+  const expiresAt = Date.now() + GOOGLE_STATE_TTL_SECONDS * 1000;
+  const stateCookie = await signedValue(
+    `${state}|${expiresAt}`,
+    env.SESSION_SECRET,
+  );
+  const authorization = new URL(GOOGLE_AUTHORIZATION_URL);
+  authorization.search = new URLSearchParams({
+    client_id: env.GOOGLE_LOGIN_CLIENT_ID,
+    prompt: "select_account",
+    redirect_uri: env.GOOGLE_LOGIN_REDIRECT_URI,
+    response_type: "code",
+    scope: "openid email profile",
+    state,
+  }).toString();
+  return new Response(null, {
+    headers: {
+      location: authorization.toString(),
+      "set-cookie": `${GOOGLE_STATE_COOKIE}=${stateCookie}; HttpOnly; Secure; SameSite=Lax; Path=/auth/google/callback; Max-Age=${GOOGLE_STATE_TTL_SECONDS}`,
+    },
+    status: 302,
+  });
+};
+
+const finishGoogleLogin = async (request: Request, env: Env) => {
+  const url = new URL(request.url);
+  const receivedState = url.searchParams.get("state");
+  const code = url.searchParams.get("code");
+  const stateCookie = cookies(request)[GOOGLE_STATE_COOKIE];
+  const stateValue = stateCookie
+    ? await verifySignedValue(stateCookie, env.SESSION_SECRET)
+    : null;
+  const separator = stateValue?.lastIndexOf("|") ?? -1;
+  const expectedState = stateValue?.slice(0, separator) ?? "";
+  const stateExpiresAt = Number(stateValue?.slice(separator + 1));
+  if (
+    url.searchParams.has("error") ||
+    !code ||
+    !receivedState ||
+    receivedState !== expectedState ||
+    stateExpiresAt <= Date.now()
+  ) {
+    return loginPage(env, "google");
+  }
+
+  const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
+    body: new URLSearchParams({
+      client_id: env.GOOGLE_LOGIN_CLIENT_ID,
+      client_secret: env.GOOGLE_LOGIN_CLIENT_SECRET,
+      code,
+      grant_type: "authorization_code",
+      redirect_uri: env.GOOGLE_LOGIN_REDIRECT_URI,
+    }),
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    method: "POST",
+  });
+  const tokens = (await tokenResponse.json().catch(() => null)) as {
+    access_token?: unknown;
+  } | null;
+  if (!tokenResponse.ok || typeof tokens?.access_token !== "string") {
+    return loginPage(env, "google");
+  }
+  const profileResponse = await fetch(GOOGLE_USERINFO_URL, {
+    headers: { authorization: `Bearer ${tokens.access_token}` },
+  });
+  const profile = (await profileResponse.json().catch(() => null)) as {
+    email?: unknown;
+    email_verified?: unknown;
+  } | null;
+  if (
+    !profileResponse.ok ||
+    profile?.email_verified !== true ||
+    typeof profile.email !== "string" ||
+    !/\S+@\S+\.\S+/u.test(profile.email)
+  ) {
+    return loginPage(env, "google");
+  }
+  const headers = new Headers({ location: "/" });
+  headers.append("set-cookie", await sessionCookie(profile.email, env));
+  headers.append(
+    "set-cookie",
+    `${GOOGLE_STATE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/auth/google/callback; Max-Age=0`,
+  );
   return new Response(null, { headers, status: 303 });
 };
 
 const logout = () =>
   new Response(null, {
     headers: {
-      location: "/",
+      location: "/login",
       "set-cookie": `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`,
     },
     status: 303,
@@ -453,6 +561,15 @@ export default {
       const url = new URL(request.url);
       if (url.pathname === "/auth/login" && request.method === "POST") {
         return secureHeaders(await login(request, env));
+      }
+      if (url.pathname === "/auth/google" && request.method === "GET") {
+        return secureHeaders(await startGoogleLogin(env));
+      }
+      if (
+        url.pathname === "/auth/google/callback" &&
+        request.method === "GET"
+      ) {
+        return secureHeaders(await finishGoogleLogin(request, env));
       }
       if (url.pathname === "/internal/r2" && request.method === "POST") {
         return secureHeaders(await readInternalR2Object(request, env));

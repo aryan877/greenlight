@@ -16,9 +16,15 @@ type ChannelIdentity = {
 };
 
 type UploadResult = {
+  privacy: "private" | "unlisted";
   studio_url: string;
   url: string;
   video_id: string;
+};
+
+type UploadedVideoState = {
+  id: string;
+  status?: { privacyStatus?: string };
 };
 
 type UpdateResult = UploadResult & {
@@ -206,8 +212,23 @@ export class YouTubeUploader {
       "--no-notify-subscribers",
     ];
     if (input.thumbnailPath) args.push("--thumbnail", input.thumbnailPath);
-    const upload = await this.run<UploadResult>(args, 30 * 60_000);
-    return { ...upload, channel };
+    const upload = await this.run<Omit<UploadResult, "privacy">>(
+      args,
+      30 * 60_000,
+    );
+    const uploadedState = await this.run<UploadedVideoState>([
+      "show",
+      upload.video_id,
+      "--profile",
+      this.config.profile,
+      "--parts",
+      "status",
+    ]);
+    const privacy = uploadedState.status?.privacyStatus;
+    if (privacy !== "private" && privacy !== "unlisted") {
+      throw new Error("youtube_upload_unsafe_privacy_state");
+    }
+    return { ...upload, channel, privacy };
   }
 
   async publish(videoId: string): Promise<UpdateResult> {

@@ -25,6 +25,7 @@
   ],
   "vars": {
     "DEMO_EMAIL": "demo@greenlight.studio",
+    "GOOGLE_LOGIN_REDIRECT_URI": "https://greenlight.aryankumar.dev/auth/google/callback",
     "ORIGIN_URL": "https://greenlight-origin.aryankumar.dev",
   },
   "observability": {

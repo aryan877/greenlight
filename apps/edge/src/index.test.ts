@@ -3,6 +3,19 @@ import { vi } from "vitest";
 
 import worker, { edgeInternals } from "./index.js";
 
+const edgeEnv = {
+  ASSETS: { fetch: vi.fn() },
+  DEMO_EMAIL: "demo@greenlight.studio",
+  DEMO_PASSWORD: "judge-pass",
+  GOOGLE_LOGIN_CLIENT_ID: "google-client",
+  GOOGLE_LOGIN_CLIENT_SECRET: "google-secret",
+  GOOGLE_LOGIN_REDIRECT_URI: "https://studio.example/auth/google/callback",
+  MEDIA: {},
+  ORIGIN_SHARED_SECRET: "origin-secret",
+  ORIGIN_URL: "https://origin.example",
+  SESSION_SECRET: "a-long-session-secret",
+} as never;
+
 describe("edge signed values", () => {
   it("accepts an unchanged value", async () => {
     const token = await edgeInternals.signedValue("demo", "a-long-secret");
@@ -64,5 +77,101 @@ describe("edge signed values", () => {
     await expect(response.text()).resolves.toBe("r2-original");
     expect(response.headers.get("content-type")).toBe("video/mp4");
     expect(get).toHaveBeenCalledOnce();
+  });
+});
+
+describe("edge authentication", () => {
+  it("shows both prefilled judge access and Google sign-in", async () => {
+    const response = await worker.fetch(
+      new Request("https://studio.example/login"),
+      edgeEnv,
+    );
+    const page = await response.text();
+
+    expect(page).toContain("Continue with Google");
+    expect(page).toContain('value="demo@greenlight.studio"');
+    expect(page).toContain('value="judge-pass"');
+    expect(page).toContain("Judge credentials are intentionally prefilled");
+  });
+
+  it("creates a signed session from the judge credentials", async () => {
+    const response = await worker.fetch(
+      new Request("https://studio.example/auth/login", {
+        body: new URLSearchParams({
+          email: "demo@greenlight.studio",
+          password: "judge-pass",
+        }),
+        method: "POST",
+      }),
+      edgeEnv,
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/");
+    expect(response.headers.get("set-cookie")).toContain("greenlight_session=");
+  });
+
+  it("uses a CSRF-bound Google code flow and accepts a verified email", async () => {
+    const start = await worker.fetch(
+      new Request("https://studio.example/auth/google"),
+      edgeEnv,
+    );
+    const authorization = new URL(String(start.headers.get("location")));
+    const stateCookie = String(start.headers.get("set-cookie"));
+    const state = String(authorization.searchParams.get("state"));
+    expect(authorization.origin).toBe("https://accounts.google.com");
+    expect(authorization.searchParams.get("scope")).toBe(
+      "openid email profile",
+    );
+
+    const providerFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: "access-token" }), {
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            email: "creator@example.com",
+            email_verified: true,
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", providerFetch);
+    const callback = await worker.fetch(
+      new Request(
+        `https://studio.example/auth/google/callback?code=one-time-code&state=${encodeURIComponent(state)}`,
+        { headers: { cookie: stateCookie.split(";", 1)[0] ?? "" } },
+      ),
+      edgeEnv,
+    );
+    vi.unstubAllGlobals();
+
+    expect(callback.status).toBe(303);
+    expect(callback.headers.get("location")).toBe("/");
+    expect(callback.headers.get("set-cookie")).toContain("greenlight_session=");
+    expect(providerFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears the session and returns to the login page", async () => {
+    const response = await worker.fetch(
+      new Request("https://studio.example/auth/logout", {
+        headers: {
+          cookie: `greenlight_session=${await edgeInternals.signedValue(
+            `demo@greenlight.studio|${Date.now() + 60_000}`,
+            "a-long-session-secret",
+          )}`,
+        },
+        method: "POST",
+      }),
+      edgeEnv,
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/login");
+    expect(response.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 });

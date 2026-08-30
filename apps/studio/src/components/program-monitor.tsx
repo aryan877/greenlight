@@ -11,7 +11,7 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { type CSSProperties, useRef } from "react";
+import { type CSSProperties, useEffect, useRef } from "react";
 
 import { greenlightApi } from "../api/greenlight.js";
 import type { useMediaController } from "../editor/use-media-controller.js";
@@ -83,14 +83,65 @@ const TransitionOverlay = ({
   );
 };
 
+const TimelineVideo = ({
+  artifactId,
+  source,
+  sceneStartSeconds,
+  timelineTime,
+  playing,
+  playbackRate,
+}: {
+  artifactId: string;
+  source: Scene["source_clip"] | null;
+  sceneStartSeconds: number;
+  timelineTime: number;
+  playing: boolean;
+  playbackRate: number;
+}) => {
+  const ref = useRef<HTMLVideoElement>(null);
+  const sync = () => {
+    const video = ref.current;
+    if (!video || !Number.isFinite(video.duration)) return;
+    const elapsed = Math.max(0, timelineTime - sceneStartSeconds);
+    const expected = source
+      ? source.in_seconds + elapsed * playbackRate
+      : (elapsed * playbackRate) % Math.max(video.duration, 1 / 30);
+    if (Math.abs(video.currentTime - expected) > 0.12) {
+      video.currentTime = Math.min(expected, video.duration);
+    }
+    video.playbackRate = playbackRate;
+    if (playing) void video.play().catch(() => undefined);
+    else video.pause();
+  };
+
+  useEffect(sync, [playing, playbackRate, sceneStartSeconds, timelineTime]);
+
+  return (
+    <video
+      ref={ref}
+      src={greenlightApi.artifactUrl(artifactId)}
+      muted
+      playsInline
+      onLoadedMetadata={sync}
+      className="size-full object-cover"
+    />
+  );
+};
+
 export const SceneCanvas = ({
   scene,
   artifacts,
   captionText,
+  sceneStartSeconds,
+  timelineTime,
+  playing,
 }: {
   scene: Scene;
   artifacts: Artifact[];
   captionText: string | null;
+  sceneStartSeconds: number;
+  timelineTime: number;
+  playing: boolean;
 }) => {
   const visuals = scene.visual.artifact_ids.slice(0, 4);
   const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
@@ -119,18 +170,13 @@ export const SceneCanvas = ({
                 className="grid min-h-0 place-items-center rounded-[7%] bg-[#ecf2ef] p-[9%]"
               >
                 {artifact?.mime_type.startsWith("video/") ? (
-                  <video
-                    src={`${greenlightApi.artifactUrl(visual)}${source ? `#t=${source.in_seconds.toFixed(3)},${source.out_seconds.toFixed(3)}` : ""}`}
-                    muted
-                    loop={!source}
-                    autoPlay
-                    playsInline
-                    onLoadedMetadata={(event) => {
-                      event.currentTarget.playbackRate = source
-                        ? scene.playback_rate
-                        : 1;
-                    }}
-                    className="size-full object-cover"
+                  <TimelineVideo
+                    artifactId={visual}
+                    source={source}
+                    sceneStartSeconds={sceneStartSeconds}
+                    timelineTime={timelineTime}
+                    playing={playing}
+                    playbackRate={source ? scene.playback_rate : 1}
                   />
                 ) : (
                   <img
@@ -172,6 +218,7 @@ export const ProgramMonitor = ({
   poster,
   media,
   duration,
+  sceneStartSeconds,
   timelineOpen,
   previewing,
   previewUsesCanvas,
@@ -186,6 +233,7 @@ export const ProgramMonitor = ({
   poster: Artifact | null;
   media: MediaController;
   duration: number;
+  sceneStartSeconds: number;
   timelineOpen: boolean;
   previewing: boolean;
   previewUsesCanvas: boolean;
@@ -264,6 +312,9 @@ export const ProgramMonitor = ({
               scene={scene}
               artifacts={artifacts}
               captionText={captionText}
+              sceneStartSeconds={sceneStartSeconds}
+              timelineTime={media.currentTime}
+              playing={media.playing}
             />
           ) : duration > 0 ? (
             <div

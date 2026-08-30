@@ -13,7 +13,9 @@ import {
   getArtifactInputSchema,
   idSchema,
   importMediaLibraryAssetInputSchema,
+  isYoutubeReviewPrivacy,
   projectBriefSchema,
+  productionPlanInputSchema,
   publishVideoInputSchema,
   qualityCheckInputSchema,
   qualityReportSchema,
@@ -25,6 +27,7 @@ import {
   stageVideoInputSchema,
   transcribeAudioInputSchema,
   transcriptSchema,
+  type Artifact,
 } from "@greenlight/contracts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { extname } from "node:path";
@@ -63,6 +66,18 @@ const result = (value: unknown) => ({
   structuredContent: value as Record<string, unknown>,
 });
 
+export const agentArtifactReference = (artifact: Artifact) => ({
+  id: artifact.id,
+  project_id: artifact.project_id,
+  kind: artifact.kind,
+  mime_type: artifact.mime_type,
+  byte_size: artifact.byte_size,
+  generation: artifact.generation,
+  provenance: artifact.provenance,
+  created_at: artifact.created_at,
+  workspace_ref: `greenlight://artifacts/${artifact.id}`,
+});
+
 export const captionsFromTimedWords = (
   words: Array<{
     text: string;
@@ -97,6 +112,23 @@ export const buildMcpServer = ({
   const server = new McpServer(
     { name: "greenlight", version: "0.1.0" },
     { capabilities: { tools: {} } },
+  );
+
+  server.registerTool(
+    "update_production_plan",
+    {
+      title: "Update the visible production plan",
+      description:
+        "Show or update one concise creator-facing production plan in the durable TrueForge conversation. Send the complete plan on every update, keep the same plan and step IDs through approvals, and change statuses only when work actually advances.",
+      inputSchema: productionPlanInputSchema.shape,
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (input) => result(productionPlanInputSchema.parse(input)),
   );
 
   server.registerTool(
@@ -288,7 +320,7 @@ export const buildMcpServer = ({
         project,
         current_content_package_artifact_id:
           store.getCurrentContentArtifact(project_id)?.id ?? null,
-        artifacts: store.listArtifacts(project_id),
+        artifacts: store.listArtifacts(project_id).map(agentArtifactReference),
       });
     },
   );
@@ -317,7 +349,10 @@ export const buildMcpServer = ({
         resolved.artifact.mime_type === "application/json"
           ? await artifacts.readJson(request.artifact_id)
           : null;
-      return result({ artifact: resolved.artifact, value });
+      return result({
+        artifact: agentArtifactReference(resolved.artifact),
+        value,
+      });
     },
   );
 
@@ -866,7 +901,7 @@ export const buildMcpServer = ({
     {
       title: "Stage a verified video on YouTube",
       description:
-        "Upload a verified video to the configured YouTube channel as unlisted, attach metadata and thumbnail, and lock an immutable release snapshot.",
+        "Request an unlisted upload of a verified video, attach metadata and thumbnail, and lock the actual private or unlisted YouTube state. New unaudited Google API projects can enforce private staging.",
       inputSchema: stageVideoInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -962,7 +997,7 @@ export const buildMcpServer = ({
           metadata_sha256: hashJson(contentPackage.metadata),
           quality_report_sha256: qualityArtifact.artifact.sha256,
           evidence_ledger_sha256: evidence.artifact.sha256,
-          privacy: "unlisted",
+          privacy: uploaded.privacy,
           created_at: new Date().toISOString(),
         });
         const output = {
@@ -994,7 +1029,7 @@ export const buildMcpServer = ({
     {
       title: "Publish the approved YouTube release",
       description:
-        "Make the exact unlisted release snapshot public. This is externally consequential and must be approved in TrueForge.",
+        "Make the exact private or unlisted review snapshot public. This is externally consequential and must be approved in TrueForge.",
       inputSchema: publishVideoInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -1042,9 +1077,9 @@ export const buildMcpServer = ({
         }
         return result(operation.result);
       }
-      if (release.privacy !== "unlisted") {
-        store.failOperation(operation.id, "release_not_unlisted");
-        throw new Error("release_not_unlisted");
+      if (!isYoutubeReviewPrivacy(release.privacy)) {
+        store.failOperation(operation.id, "release_not_staged");
+        throw new Error("release_not_staged");
       }
       try {
         store.claimRelease(request.youtube_release_id, "publishing");
@@ -1098,7 +1133,7 @@ export const buildMcpServer = ({
     {
       title: "Schedule the approved YouTube release",
       description:
-        "Schedule the exact unlisted release snapshot for public release. This is externally consequential and must be approved in TrueForge.",
+        "Schedule the exact private or unlisted review snapshot for public release. This is externally consequential and must be approved in TrueForge.",
       inputSchema: scheduleVideoInputSchema.shape,
       annotations: {
         readOnlyHint: false,
@@ -1150,9 +1185,9 @@ export const buildMcpServer = ({
         store.failOperation(operation.id, "schedule_time_must_be_future");
         throw new Error("schedule_time_must_be_future");
       }
-      if (release.privacy !== "unlisted") {
-        store.failOperation(operation.id, "release_not_unlisted");
-        throw new Error("release_not_unlisted");
+      if (!isYoutubeReviewPrivacy(release.privacy)) {
+        store.failOperation(operation.id, "release_not_staged");
+        throw new Error("release_not_staged");
       }
       try {
         store.claimRelease(request.youtube_release_id, "scheduling");

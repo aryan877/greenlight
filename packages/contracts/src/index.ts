@@ -78,6 +78,61 @@ export const projectBriefSchema = z.object({
   tone: z.string().trim().min(2).max(80).default("clear, curious, cinematic"),
 });
 
+export const productionPlanStepStatusSchema = z.enum([
+  "pending",
+  "in_progress",
+  "completed",
+  "blocked",
+]);
+
+export const productionPlanInputSchema = z
+  .object({
+    plan_id: z
+      .string()
+      .trim()
+      .min(3)
+      .max(64)
+      .regex(/^[a-z0-9][a-z0-9_-]+$/i),
+    title: z.string().trim().min(3).max(80).default("Production plan"),
+    steps: z
+      .array(
+        z.object({
+          id: z
+            .string()
+            .trim()
+            .min(2)
+            .max(48)
+            .regex(/^[a-z0-9][a-z0-9_-]+$/i),
+          label: z.string().trim().min(3).max(100),
+          status: productionPlanStepStatusSchema,
+        }),
+      )
+      .min(2)
+      .max(7),
+  })
+  .superRefine(({ steps }, context) => {
+    const stepIds = new Set<string>();
+    let activeSteps = 0;
+    for (const [index, step] of steps.entries()) {
+      if (stepIds.has(step.id)) {
+        context.addIssue({
+          code: "custom",
+          path: ["steps", index, "id"],
+          message: "Plan step IDs must be unique",
+        });
+      }
+      stepIds.add(step.id);
+      if (step.status === "in_progress") activeSteps += 1;
+    }
+    if (activeSteps > 1) {
+      context.addIssue({
+        code: "custom",
+        path: ["steps"],
+        message: "Only one production-plan step can be in progress",
+      });
+    }
+  });
+
 export const projectSchema = z.object({
   id: idSchema,
   brief: projectBriefSchema,
@@ -1316,6 +1371,13 @@ export const qualityReportSchema = z.object({
   created_at: z.string().datetime(),
 });
 
+export const youtubeReviewPrivacySchema = z.enum(["private", "unlisted"]);
+
+export const isYoutubeReviewPrivacy = (
+  value: unknown,
+): value is z.infer<typeof youtubeReviewPrivacySchema> =>
+  youtubeReviewPrivacySchema.safeParse(value).success;
+
 export const releaseSnapshotSchema = z.object({
   id: idSchema,
   project_id: idSchema,
@@ -1326,7 +1388,7 @@ export const releaseSnapshotSchema = z.object({
   metadata_sha256: sha256Schema,
   quality_report_sha256: sha256Schema,
   evidence_ledger_sha256: sha256Schema,
-  privacy: z.literal("unlisted"),
+  privacy: youtubeReviewPrivacySchema,
   created_at: z.string().datetime(),
 });
 
@@ -1937,6 +1999,11 @@ export const editorPatchInputSchema = z.object({
 
 export type ProjectStage = z.infer<typeof projectStageSchema>;
 export type ProjectBrief = z.infer<typeof projectBriefSchema>;
+export type YoutubeReviewPrivacy = z.infer<typeof youtubeReviewPrivacySchema>;
+export type ProductionPlanInput = z.infer<typeof productionPlanInputSchema>;
+export type ProductionPlanStepStatus = z.infer<
+  typeof productionPlanStepStatusSchema
+>;
 export type Project = z.infer<typeof projectSchema>;
 export type Source = z.infer<typeof sourceSchema>;
 export type Claim = z.infer<typeof claimSchema>;

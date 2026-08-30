@@ -198,6 +198,8 @@ export const ReleasePanel = ({
   const selectedCandidate = candidateThumbnails.some(
     (candidate) => candidate.id === selectedThumbnailId,
   );
+  const stagedForReview =
+    releasePrivacy === "private" || releasePrivacy === "unlisted";
 
   const connectYouTube = async () => {
     setConnecting(true);
@@ -446,15 +448,19 @@ export const ReleasePanel = ({
           Disclose synthetic media
         </label>
 
-        {releasePrivacy === "unlisted" ? (
+        {stagedForReview ? (
           <div className="px-4 py-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[11px] font-medium text-ink">
-                  Unlisted review is live
+                  {releasePrivacy === "private"
+                    ? "Private review is live"
+                    : "Unlisted review is live"}
                 </p>
                 <p className="mt-0.5 text-[9px] text-ink-tertiary">
-                  Review it before making it public.
+                  {releasePrivacy === "private"
+                    ? "Google is enforcing private staging until this API project is audited."
+                    : "Review it before making it public."}
                 </p>
               </div>
               {releaseStudioUrl ? (
@@ -519,7 +525,7 @@ export const ReleasePanel = ({
         ) : null}
       </div>
 
-      {connection?.connected && releasePrivacy !== "unlisted" ? (
+      {connection?.connected && !releasePrivacy ? (
         <div className="shrink-0 border-t border-line-subtle p-3">
           <button
             type="button"
@@ -532,7 +538,7 @@ export const ReleasePanel = ({
             ) : (
               <YouTubeIcon className="size-[13px]" />
             )}
-            Upload unlisted for review
+            Upload for review
           </button>
           {!selectedCandidate ? (
             <p className="mt-2 text-center text-[9px] text-ink-caption">

@@ -572,10 +572,10 @@ export class GreenlightStore {
   claimRelease(id: string, state: "publishing" | "scheduling"): void {
     const result = this.db
       .prepare(
-        "UPDATE releases SET privacy = ?, updated_at = ? WHERE id = ? AND privacy = 'unlisted'",
+        "UPDATE releases SET privacy = ?, updated_at = ? WHERE id = ? AND privacy IN ('private', 'unlisted')",
       )
       .run(state, now(), id);
-    if (result.changes !== 1) throw new Error("release_not_unlisted");
+    if (result.changes !== 1) throw new Error("release_not_staged");
   }
 
   completeRelease(
@@ -592,11 +592,13 @@ export class GreenlightStore {
   }
 
   rollbackReleaseClaim(id: string, from: "publishing" | "scheduling"): void {
+    const release = this.getRelease(id);
+    if (!release) throw new Error("release_not_found");
     const result = this.db
       .prepare(
-        "UPDATE releases SET privacy = 'unlisted', updated_at = ? WHERE id = ? AND privacy = ?",
+        "UPDATE releases SET privacy = ?, updated_at = ? WHERE id = ? AND privacy = ?",
       )
-      .run(now(), id, from);
+      .run(release.snapshot.privacy, now(), id, from);
     if (result.changes !== 1) throw new Error("release_rollback_failed");
   }
 

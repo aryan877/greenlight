@@ -126,12 +126,6 @@ export const ProjectSwitcher = ({
                         <Clock3 size={10} /> {updatedLabel(project.updated_at)}{" "}
                         · {project.artifact_count} files
                       </span>
-                      <span
-                        className="mt-1 block break-all font-mono text-[8px] leading-3 text-ink-caption"
-                        title={project.workspace_path}
-                      >
-                        {project.workspace_path}
-                      </span>
                     </span>
                   </button>
                 );

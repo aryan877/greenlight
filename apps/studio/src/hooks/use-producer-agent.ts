@@ -18,12 +18,15 @@ import { greenlightKeys } from "../api/query-keys.js";
 
 export type StudioAgentEvent = {
   id: string;
+  turnId?: string;
   kind:
     | "reasoning"
+    | "plan"
     | "subagent"
     | "tool"
     | "artifact"
     | "approval"
+    | "question"
     | "message"
     | "instruction"
     | "system";
@@ -36,6 +39,31 @@ export type StudioAgentEvent = {
   status?: "running" | "done" | "error";
   subagent?: StudioSubagentRun;
   durationMs?: number;
+  tool?: {
+    callId: string;
+    name: string;
+    server: string | null;
+  };
+  approval?: {
+    pending: PendingToolApproval;
+    decision?: {
+      status: "allow" | "deny";
+      label: string;
+      reason?: string;
+    };
+  };
+  question?: {
+    pending: PendingQuestion;
+    answer?: string;
+  };
+  plan?: {
+    title: string;
+    steps: Array<{
+      id: string;
+      label: string;
+      status: "pending" | "in_progress" | "completed" | "blocked";
+    }>;
+  };
 };
 
 export type StudioSubagentStep = {
@@ -71,6 +99,13 @@ export const appendUniqueStudioEvents = (
     ...current.map((item) => {
       const update = updates.get(item.id);
       if (!update) return item;
+      if (item.kind === "plan" && update.kind === "plan") {
+        return {
+          ...item,
+          ...update,
+          ...(item.turnId ? { turnId: item.turnId } : {}),
+        };
+      }
       if (item.kind !== "subagent" || update.kind !== "subagent") {
         return update;
       }
@@ -85,6 +120,15 @@ export const appendUniqueStudioEvents = (
           label: step.label || currentStep?.label || "Working",
         });
       }
+      const settled = update.status && update.status !== "running";
+      const uniqueSteps = new Map<string, StudioSubagentStep>();
+      for (const step of steps.values()) {
+        if (!step.label || step.label === "Working") continue;
+        const key = step.label.toLocaleLowerCase();
+        const next = settled ? { ...step, status: "done" as const } : step;
+        const previous = uniqueSteps.get(key);
+        uniqueSteps.set(key, previous ? { ...previous, ...next } : next);
+      }
       return {
         ...item,
         ...update,
@@ -93,13 +137,29 @@ export const appendUniqueStudioEvents = (
         subagent: {
           threadId: update.subagent?.threadId ?? item.subagent?.threadId ?? "",
           brief: update.subagent?.brief || item.subagent?.brief || "",
-          steps: [...steps.values()],
+          steps: [...uniqueSteps.values()],
           result: update.subagent?.result || item.subagent?.result || "",
         },
       };
     }),
     ...incoming.filter((item) => !currentIds.has(item.id)),
   ];
+};
+
+export const compactStudioEvents = (
+  events: StudioAgentEvent[],
+): StudioAgentEvent[] => {
+  const lastDuplicate = new Map<string, number>();
+  for (const [index, event] of events.entries()) {
+    if (event.kind !== "message") continue;
+    const key = `${event.turnId ?? event.id}:${event.label.trim().toLocaleLowerCase()}`;
+    lastDuplicate.set(key, index);
+  }
+  return events.filter((event, index) => {
+    if (event.kind !== "message") return true;
+    const key = `${event.turnId ?? event.id}:${event.label.trim().toLocaleLowerCase()}`;
+    return lastDuplicate.get(key) === index;
+  });
 };
 
 export type PendingToolApproval = {
@@ -454,6 +514,7 @@ export const describeTurnInput = (
         ? [
             {
               id: `turn-input-${turnId}-${index}`,
+              turnId,
               kind: "instruction" as const,
               label: instruction,
               detail: "",
@@ -468,6 +529,7 @@ export const describeTurnInput = (
       ? [
           {
             id: `turn-input-${turnId}-${index}`,
+            turnId,
             kind: "instruction" as const,
             label: decision,
             detail: "",
@@ -609,29 +671,227 @@ const selectionSceneIds = (args: Record<string, unknown>) =>
     ? ((args.selection as { scene_ids?: string[] }).scene_ids ?? [])
     : [];
 
+type ResolvedToolCall = {
+  id: string;
+  name: string;
+  server: string | null;
+  arguments: Record<string, unknown>;
+};
+
+const resolvedToolCall = (call: ToolCall): ResolvedToolCall => {
+  const outer = parseArguments(call);
+  if (call.function.name === "call_tool") {
+    return {
+      id: call.id,
+      name:
+        typeof outer.tool_name === "string" ? outer.tool_name : "unknown_tool",
+      server: typeof outer.mcp_server === "string" ? outer.mcp_server : null,
+      arguments:
+        outer.input && typeof outer.input === "object"
+          ? (outer.input as Record<string, unknown>)
+          : {},
+    };
+  }
+  const greenlightTools = new Set([
+    "create_project",
+    "get_project",
+    "get_artifact",
+    "get_media_capabilities",
+    "search_media_library",
+    "import_media_library_asset",
+    "save_evidence_ledger",
+    "search_openmoji",
+    "attach_openmoji",
+    "generate_sound_effect",
+    "save_content_package",
+    "apply_editor_patch",
+    "focus_editor_selection",
+    "generate_voice",
+    "transcribe_audio",
+    "correct_transcript",
+    "generate_image",
+    "render_video",
+    "run_quality_checks",
+    "stage_video_unlisted",
+    "publish_video",
+    "schedule_video",
+    "update_production_plan",
+  ]);
+  const exaTools = new Set(["search", "get_contents"]);
+  return {
+    id: call.id,
+    name: call.function.name,
+    server: greenlightTools.has(call.function.name)
+      ? "greenlight"
+      : exaTools.has(call.function.name)
+        ? "exa"
+        : null,
+    arguments: outer,
+  };
+};
+
+const toolDetail = (server: string | null): string =>
+  server
+    ? `${server === "greenlight" ? "Greenlight" : server} MCP`
+    : "TrueForge";
+
+const completedToolLabel = (name: string, current: string): string => {
+  const labels: Record<string, string> = {
+    apply_editor_patch: "Applied the editor change",
+    render_video: "Rendered the finished cut",
+    run_quality_checks: "Checked the finished cut",
+  };
+  return labels[name] ?? current;
+};
+
+export const toolResponseFailure = (event: WireEvent): string | null => {
+  if (event.type !== "tool.response") return null;
+  const explicitlyFailed = event.isError === true || event.is_error === true;
+  let errorText = "";
+  if (typeof event.content === "string") {
+    try {
+      const parsed = JSON.parse(event.content) as Record<string, unknown>;
+      if (parsed.error) errorText = JSON.stringify(parsed.error);
+    } catch {
+      if (explicitlyFailed) errorText = event.content;
+    }
+  }
+  if (!explicitlyFailed && !errorText) return null;
+  if (/outside_selection/i.test(errorText)) {
+    return "The preview did not include its complete scope.";
+  }
+  if (/base_content_package|revision|stale/i.test(errorText)) {
+    return "The production changed before this action could run.";
+  }
+  if (/denied|cancel/i.test(errorText)) {
+    return "The creator stopped this action.";
+  }
+  if (/input validation error/i.test(errorText)) {
+    return "One detail needed a correction before this step could be saved.";
+  }
+  return "This action did not complete.";
+};
+
+const failedToolLabel = (name: string): string => {
+  if (name === "apply_editor_patch") return "Editor change was rejected";
+  if (name === "render_video") return "Render did not complete";
+  if (name === "save_evidence_ledger") return "Adjusted the source record";
+  return "Action did not complete";
+};
+
 const toolPresentation = (
   call: ToolCall,
 ): Omit<StudioAgentEvent, "id"> | null => {
-  const args = parseArguments(call);
+  const resolved = resolvedToolCall(call);
+  const { arguments: args, name, server } = resolved;
   const sceneIds = selectionSceneIds(args);
+  if (name === "update_production_plan") {
+    const steps = Array.isArray(args.steps)
+      ? args.steps.flatMap((candidate) => {
+          if (!candidate || typeof candidate !== "object") return [];
+          const step = candidate as Record<string, unknown>;
+          const status = step.status;
+          if (
+            typeof step.id !== "string" ||
+            typeof step.label !== "string" ||
+            (status !== "pending" &&
+              status !== "in_progress" &&
+              status !== "completed" &&
+              status !== "blocked")
+          ) {
+            return [];
+          }
+          return [
+            {
+              id: step.id,
+              label: step.label,
+              status: status as
+                "pending" | "in_progress" | "completed" | "blocked",
+            },
+          ];
+        })
+      : [];
+    const blocked = steps.some((step) => step.status === "blocked");
+    const completed =
+      steps.length > 0 && steps.every((step) => step.status === "completed");
+    return {
+      kind: "plan",
+      label: typeof args.title === "string" ? args.title : "Production plan",
+      detail: "",
+      sceneIds: [],
+      status: blocked ? "error" : completed ? "done" : "running",
+      plan: {
+        title: typeof args.title === "string" ? args.title : "Production plan",
+        steps,
+      },
+    };
+  }
   const presentations: Record<
     string,
     { kind: StudioAgentEvent["kind"]; label: string; detail?: string }
   > = {
+    create_project: { kind: "artifact", label: "Created the production" },
+    get_project: { kind: "tool", label: "Read the current production" },
+    get_artifact: { kind: "tool", label: "Read managed media" },
+    get_media_capabilities: {
+      kind: "tool",
+      label: "Checked production capabilities",
+    },
+    search_media_library: {
+      kind: "tool",
+      label:
+        args.use === "music"
+          ? "Searched licensed music"
+          : args.use === "sound_effect"
+            ? "Searched licensed sound effects"
+            : "Searched licensed B-roll",
+    },
+    import_media_library_asset: {
+      kind: "artifact",
+      label:
+        args.use === "music"
+          ? "Imported licensed music"
+          : args.use === "sound_effect"
+            ? "Imported a licensed sound effect"
+            : "Imported licensed B-roll",
+    },
     save_evidence_ledger: {
       kind: "artifact",
       label: "Updated the source record",
       detail: `${Array.isArray(args.claims) ? args.claims.length : 0} supported claims kept`,
     },
-    search_openmoji: { kind: "tool", label: "Found visual options" },
-    attach_openmoji: { kind: "artifact", label: "Added a visual" },
+    search_openmoji: { kind: "tool", label: "Searched OpenMoji visuals" },
+    attach_openmoji: { kind: "artifact", label: "Attached an OpenMoji visual" },
+    generate_sound_effect: {
+      kind: "artifact",
+      label: "Generated a sound-effect preview",
+    },
+    save_content_package: { kind: "artifact", label: "Saved the storyboard" },
+    apply_editor_patch: { kind: "tool", label: "Prepared an editor change" },
+    focus_editor_selection: {
+      kind: "tool",
+      label: "Focused the referenced edit",
+    },
     generate_voice: { kind: "artifact", label: "Created the voice track" },
     transcribe_audio: { kind: "artifact", label: "Timed every spoken word" },
     correct_transcript: { kind: "artifact", label: "Corrected the transcript" },
     generate_image: { kind: "artifact", label: "Created a visual" },
+    render_video: { kind: "artifact", label: "Prepared the final render" },
     run_quality_checks: { kind: "tool", label: "Checked the finished cut" },
+    stage_video_unlisted: {
+      kind: "artifact",
+      label: "Uploaded the video for review",
+    },
+    publish_video: { kind: "artifact", label: "Published the video" },
+    schedule_video: { kind: "artifact", label: "Scheduled the video" },
+    search: { kind: "tool", label: "Searched current sources" },
+    get_contents: { kind: "tool", label: "Read source pages" },
+    get_current_datetime: {
+      kind: "tool",
+      label: "Checked source freshness",
+    },
   };
-  if (call.function.name === "save_evidence_ledger") {
+  if (name === "save_evidence_ledger") {
     const sources = Array.isArray(args.sources)
       ? (args.sources as Array<Record<string, unknown>>)
       : [];
@@ -643,6 +903,8 @@ const toolPresentation = (
       label: "Research is ready",
       detail: `${sources.length} references · ${claims.length} checked claims`,
       sceneIds,
+      status: "running",
+      tool: { callId: resolved.id, name, server },
       document: {
         title: "Research",
         subtitle: "The facts behind this production",
@@ -663,7 +925,7 @@ const toolPresentation = (
       },
     };
   }
-  if (call.function.name === "save_content_package") {
+  if (name === "save_content_package") {
     const scenes = Array.isArray(args.scenes)
       ? (args.scenes as Array<Record<string, unknown>>)
       : [];
@@ -676,6 +938,8 @@ const toolPresentation = (
       label: "Storyboard is ready",
       detail: `${scenes.length} scenes · ${String(metadata.title ?? args.headline ?? "Untitled")}`,
       sceneIds,
+      status: "running",
+      tool: { callId: resolved.id, name, server },
       document: {
         title: String(args.headline ?? "Storyboard"),
         subtitle: String(args.dek ?? "Script, scenes, and release copy"),
@@ -699,9 +963,15 @@ const toolPresentation = (
       },
     };
   }
-  const presentation = presentations[call.function.name];
+  const presentation = presentations[name];
   return presentation
-    ? { ...presentation, detail: presentation.detail ?? "", sceneIds }
+    ? {
+        ...presentation,
+        detail: presentation.detail ?? toolDetail(server),
+        sceneIds,
+        status: "running",
+        tool: { callId: resolved.id, name, server },
+      }
     : null;
 };
 
@@ -738,20 +1008,20 @@ const creatorFacingSubagentBrief = (value: string): string => {
     : brief;
 };
 
-const subagentToolLabel = (toolName: string): string | null => {
+const subagentToolLabel = (call: ToolCall): string | null => {
+  const resolved = resolvedToolCall(call);
+  const toolName = resolved.name;
+  if (/get_current_datetime/i.test(toolName)) return "Checked source freshness";
   if (/search|exa/i.test(toolName)) return "Searching the web";
   if (/crawl|fetch|read|contents?/i.test(toolName)) return "Reading a source";
   if (/evidence|claim|source/i.test(toolName)) return "Organizing findings";
   if (/script|story|content_package/i.test(toolName))
     return "Shaping the draft";
   if (/get_project/i.test(toolName)) return "Reading the current project";
-  if (
-    /^(?:exec|call_tool|get_tool_info|get_tool_output_schema|list_tools)$/i.test(
-      toolName,
-    )
-  ) {
+  if (/^(?:get_tool_info|get_tool_output_schema|list_tools)$/i.test(toolName)) {
     return null;
   }
+  if (/^exec$/i.test(toolName)) return "Analyzing the findings";
   return cleanConversationText(toolName.replaceAll("_", " "));
 };
 
@@ -778,19 +1048,109 @@ const subagentResult = (event: WireEvent): string => {
     : result;
 };
 
-const subagentDocument = (
+const cleanDocumentLine = (value: string): string =>
+  cleanConversationText(
+    value
+      .replace(/\bclaim_[a-z0-9_-]+\b\s*,?/gi, "")
+      .replace(/\bclaims?:\s*(?:,\s*)*/gi, "")
+      .replace(/^\s*[•·]\s*/, "")
+      .replace(/\s*[•·]\s*$/g, ""),
+  );
+
+const titleCaseDocumentHeading = (value: string): string => {
+  const clean = cleanDocumentLine(value);
+  return clean === clean.toLocaleUpperCase()
+    ? clean
+        .toLocaleLowerCase()
+        .replace(/\b\p{L}/gu, (letter) => letter.toLocaleUpperCase())
+    : clean;
+};
+
+const scriptField = (block: string, label: string): string => {
+  const match = new RegExp(
+    `(?:\\*\\*)?${label}:(?:\\*\\*)?\\s*([\\s\\S]*?)(?=\\s*(?:[•·]\\s*)?(?:\\*\\*)?(?:Narration|Duration|Claims?|Visual(?: detail)?|Summary):|$)`,
+    "i",
+  ).exec(block);
+  const raw = (match?.[1] ?? "")
+    .trim()
+    .replace(/^\*+|\*+$/g, "")
+    .trim();
+  const wrapped = [
+    ['"', '"'],
+    ["'", "'"],
+    ["“", "”"],
+  ].find(
+    ([opening, closing]) => raw.startsWith(opening!) && raw.endsWith(closing!),
+  );
+  return cleanDocumentLine(wrapped ? raw.slice(1, -1).trim() : raw);
+};
+
+export const scriptReviewDocument = (
   title: string,
   result: string,
 ): StudioReviewDocument | undefined => {
   if (!result || !/script|chapter|story|outline/i.test(title)) return undefined;
-  const lines = result
+  const blocks = result
+    .replace(/```(?:markdown|md)?/gi, "")
+    .replace(/```/g, "")
     .split(/\n{2,}/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+    .map((block) => block.trim())
+    .filter(
+      (block) =>
+        Boolean(block) &&
+        !/^-{3,}$/.test(block) &&
+        !/^part\s+\d+\s*(?:—|–|-).*script/i.test(cleanDocumentLine(block)),
+    );
+  const sceneSections = blocks.flatMap((block) => {
+    const timedScene =
+      /^\s*\*{0,2}(\d+)\.\s*([^\n(]+?)\s*\(([^)]+)\)\*{0,2}\s*(?:—|–|-)?\s*([\s\S]*)$/i.exec(
+        block,
+      );
+    const titledScene =
+      /^\s*#{0,6}\s*\*{0,2}(\d+)\.\s*[A-Z][A-Z\s]*\s*[·—–:-]\s*["“]?([^"”\n]+)["”]?\*{0,2}\s*([\s\S]*)$/i.exec(
+        block,
+      );
+    if (!timedScene && !titledScene) return [];
+    const number = timedScene?.[1] ?? titledScene?.[1] ?? "";
+    const title = timedScene?.[2] ?? titledScene?.[2] ?? "Scene";
+    const body = timedScene?.[4] ?? titledScene?.[3] ?? "";
+    const duration = timedScene?.[3] ?? scriptField(body, "Duration");
+    const narration = scriptField(body, "Narration");
+    const visual =
+      scriptField(body, "Visual detail") || scriptField(body, "Visual");
+    const lines = [
+      narration ? `Narration · ${narration}` : "",
+      visual ? `Visual · ${visual}` : "",
+    ].filter(Boolean);
+    return [
+      {
+        title: [
+          number,
+          titleCaseDocumentHeading(title)
+            .replace(/^["“]|["”]$/g, "")
+            .replace(/\bCta\b/g, "CTA"),
+          cleanDocumentLine(duration),
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        lines,
+      },
+    ];
+  });
+  const summary = blocks
+    .map((block) => scriptField(block, "Summary"))
+    .find(Boolean);
+  const fallbackLines = blocks.map(cleanDocumentLine).filter(Boolean);
   return {
     title: "Script draft",
     subtitle: "Review the chapters and wording before production starts",
-    sections: [{ title, lines }],
+    sections:
+      sceneSections.length > 0
+        ? [
+            ...sceneSections,
+            ...(summary ? [{ title: "Overview", lines: [summary] }] : []),
+          ]
+        : [{ title: titleCaseDocumentHeading(title), lines: fallbackLines }],
   };
 };
 
@@ -826,7 +1186,7 @@ const describeSubagentEvent = (event: WireEvent): StudioAgentEvent[] | null => {
 
   if (type === "model.message") {
     const steps = toolCallsOf(event).flatMap((call) => {
-      const label = subagentToolLabel(call.function.name);
+      const label = subagentToolLabel(call);
       return label ? [{ id: call.id, label, status: "running" as const }] : [];
     });
     return steps.length > 0
@@ -845,25 +1205,7 @@ const describeSubagentEvent = (event: WireEvent): StudioAgentEvent[] | null => {
   }
 
   if (type === "tool.response") {
-    const toolCallId = event.toolCallId ?? event.tool_call_id;
-    return typeof toolCallId === "string"
-      ? [
-          {
-            id: `subagent-${threadId}`,
-            kind: "subagent",
-            label: "Subagent",
-            detail: "Working",
-            sceneIds: [],
-            status: "running",
-            subagent: {
-              threadId,
-              brief: "",
-              steps: [{ id: toolCallId, label: "", status: "done" }],
-              result: "",
-            },
-          },
-        ]
-      : [];
+    return [];
   }
 
   if (type === "thread.done") {
@@ -879,11 +1221,19 @@ const describeSubagentEvent = (event: WireEvent): StudioAgentEvent[] | null => {
         id: `subagent-${threadId}`,
         kind: "subagent",
         label: title,
-        detail: failed ? "Couldn’t finish" : "Done",
+        detail: failed ? "Stopped" : "Done",
         sceneIds: [],
         status: failed ? "error" : "done",
-        subagent: { threadId, brief: "", steps: [], result },
-        document: subagentDocument(title, result),
+        subagent: {
+          threadId,
+          brief: "",
+          steps: [],
+          result:
+            failed && !result
+              ? "This branch stopped before returning findings."
+              : result,
+        },
+        document: scriptReviewDocument(title, result),
       },
     ];
   }
@@ -895,7 +1245,16 @@ const creatorFacingSentence = (value: string): string | null => {
   const content = cleanConversationText(value);
   if (!content) return null;
   if (
-    /\b(?:sandbox|code mode|proxy error|pydantic|mcp tools?|tool protocol|generate_?voice|transcribe_?audio|content package|artifact id|frame rate|30\s?fps|capabilities are wired|jq|on path|the id just needs|technical anchor)\b/i.test(
+    /\b(?:sandbox|code mode|proxy error|pydantic|mcp tools?|tool protocol|tools? greenlight exposes|configured adapter|use=music|generate_?voice|transcribe_?audio|content package|artifact ids?|scene ids?|schemas?|strict-check|frame-grid|frame rate|30\s?fps|rounded display|capabilities are wired|jq|on path|the id just needs|technical anchor)\b/i.test(
+      content,
+    )
+  ) {
+    return null;
+  }
+  if (
+    /^(?:the )?project state is large\.?$/i.test(content) ||
+    /^\d+(?:\.\d+)?s across \d+ scenes?\.?$/i.test(content) ||
+    /^the package is (?:intact|corrected|intact and corrected)\.?$/i.test(
       content,
     )
   ) {
@@ -932,7 +1291,7 @@ const creatorFacingSentence = (value: string): string | null => {
         !/:\s*\d+\.$/.test(sentence) &&
         !/^(?:scene|clip|track)\s+\d+\b/i.test(sentence) &&
         !/^#{1,6}\s/.test(sentence) &&
-        !/(?:\bartifact[_-]?[a-z0-9]+|\bscene_[a-z0-9_-]+|frame math|frames? \d|gapafter|base_content_package|content_package_artifact|sha256|current revision)/i.test(
+        !/(?:\bartifact[_-]?[a-z0-9]+|\bartifact ids?|\bscene_[a-z0-9_-]+|\bscene ids?|schemas?|strict-check|frame math|frame-grid|frame multiples|frames? \d|rounded display|project state is large|^\d+(?:\.\d+)?s across \d+ scenes?|package is (?:intact|corrected)|corrected payload|gapafter|base_content_package|content_package_artifact|sha256|current revision)/i.test(
           sentence,
         ) &&
         !/^(got it|on it|understood|okay|let me|i(?:'ll| will| now)|now i|first[, ]|to begin)/i.test(
@@ -944,7 +1303,7 @@ const creatorFacingSentence = (value: string): string | null => {
 
 export const describeEvent = (
   event: WireEvent,
-  context: { durationMs?: number } = {},
+  context: { durationMs?: number; turnId?: string } = {},
 ): StudioAgentEvent[] => {
   const type = String(event.type ?? "agent.event");
   const childEvent = describeSubagentEvent(event);
@@ -979,10 +1338,26 @@ export const describeEvent = (
     const calls = toolCallsOf(event);
     for (const call of calls) {
       const presentation = toolPresentation(call);
-      if (presentation) output.push({ id: call.id, ...presentation });
+      if (presentation) {
+        const resolved = resolvedToolCall(call);
+        const planId =
+          resolved.name === "update_production_plan" &&
+          typeof resolved.arguments.plan_id === "string"
+            ? resolved.arguments.plan_id
+            : null;
+        output.push({
+          id: planId ? `production-plan-${planId}` : call.id,
+          ...presentation,
+        });
+      }
     }
     const humanSentence = creatorFacingSentence(textContent(event.content));
-    if (humanSentence && (calls.length === 0 || output.length === 0)) {
+    const onlyCreatorQuestions =
+      calls.length > 0 &&
+      calls.every(
+        (call) => resolvedToolCall(call).name === "ask_user_question",
+      );
+    if (humanSentence && (calls.length === 0 || onlyCreatorQuestions)) {
       output.push({
         id: String(event.id ?? crypto.randomUUID()),
         kind: "message",
@@ -1007,6 +1382,7 @@ export const useProducerAgent = (
   const activeProjectId = useRef(projectId);
   const onFocusRef = useRef(onFocus);
   const eventStore = useRef(new Map<string, WireEvent>());
+  const toolCallStore = useRef(new Map<string, ToolCall>());
   const turnCreatedEvents = useRef(new Map<string, WireEvent>());
   const turnCostsInUsd = useRef(new Map<string, number>());
   const outgoingStore = useRef(new Map<string, ProducerSendInput>());
@@ -1042,6 +1418,25 @@ export const useProducerAgent = (
       let durationMs: number | undefined;
       if (sourceTurnId && incoming.type === "turn.created") {
         turnCreatedEvents.current.set(sourceTurnId, incoming);
+        setEvents((current) => {
+          let attachAt = -1;
+          for (let index = current.length - 1; index >= 0; index -= 1) {
+            const item = current[index];
+            if (
+              item?.kind === "instruction" &&
+              !item.turnId &&
+              item.delivery === "sending"
+            ) {
+              attachAt = index;
+              break;
+            }
+          }
+          return attachAt < 0
+            ? current
+            : current.map((item, index) =>
+                index === attachAt ? { ...item, turnId: sourceTurnId } : item,
+              );
+        });
       }
       if (terminal) {
         setActivity(null);
@@ -1077,8 +1472,92 @@ export const useProducerAgent = (
       }
       if (event.id) eventStore.current.set(event.id, event);
 
+      if (event.type === "model.message") {
+        for (const call of toolCallsOf(event)) {
+          toolCallStore.current.set(call.id, call);
+        }
+      }
+
+      if (event.type === "tool.response") {
+        const toolCallId = event.toolCallId ?? event.tool_call_id;
+        if (typeof toolCallId === "string") {
+          const failure = toolResponseFailure(event);
+          setEvents((current) =>
+            current.map((item) =>
+              item.tool?.callId === toolCallId
+                ? failure
+                  ? {
+                      ...item,
+                      label: failedToolLabel(item.tool.name),
+                      detail: failure,
+                      status: "error" as const,
+                    }
+                  : {
+                      ...item,
+                      label: completedToolLabel(item.tool.name, item.label),
+                      status: "done" as const,
+                    }
+                : item,
+            ),
+          );
+        }
+      }
+
       if (event.type === "turn.created") {
         const resolved = new Set(resolvedToolCallIds(event));
+        for (const input of turnInputOf(event)) {
+          if (!input || typeof input !== "object") continue;
+          const decisionInput = input as Record<string, unknown>;
+          if (
+            decisionInput.type === "user.tool_response" &&
+            typeof decisionInput.content === "string"
+          ) {
+            const toolCallId = toolCallIdOfInput(decisionInput);
+            if (toolCallId) {
+              const answer = questionDecisionLabel(decisionInput.content);
+              setEvents((current) =>
+                current.map((item) =>
+                  item.id === `question-${toolCallId}` && item.question
+                    ? {
+                        ...item,
+                        question: { ...item.question, answer },
+                      }
+                    : item,
+                ),
+              );
+            }
+            continue;
+          }
+          if (decisionInput.type !== "user.tool_approval") continue;
+          const toolCallId = toolCallIdOfInput(decisionInput);
+          const approval =
+            decisionInput.approval && typeof decisionInput.approval === "object"
+              ? (decisionInput.approval as Record<string, unknown>)
+              : null;
+          const status = approval?.status;
+          if (!toolCallId || (status !== "allow" && status !== "deny")) {
+            continue;
+          }
+          const reason =
+            typeof approval?.reason === "string" ? approval.reason : undefined;
+          setEvents((current) =>
+            current.map((item) =>
+              item.id === `approval-${toolCallId}` && item.approval
+                ? {
+                    ...item,
+                    approval: {
+                      ...item.approval,
+                      decision: {
+                        status,
+                        label: approvalDecisionLabel(status, reason),
+                        ...(reason ? { reason } : {}),
+                      },
+                    },
+                  }
+                : item,
+            ),
+          );
+        }
         if (resolved.size > 0) {
           setPendingApprovals((current) =>
             current.filter((item) => !resolved.has(item.toolCallId)),
@@ -1101,6 +1580,7 @@ export const useProducerAgent = (
 
       if (event.type === "model.message" && !options.historical) {
         for (const call of toolCallsOf(event)) {
+          const resolved = resolvedToolCall(call);
           const nextActivity: Record<string, string> = {
             get_project: "Checking the current cut…",
             get_artifact: "Reading the selected media…",
@@ -1109,10 +1589,13 @@ export const useProducerAgent = (
             generate_voice: "Generating the voice…",
             generate_image: "Creating the visual…",
             render_video: "Rendering the video…",
+            search_media_library: "Searching licensed media…",
+            import_media_library_asset: "Importing licensed media…",
+            run_quality_checks: "Checking the finished cut…",
           };
-          setActivity(nextActivity[call.function.name] ?? "Working…");
-          if (call.function.name !== "focus_editor_selection") continue;
-          const parsed = editorFocusInputSchema.safeParse(parseArguments(call));
+          setActivity(nextActivity[resolved.name] ?? "Working…");
+          if (resolved.name !== "focus_editor_selection") continue;
+          const parsed = editorFocusInputSchema.safeParse(resolved.arguments);
           if (parsed.success) onFocusRef.current(parsed.data);
         }
       }
@@ -1137,14 +1620,28 @@ export const useProducerAgent = (
 
         if (event.type === "tool.approval_required") {
           setActivity(null);
-          const approvals = resolved.map(({ call }) => ({
-            eventId: String(event.id ?? crypto.randomUUID()),
-            turnId: sourceTurnId,
-            threadId: String(event.threadId ?? event.thread_id ?? "main"),
-            toolCallId: call.id,
-            toolName: call.function.name,
-            arguments: parseArguments(call),
-          }));
+          const approvals = resolved.map(({ call }) => {
+            const tool = resolvedToolCall(call);
+            return {
+              eventId: String(event.id ?? crypto.randomUUID()),
+              turnId: sourceTurnId,
+              threadId: String(event.threadId ?? event.thread_id ?? "main"),
+              toolCallId: call.id,
+              toolName: tool.name,
+              arguments: tool.arguments,
+            };
+          });
+          appendEvents(
+            approvals.map((pending) => ({
+              id: `approval-${pending.toolCallId}`,
+              turnId: sourceTurnId,
+              kind: "approval" as const,
+              label: "Review before continuing",
+              detail: "",
+              sceneIds: [],
+              approval: { pending },
+            })),
+          );
           setPendingApprovals((current) => [
             ...current.filter(
               (item) =>
@@ -1161,6 +1658,17 @@ export const useProducerAgent = (
             eventStore.current,
             sourceTurnId,
           );
+          appendEvents(
+            questions.map((pending) => ({
+              id: `question-${pending.toolCallId}`,
+              turnId: sourceTurnId,
+              kind: "question" as const,
+              label: "Creator input required",
+              detail: "",
+              sceneIds: [],
+              question: { pending },
+            })),
+          );
           setPendingQuestions((current) => [
             ...current.filter(
               (item) =>
@@ -1173,7 +1681,15 @@ export const useProducerAgent = (
         }
       }
 
-      appendEvents(describeEvent(event, { durationMs }));
+      appendEvents(
+        describeEvent(event, {
+          durationMs,
+          ...(sourceTurnId ? { turnId: sourceTurnId } : {}),
+        }).map((described) => ({
+          ...described,
+          ...(sourceTurnId ? { turnId: sourceTurnId } : {}),
+        })),
+      );
       return event;
     },
     [appendEvents],
@@ -1195,6 +1711,7 @@ export const useProducerAgent = (
       if (activeProjectId.current !== historyProjectId) return [];
 
       eventStore.current.clear();
+      toolCallStore.current.clear();
       turnCreatedEvents.current.clear();
       turnCostsInUsd.current.clear();
       setEvents([]);
@@ -1370,13 +1887,14 @@ export const useProducerAgent = (
     activeProjectId.current = projectId;
     sessionId.current = null;
     eventStore.current.clear();
+    toolCallStore.current.clear();
     turnCreatedEvents.current.clear();
     turnCostsInUsd.current.clear();
     outgoingStore.current.clear();
     setEvents([]);
     setPendingApprovals([]);
     setPendingQuestions([]);
-    setActivity(null);
+    setActivity(projectId ? "Restoring the Producer thread…" : null);
     setSessionCostInUsd(null);
     setIsRestoring(Boolean(projectId));
     if (!projectId) return;
@@ -1513,6 +2031,9 @@ export const useProducerAgent = (
       .finally(() => {
         if (!cancelled && activeProjectId.current === projectId) {
           setIsRestoring(false);
+          setActivity((current) =>
+            current === "Restoring the Producer thread…" ? null : current,
+          );
         }
       });
     return () => {
@@ -1837,7 +2358,7 @@ export const useProducerAgent = (
 
   return {
     activity,
-    events,
+    events: compactStudioEvents(events),
     pendingApprovals,
     pendingQuestions,
     sessionCostInUsd,

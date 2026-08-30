@@ -22,11 +22,24 @@
         "disable_tools": [],
         "preload": false,
         "preload_tools": [
+          "update_production_plan",
           "create_project",
           "get_project",
           "get_artifact",
+          "get_media_capabilities",
+          "search_media_library",
+          "import_media_library_asset",
+          "search_openmoji",
+          "attach_openmoji",
+          "save_evidence_ledger",
+          "save_content_package",
           "apply_editor_patch",
-          "focus_editor_selection"
+          "focus_editor_selection",
+          "generate_image",
+          "generate_voice",
+          "transcribe_audio",
+          "render_video",
+          "run_quality_checks"
         ],
         "require_approval_for_tools": [
           "apply_editor_patch",

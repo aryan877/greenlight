@@ -14,7 +14,6 @@ import {
   Captions,
   Check,
   ChevronDown,
-  CircleDot,
   Film,
   Image as ImageIcon,
   Layers3,
@@ -25,9 +24,7 @@ import {
   RotateCcw,
   Search,
   Square,
-  SlidersHorizontal,
   Split,
-  Sparkles,
   FileText,
   X,
 } from "lucide-react";
@@ -50,16 +47,6 @@ import { shouldSubmitProducerInstruction } from "../editor/producer-composer.js"
 import type { ProducerDraftIntent } from "../editor/producer-draft.js";
 import { cx } from "./controls.js";
 import { PromptLibraryModal } from "./prompt-library-modal.js";
-
-const eventIcon: Partial<
-  Record<StudioAgentEvent["kind"], typeof SlidersHorizontal>
-> = {
-  reasoning: Sparkles,
-  subagent: Search,
-  tool: SlidersHorizontal,
-  artifact: Film,
-  approval: CircleDot,
-};
 
 const formatReplyDuration = (durationMs: number) =>
   `${(durationMs / 1_000).toFixed(1)}s`;
@@ -194,7 +181,7 @@ const SubagentCard = ({
 
   const run = event.subagent;
   return (
-    <section className="ml-8 w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-line bg-surface-sunken">
+    <section className="w-full overflow-hidden rounded-lg border border-line bg-surface">
       <button
         type="button"
         aria-expanded={open}
@@ -206,7 +193,7 @@ const SubagentCard = ({
           <span className="block text-[10px] text-track-voice-strong">
             Subagent
           </span>
-          <strong className="mt-0.5 block truncate text-[13px] font-medium leading-5 text-ink">
+          <strong className="mt-0.5 line-clamp-2 block text-[12px] font-medium leading-5 text-ink">
             {event.label}
           </strong>
         </span>
@@ -461,8 +448,25 @@ export const approvalCopy = (
           (operation.track as Record<string, unknown> | undefined)?.role ===
             "narration"),
     );
-    const updatesVisuals = operations.some(
-      (operation) => operation.visual !== undefined,
+    const videoTracks = operations
+      .filter((operation) => operation.type === "upsert_video_track")
+      .map((operation) => operation.track)
+      .filter(
+        (track): track is Record<string, unknown> =>
+          Boolean(track) && typeof track === "object",
+      );
+    const videoClipCount = videoTracks.reduce(
+      (count, track) =>
+        count + (Array.isArray(track.clips) ? track.clips.length : 0),
+      0,
+    );
+    const updatesVisuals =
+      videoTracks.length > 0 ||
+      operations.some((operation) => operation.visual !== undefined);
+    const transitionOperations = operations.filter(
+      (operation) =>
+        operation.type === "upsert_transition_track" ||
+        operation.type === "update_transition_clip",
     );
     const audioTracks = operations
       .filter((operation) => operation.type === "upsert_audio_track")
@@ -473,6 +477,47 @@ export const approvalCopy = (
       );
     const dubTrack = audioTracks.find((track) => track.role === "dub");
     const musicTrack = audioTracks.find((track) => track.role === "music");
+    const thumbnailCount = operations.reduce((count, operation) => {
+      if (operation.type !== "update_release") return count;
+      const release = operation.release;
+      if (!release || typeof release !== "object") return count;
+      const candidates = (release as Record<string, unknown>)
+        .thumbnail_candidate_artifact_ids;
+      return Math.max(count, Array.isArray(candidates) ? candidates.length : 0);
+    }, 0);
+    if (transitionOperations.length > 0) {
+      const transitionCount = transitionOperations.reduce(
+        (count, operation) => {
+          if (operation.type !== "upsert_transition_track") return count + 1;
+          const track = operation.track;
+          if (!track || typeof track !== "object") return count;
+          const clips = (track as Record<string, unknown>).clips;
+          return count + (Array.isArray(clips) ? clips.length : 0);
+        },
+        0,
+      );
+      if (musicTrack || thumbnailCount > 0) {
+        const additions = [
+          `${transitionCount} ${transitionCount === 1 ? "transition" : "transitions"}`,
+          ...(musicTrack ? ["a quiet ducked music bed"] : []),
+          ...(thumbnailCount > 0
+            ? [
+                `${thumbnailCount} ${thumbnailCount === 1 ? "thumbnail" : "thumbnail candidates"}`,
+              ]
+            : []),
+        ];
+        return {
+          title: "Polish the locked cut",
+          detail: `Add ${additions.join(", ")}. Scene timing, narration, and captions stay unchanged.`,
+          action: "Apply polish",
+        };
+      }
+      return {
+        title: `Add ${transitionCount} subtle ${transitionCount === 1 ? "transition" : "transitions"}`,
+        detail: `Place them on the ${transitionCount} real ${transitionCount === 1 ? "cut" : "cuts"}. Scene timing, narration, captions, and release stay unchanged.`,
+        action: "Add transitions",
+      };
+    }
     for (const operation of operations) {
       if (operation.title !== undefined) fields.add("title");
       if (operation.claim_ids !== undefined) fields.add("sources");
@@ -519,6 +564,14 @@ export const approvalCopy = (
         detail:
           "Place one licensed music bed under the full cut, keep speech clear with ducking, and leave every video cut unchanged.",
         action: "Add music",
+      };
+    }
+    if (updatesNarration && updatesVisuals) {
+      const count = sceneIds.length || content?.scenes.length || 1;
+      return {
+        title: `Build the complete ${count}-scene cut`,
+        detail: `Place ${videoClipCount || "the"} licensed B-roll ${videoClipCount === 1 ? "clip" : "clips"}, add the chosen narration and measured captions, and keep the release unchanged.`,
+        action: "Build cut",
       };
     }
     if (updatesNarration) {
@@ -661,9 +714,10 @@ export const approvalCopy = (
   }
   if (pending.toolName === "stage_video_unlisted") {
     return {
-      title: "Upload to YouTube as unlisted",
-      detail: "Only people with the link will be able to watch it.",
-      action: "Upload unlisted",
+      title: "Upload to YouTube for review",
+      detail:
+        "Greenlight requests unlisted. Google may keep a new API project's upload private until it is audited.",
+      action: "Upload for review",
     };
   }
   if (pending.toolName === "publish_video") {
@@ -692,30 +746,51 @@ const ApprovalCard = ({
   content,
   artifacts,
   busy,
+  decision,
   onDecision,
 }: {
   pending: PendingToolApproval;
   content: ContentPackage | null;
   artifacts: Artifact[];
   busy: boolean;
+  decision?: NonNullable<NonNullable<StudioAgentEvent["approval"]>["decision"]>;
   onDecision: (status: "allow" | "deny", reason?: string) => void;
 }) => {
   const copy = approvalCopy(pending, content, artifacts);
   const [refining, setRefining] = useState(false);
   const [reason, setReason] = useState("");
   return (
-    <div className="mx-3 my-4 overflow-hidden rounded-lg border border-line bg-surface-raised p-4 shadow-sm">
-      <div>
-        <div className="flex items-center gap-2 text-[10px] font-medium text-action">
-          Review before continuing
+    <section className="overflow-hidden rounded-lg border border-line bg-surface">
+      <div className="px-3.5 py-3">
+        <div className="flex items-center gap-2 text-[10px] font-medium text-ink-tertiary">
+          {decision ? "Decision recorded" : "Your approval is required"}
+          {decision ? (
+            <span
+              className={cx(
+                "ml-auto inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-medium",
+                decision.status === "allow"
+                  ? "bg-action-soft text-action"
+                  : "bg-warning-soft text-warning",
+              )}
+            >
+              {decision.status === "allow" ? <Check size={10} /> : null}
+              {decision.label}
+            </span>
+          ) : null}
         </div>
-        <p className="mt-2 text-[14px] font-medium leading-5 text-ink">
+        <p className="mt-1.5 text-[13px] font-medium leading-5 text-ink">
           {copy.title}
         </p>
-        <p className="mt-1 text-[12px] leading-5 text-ink-tertiary">
+        <p className="mt-0.5 text-[11px] leading-5 text-ink-tertiary">
           {copy.detail}
         </p>
-        {refining ? (
+        {decision ? (
+          decision.reason ? (
+            <p className="mt-2 border-l-2 border-warning pl-2 text-[11px] leading-5 text-ink-secondary">
+              {decision.reason}
+            </p>
+          ) : null
+        ) : refining ? (
           <div className="mt-3">
             <textarea
               autoFocus
@@ -729,7 +804,7 @@ const ApprovalCard = ({
               <button
                 type="button"
                 onClick={() => setRefining(false)}
-                className="h-8 rounded-lg px-2 text-[11px] text-ink-tertiary hover:text-ink"
+                className="h-8 rounded-md px-2 text-[11px] text-ink-tertiary hover:bg-hover hover:text-ink"
               >
                 Back
               </button>
@@ -737,20 +812,20 @@ const ApprovalCard = ({
                 type="button"
                 disabled={!reason.trim() || busy}
                 onClick={() => onDecision("deny", reason.trim())}
-                className="h-8 rounded-lg bg-control px-3 text-[11px] font-medium text-control-ink disabled:opacity-30"
+                className="h-8 rounded-md bg-control px-3 text-[11px] font-medium text-control-ink disabled:opacity-30"
               >
                 Send changes
               </button>
             </div>
           </div>
         ) : (
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line-subtle pt-3">
             {!copy.blocked ? (
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => onDecision("allow")}
-                className="flex h-9 flex-1 items-center justify-center gap-1.5 border border-action bg-action-soft text-[12px] font-medium text-action hover:bg-action-soft/70 disabled:opacity-40"
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-control px-3 text-[11px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-40"
               >
                 <Check size={13} /> {copy.action}
               </button>
@@ -760,22 +835,467 @@ const ApprovalCard = ({
               disabled={busy}
               onClick={() => setRefining(true)}
               className={cx(
-                "h-9 rounded-lg border border-line bg-surface px-3 text-[11px] text-ink-secondary hover:bg-hover disabled:opacity-40",
+                "h-8 rounded-md border border-line bg-surface px-3 text-[11px] text-ink-secondary hover:bg-hover disabled:opacity-40",
                 copy.blocked && "flex-1",
               )}
             >
-              {copy.blocked ? "Rebuild" : "Change"}
+              {copy.blocked ? "Rebuild preview" : "Request changes"}
             </button>
             <button
               type="button"
               disabled={busy}
               onClick={() => onDecision("deny", "Cancelled by the creator.")}
-              className="h-9 rounded-lg px-1.5 text-[11px] text-ink-tertiary hover:bg-hover hover:text-ink disabled:opacity-40"
+              className="h-8 rounded-md px-2 text-[11px] text-ink-tertiary hover:bg-hover hover:text-ink disabled:opacity-40"
             >
               Cancel
             </button>
           </div>
         )}
+      </div>
+    </section>
+  );
+};
+
+type ProducerConversationBlock =
+  | { kind: "event"; event: StudioAgentEvent }
+  | {
+      kind: "turn";
+      id: string;
+      turnId?: string;
+      events: StudioAgentEvent[];
+    };
+
+export const groupProducerEvents = (
+  events: StudioAgentEvent[],
+): ProducerConversationBlock[] => {
+  const blocks: ProducerConversationBlock[] = [];
+  for (const event of events) {
+    const belongsToGreenlight = !["instruction", "system"].includes(event.kind);
+    const previous = blocks.at(-1);
+    if (
+      belongsToGreenlight &&
+      previous?.kind === "turn" &&
+      previous.turnId === event.turnId &&
+      Boolean(event.turnId)
+    ) {
+      previous.events.push(event);
+      continue;
+    }
+    blocks.push(
+      belongsToGreenlight
+        ? {
+            kind: "turn",
+            id: `turn-${event.turnId ?? event.id}`,
+            ...(event.turnId ? { turnId: event.turnId } : {}),
+            events: [event],
+          }
+        : { kind: "event", event },
+    );
+  }
+  return blocks;
+};
+
+export const groupExecutionEvents = (
+  events: StudioAgentEvent[],
+): Array<{ event: StudioAgentEvent; count: number }> => {
+  const rows: Array<{ event: StudioAgentEvent; count: number }> = [];
+  const grouped = new Map<string, number>();
+  const visibleEvents = events.filter((event, index) => {
+    const failedTool = event.tool;
+    if (!failedTool || event.status !== "error") return true;
+    return !events
+      .slice(index + 1)
+      .some(
+        (candidate) =>
+          candidate.tool?.name === failedTool.name &&
+          candidate.tool.server === failedTool.server &&
+          candidate.status === "done",
+      );
+  });
+  for (const event of visibleEvents) {
+    if (!event.tool) {
+      rows.push({ event, count: 1 });
+      continue;
+    }
+    const key = [
+      event.tool.server ?? "trueforge",
+      event.tool.name,
+      event.label,
+      event.detail,
+    ].join(":");
+    const rowIndex = grouped.get(key);
+    if (rowIndex === undefined) {
+      grouped.set(key, rows.length);
+      rows.push({ event, count: 1 });
+      continue;
+    }
+    const row = rows[rowIndex]!;
+    rows[rowIndex] = {
+      event: {
+        ...row.event,
+        status:
+          row.event.status === "running" || event.status === "running"
+            ? "running"
+            : event.status,
+      },
+      count: row.count + 1,
+    };
+  }
+  return rows;
+};
+
+const ExecutionStepsCard = ({
+  events,
+  content,
+  artifacts,
+  busy,
+  onApproval,
+  onOpenDocument,
+}: {
+  events: StudioAgentEvent[];
+  content: ContentPackage | null;
+  artifacts: Artifact[];
+  busy: boolean;
+  onApproval: (
+    pending: PendingToolApproval,
+    status: "allow" | "deny",
+    reason?: string,
+  ) => void;
+  onOpenDocument: (document: StudioReviewDocument) => void;
+}) => {
+  const active = events.some(
+    (event) =>
+      event.status === "running" ||
+      (event.kind === "approval" && !event.approval?.decision),
+  );
+  const hasReviewDocument = events.some((event) => Boolean(event.document));
+  const [open, setOpen] = useState(active || hasReviewDocument);
+  const wasActive = useRef(active);
+  useEffect(() => {
+    if (active || hasReviewDocument) setOpen(true);
+    else if (wasActive.current) setOpen(false);
+    wasActive.current = active;
+  }, [active, hasReviewDocument]);
+  const toolCount = events.filter((event) => Boolean(event.tool)).length;
+  const subagentCount = events.filter(
+    (event) => event.kind === "subagent",
+  ).length;
+  const decisionCount = events.filter(
+    (event) => event.kind === "approval" || event.kind === "question",
+  ).length;
+  const visibleEvents = groupExecutionEvents(events);
+  const counts = [
+    toolCount ? `${toolCount} ${toolCount === 1 ? "tool" : "tools"}` : "",
+    subagentCount
+      ? `${subagentCount} ${subagentCount === 1 ? "subagent" : "subagents"}`
+      : "",
+    decisionCount
+      ? `${decisionCount} ${decisionCount === 1 ? "decision" : "decisions"}`
+      : "",
+  ].filter(Boolean);
+
+  return (
+    <section className="w-full overflow-hidden rounded-lg border border-line bg-surface-sunken">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left hover:bg-hover"
+      >
+        {active ? (
+          <LoaderCircle
+            size={13}
+            className="shrink-0 animate-spin text-action"
+          />
+        ) : (
+          <Check size={13} className="shrink-0 text-action" />
+        )}
+        <strong className="text-[11px] font-medium text-ink">
+          Producer steps
+        </strong>
+        <span className="min-w-0 flex-1 truncate text-[10px] text-ink-tertiary">
+          {counts.join(" · ")}
+        </span>
+        <ChevronDown
+          size={13}
+          className={cx(
+            "shrink-0 text-ink-tertiary transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open ? (
+        <div className="space-y-2 border-t border-line-subtle p-2.5">
+          {visibleEvents.map(({ event, count }) => {
+            if (event.kind === "subagent") {
+              return (
+                <SubagentCard
+                  key={event.id}
+                  event={event}
+                  onOpenDocument={onOpenDocument}
+                />
+              );
+            }
+            if (event.kind === "approval" && event.approval) {
+              return (
+                <ApprovalCard
+                  key={event.id}
+                  pending={event.approval.pending}
+                  content={content}
+                  artifacts={artifacts}
+                  busy={busy}
+                  decision={event.approval.decision}
+                  onDecision={(status, reason) =>
+                    onApproval(event.approval!.pending, status, reason)
+                  }
+                />
+              );
+            }
+            if (event.kind === "question" && event.question) {
+              return event.question.answer ? (
+                <section
+                  key={event.id}
+                  className="rounded-lg border border-line bg-surface px-3.5 py-3"
+                >
+                  <div className="flex items-center gap-2 text-[10px] font-medium text-ink-tertiary">
+                    Answer recorded
+                    <span className="ml-auto inline-flex max-w-[55%] truncate rounded-md bg-action-soft px-2 py-0.5 text-action">
+                      {event.question.answer}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 text-[12px] leading-5 text-ink-secondary">
+                    {event.question.pending.question}
+                  </p>
+                </section>
+              ) : null;
+            }
+            const eventArtifact = event.artifactId
+              ? artifacts.find((artifact) => artifact.id === event.artifactId)
+              : null;
+            return (
+              <div
+                key={event.id}
+                className="flex min-w-0 items-start gap-2.5 rounded-md px-2 py-1.5"
+              >
+                {event.status === "running" ? (
+                  <LoaderCircle
+                    size={12}
+                    className="mt-0.5 shrink-0 animate-spin text-action"
+                  />
+                ) : event.status === "error" ? (
+                  <X size={12} className="mt-0.5 shrink-0 text-warning" />
+                ) : (
+                  <Check size={12} className="mt-0.5 shrink-0 text-action" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-[11px] font-medium text-ink-secondary">
+                      {event.label}
+                    </span>
+                    {count > 1 ? (
+                      <span className="shrink-0 font-mono text-[9px] text-ink-caption">
+                        ×{count}
+                      </span>
+                    ) : null}
+                    {event.tool ? (
+                      <span className="ml-auto shrink-0 rounded-md border border-line px-1.5 py-0.5 text-[9px] text-ink-tertiary">
+                        {event.tool.server
+                          ? `${event.tool.server === "greenlight" ? "Greenlight" : event.tool.server} MCP`
+                          : "TrueForge"}
+                      </span>
+                    ) : null}
+                  </div>
+                  {event.detail &&
+                  !/^(?:TrueForge|(?:Greenlight|Exa) MCP)$/.test(
+                    event.detail,
+                  ) ? (
+                    <p className="mt-0.5 line-clamp-2 text-[10px] leading-4 text-ink-tertiary">
+                      {event.detail}
+                    </p>
+                  ) : null}
+                  {event.document ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpenDocument(event.document!)}
+                      className="mt-1 text-[10px] font-medium text-action hover:underline"
+                    >
+                      Review document
+                    </button>
+                  ) : null}
+                  {eventArtifact ? (
+                    <a
+                      href={greenlightApi.artifactUrl(eventArtifact.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 block text-[10px] font-medium text-action hover:underline"
+                    >
+                      Open media
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </section>
+  );
+};
+
+const ProductionPlanCard = ({ event }: { event: StudioAgentEvent }) => {
+  const plan = event.plan;
+  if (!plan || plan.steps.length === 0) return null;
+  const completed = plan.steps.filter(
+    (step) => step.status === "completed",
+  ).length;
+  const allDone = completed === plan.steps.length;
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-line bg-surface">
+      <div className="flex items-center gap-2 border-b border-line-subtle px-3.5 py-2.5">
+        {allDone ? (
+          <Check size={14} className="shrink-0 text-action" />
+        ) : (
+          <LoaderCircle
+            size={14}
+            className="shrink-0 animate-spin text-action"
+          />
+        )}
+        <strong className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">
+          {plan.title}
+        </strong>
+        <span className="font-mono text-[10px] text-ink-tertiary">
+          {completed}/{plan.steps.length}
+        </span>
+      </div>
+      <ol className="px-3.5 py-2.5">
+        {plan.steps.map((step) => (
+          <li
+            key={step.id}
+            className="flex min-h-7 items-center gap-2.5 text-[11px]"
+          >
+            {step.status === "completed" ? (
+              <span className="grid size-4 shrink-0 place-items-center rounded-full bg-action-soft text-action">
+                <Check size={10} strokeWidth={2.5} />
+              </span>
+            ) : step.status === "in_progress" ? (
+              <span className="grid size-4 shrink-0 place-items-center rounded-full border border-action">
+                <span className="size-1.5 animate-pulse rounded-full bg-action" />
+              </span>
+            ) : step.status === "blocked" ? (
+              <span className="grid size-4 shrink-0 place-items-center rounded-full border border-warning text-warning">
+                <X size={10} strokeWidth={2.5} />
+              </span>
+            ) : (
+              <span className="size-4 shrink-0 rounded-full border border-line-strong" />
+            )}
+            <span
+              className={cx(
+                "min-w-0 flex-1",
+                step.status === "completed"
+                  ? "text-ink-secondary"
+                  : step.status === "pending"
+                    ? "text-ink-tertiary"
+                    : step.status === "blocked"
+                      ? "text-warning"
+                      : "font-medium text-ink",
+              )}
+            >
+              {step.label}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+};
+
+const ProducerTurn = ({
+  block,
+  activity,
+  content,
+  artifacts,
+  busy,
+  onApproval,
+  onOpenDocument,
+}: {
+  block: Extract<ProducerConversationBlock, { kind: "turn" }>;
+  activity: string | null;
+  content: ContentPackage | null;
+  artifacts: Artifact[];
+  busy: boolean;
+  onApproval: (
+    pending: PendingToolApproval,
+    status: "allow" | "deny",
+    reason?: string,
+  ) => void;
+  onOpenDocument: (document: StudioReviewDocument) => void;
+}) => {
+  const segments: Array<
+    | { kind: "message"; event: StudioAgentEvent }
+    | { kind: "plan"; event: StudioAgentEvent }
+    | { kind: "steps"; id: string; events: StudioAgentEvent[] }
+  > = [];
+  for (const event of block.events) {
+    if (event.kind === "message") {
+      segments.push({ kind: "message", event });
+      continue;
+    }
+    if (event.kind === "plan") {
+      segments.push({ kind: "plan", event });
+      continue;
+    }
+    const previous = segments.at(-1);
+    if (previous?.kind === "steps") {
+      previous.events.push(event);
+    } else {
+      segments.push({
+        kind: "steps",
+        id: `steps-${event.id}`,
+        events: [event],
+      });
+    }
+  }
+  const running = block.events.some((event) => event.status === "running");
+
+  return (
+    <div className="grid grid-cols-[20px_minmax(0,1fr)] gap-3 py-1">
+      <AgentMark thinking={running && Boolean(activity)} />
+      <div className="min-w-0 space-y-2.5">
+        {segments.map((segment) =>
+          segment.kind === "message" ? (
+            <div key={segment.event.id}>
+              <p className="whitespace-pre-wrap text-[14px] leading-6 text-ink">
+                {segment.event.label}
+              </p>
+              {segment.event.durationMs === undefined ? null : (
+                <span
+                  className="mt-1 block font-mono text-[10px] text-ink-secondary"
+                  title={`Completed in ${formatReplyDuration(segment.event.durationMs)}`}
+                >
+                  {formatReplyDuration(segment.event.durationMs)}
+                </span>
+              )}
+            </div>
+          ) : segment.kind === "plan" ? (
+            <ProductionPlanCard key={segment.event.id} event={segment.event} />
+          ) : (
+            <ExecutionStepsCard
+              key={segment.id}
+              events={segment.events}
+              content={content}
+              artifacts={artifacts}
+              busy={busy}
+              onApproval={onApproval}
+              onOpenDocument={onOpenDocument}
+            />
+          ),
+        )}
+        {activity ? (
+          <p className="agent-thinking text-[11px] text-ink-tertiary">
+            {activity}
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -797,7 +1317,7 @@ const ReviewDocument = ({
       if (event.target === event.currentTarget) onClose();
     }}
   >
-    <article className="flex max-h-[78vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-float">
+    <article className="flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-float">
       <header className="flex items-start border-b border-line-subtle px-6 py-5">
         <div>
           <h2 className="text-[17px] font-medium tracking-[-0.02em] text-ink">
@@ -816,24 +1336,39 @@ const ReviewDocument = ({
           <X size={14} />
         </button>
       </header>
-      <div className="scroll-stable min-h-0 overflow-y-auto px-6 py-2">
+      <div className="scroll-stable min-h-0 overflow-y-auto bg-surface-sunken px-6 py-5">
         {document.sections.map((section) => (
           <section
             key={section.title}
-            className="border-b border-line-subtle py-5 last:border-0"
+            className="mb-3 border border-line bg-surface px-4 py-4 last:mb-0"
           >
-            <h3 className="text-[10px] font-medium text-ink">
+            <h3 className="font-mono text-[10px] font-medium uppercase tracking-[0.08em] text-action">
               {section.title}
             </h3>
-            <div className="mt-3 space-y-3">
-              {section.lines.map((line, index) => (
-                <p
-                  key={`${section.title}-${index}`}
-                  className="text-[11px] leading-5 text-ink-secondary"
-                >
-                  {line}
-                </p>
-              ))}
+            <div className="mt-3 divide-y divide-line-subtle">
+              {section.lines.map((line, index) => {
+                const field = /^(Narration|Visual) · ([\s\S]+)$/.exec(line);
+                return (
+                  <div
+                    key={`${section.title}-${index}`}
+                    className="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-[76px_minmax(0,1fr)] sm:gap-4"
+                  >
+                    {field ? (
+                      <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-caption">
+                        {field[1]}
+                      </span>
+                    ) : null}
+                    <p
+                      className={cx(
+                        "text-[13px] leading-6 text-ink-secondary",
+                        !field && "sm:col-span-2",
+                      )}
+                    >
+                      {field?.[2] ?? line}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
           </section>
         ))}
@@ -1107,6 +1642,7 @@ export const ProducerPanel = ({
   const [openDocument, setOpenDocument] = useState<StudioReviewDocument | null>(
     null,
   );
+  const autoOpenedDocumentRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectionScrollRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
@@ -1175,9 +1711,24 @@ export const ProducerPanel = ({
       ?.slice(0, 220) ??
     "Every edit stays intentional, reversible, and ready to share.";
   const isVoiceQuestion = (pending: PendingQuestion) =>
-    /\b(?:choose|pick|select|audition)\b.{0,80}\b(?:voice|speaker)\b|\b(?:voice|speaker)\b.{0,80}\b(?:choose|pick|select|audition)\b/i.test(
+    /\b(?:choose|pick|select|audition)\b.{0,80}\b(?:voice|speaker|narrator)\b|\b(?:voice|speaker|narrator)\b.{0,80}\b(?:choose|pick|select|audition)\b|\b(?:which|what)\b.{0,80}\b(?:voice|speaker|narrator)\b|\bnarrator voice\b/i.test(
       pending.question,
     );
+  const conversationBlocks = groupProducerEvents(events);
+  const pendingScriptDocument = [...events]
+    .reverse()
+    .find((event) => event.document?.title === "Script draft");
+  useEffect(() => {
+    if (
+      !pendingScriptDocument?.document ||
+      pendingQuestions.length === 0 ||
+      autoOpenedDocumentRef.current === pendingScriptDocument.id
+    ) {
+      return;
+    }
+    autoOpenedDocumentRef.current = pendingScriptDocument.id;
+    setOpenDocument(pendingScriptDocument.document);
+  }, [pendingQuestions.length, pendingScriptDocument]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1198,7 +1749,24 @@ export const ProducerPanel = ({
           <div className="h-full" />
         ) : (
           <div className="mx-auto w-full max-w-[680px] space-y-3">
-            {events.map((event) => {
+            {conversationBlocks.map((block, index) => {
+              if (block.kind === "turn") {
+                return (
+                  <ProducerTurn
+                    key={block.id}
+                    block={block}
+                    activity={
+                      index === conversationBlocks.length - 1 ? activity : null
+                    }
+                    content={content}
+                    artifacts={artifacts}
+                    busy={isApproving}
+                    onApproval={onApproval}
+                    onOpenDocument={setOpenDocument}
+                  />
+                );
+              }
+              const event = block.event;
               if (event.kind === "instruction") {
                 return (
                   <CreatorMessage
@@ -1222,95 +1790,11 @@ export const ProducerPanel = ({
                   </div>
                 );
               }
-              const Icon = eventIcon[event.kind];
-              const eventArtifact = event.artifactId
-                ? artifacts.find((artifact) => artifact.id === event.artifactId)
-                : null;
-              if (event.kind === "message") {
-                return (
-                  <div
-                    key={event.id}
-                    className="grid grid-cols-[20px_minmax(0,1fr)] gap-3 py-1"
-                  >
-                    <AgentMark />
-                    <div className="min-w-0">
-                      <p className="whitespace-pre-wrap text-[14px] leading-6 text-ink">
-                        {event.label}
-                      </p>
-                      {event.durationMs === undefined ? null : (
-                        <span
-                          className="mt-1 block font-mono text-[10px] text-ink-secondary"
-                          title={`Completed in ${formatReplyDuration(event.durationMs)}`}
-                        >
-                          {formatReplyDuration(event.durationMs)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              }
-              if (event.kind === "subagent") {
-                return (
-                  <SubagentCard
-                    key={event.id}
-                    event={event}
-                    onOpenDocument={setOpenDocument}
-                  />
-                );
-              }
-              return (
-                <div
-                  key={event.id}
-                  className="ml-8 flex w-[calc(100%-2rem)] gap-2.5 border-l border-line px-3 py-2 text-left"
-                >
-                  <span
-                    className={cx(
-                      "mt-0.5 grid size-5 shrink-0 place-items-center text-ink-tertiary",
-                      event.kind === "artifact" && "text-action",
-                      event.kind === "approval" && "text-warning",
-                    )}
-                  >
-                    {event.document ? (
-                      <FileText size={12} />
-                    ) : Icon ? (
-                      <Icon size={12} />
-                    ) : null}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <strong className="block text-[12px] font-medium leading-5 text-ink-secondary">
-                      {event.label}
-                    </strong>
-                    {event.detail ? (
-                      <p className="mt-0.5 line-clamp-5 whitespace-pre-wrap text-[12px] leading-5 text-ink-tertiary">
-                        {event.detail}
-                      </p>
-                    ) : null}
-                    {event.document ? (
-                      <button
-                        type="button"
-                        onClick={() => setOpenDocument(event.document!)}
-                        className="mt-1 block text-[11px] font-medium text-action hover:underline"
-                      >
-                        Open
-                      </button>
-                    ) : null}
-                    {eventArtifact ? (
-                      <a
-                        href={greenlightApi.artifactUrl(eventArtifact.id)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1 block text-[11px] font-medium text-action hover:underline"
-                      >
-                        Open media
-                      </a>
-                    ) : null}
-                  </div>
-                </div>
-              );
+              return null;
             })}
           </div>
         )}
-        {activity ? (
+        {activity && conversationBlocks.at(-1)?.kind !== "turn" ? (
           <div className="mx-auto grid w-full max-w-[680px] grid-cols-[20px_minmax(0,1fr)] gap-3 py-2 text-[13px]">
             <AgentMark thinking />
             <span className="agent-thinking pt-0.5">{activity}</span>
@@ -1341,17 +1825,6 @@ export const ProducerPanel = ({
             />
           ),
         )}
-
-        {pendingApprovals.map((pending) => (
-          <ApprovalCard
-            key={pending.toolCallId}
-            pending={pending}
-            content={content}
-            artifacts={artifacts}
-            busy={isApproving}
-            onDecision={(status, reason) => onApproval(pending, status, reason)}
-          />
-        ))}
       </div>
 
       <form
@@ -1493,7 +1966,14 @@ export const ProducerPanel = ({
             }}
           />
         ) : null}
-        <div className="flex min-h-[88px] flex-col gap-2 px-3 pt-3">
+        <div
+          className={cx(
+            "flex gap-2 px-3",
+            conversationPaused
+              ? "min-h-0 items-center py-3"
+              : "min-h-[88px] flex-col pt-3",
+          )}
+        >
           {references.length > 0 || contextArtifacts.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
               {references.map((reference) => {
@@ -1570,35 +2050,41 @@ export const ProducerPanel = ({
               ) : null}
             </div>
           ) : null}
-          <textarea
-            value={instruction}
-            onChange={(event) => setInstruction(event.target.value)}
-            onKeyDown={(event) => {
-              if (
-                !shouldSubmitProducerInstruction({
-                  key: event.key,
-                  shiftKey: event.shiftKey,
-                  isComposing: event.nativeEvent.isComposing,
-                })
-              ) {
-                return;
+          {conversationPaused ? (
+            <div className="flex min-w-0 flex-1 items-center gap-2.5 text-[11px] text-ink-secondary">
+              <span className="grid size-6 shrink-0 place-items-center rounded-full bg-action-soft text-action">
+                <ChevronDown size={12} />
+              </span>
+              <span className="truncate">
+                {pendingQuestions.length > 0
+                  ? "Waiting for your answer above"
+                  : "Waiting for your decision above"}
+              </span>
+            </div>
+          ) : (
+            <textarea
+              value={instruction}
+              onChange={(event) => setInstruction(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  !shouldSubmitProducerInstruction({
+                    key: event.key,
+                    shiftKey: event.shiftKey,
+                    isComposing: event.nativeEvent.isComposing,
+                  })
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }}
+              placeholder={
+                selection ? "Edit this selection…" : "Direct the production…"
               }
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }}
-            placeholder={
-              pendingQuestions.length > 0
-                ? "Answer the question above…"
-                : pendingApprovals.length > 0
-                  ? "Review the change above…"
-                  : selection
-                    ? "Edit this selection…"
-                    : "Direct the production…"
-            }
-            disabled={conversationPaused}
-            rows={3}
-            className="min-w-[180px] flex-1 resize-none border-0 bg-transparent px-1 text-[14px] leading-6 text-ink outline-none placeholder:text-ink-caption disabled:cursor-not-allowed disabled:bg-surface-sunken/40"
-          />
+              rows={3}
+              className="min-w-[180px] flex-1 resize-none border-0 bg-transparent px-1 text-[14px] leading-6 text-ink outline-none placeholder:text-ink-caption"
+            />
+          )}
         </div>
         <div className="flex items-center px-3 pb-2.5 pt-1">
           <span
@@ -1614,28 +2100,32 @@ export const ProducerPanel = ({
             <span className="text-ink-caption">·</span>
             {formatSessionCost(sessionCostInUsd)}
           </span>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={MEDIA_ACCEPT}
-            className="sr-only"
-            onChange={(event) => {
-              const files = [...(event.target.files ?? [])];
-              if (files.length > 0) void onImportFiles(files);
-              event.target.value = "";
-            }}
-          />
-          <button
-            type="button"
-            aria-label="Attach media"
-            disabled={importing}
-            onClick={() => fileInputRef.current?.click()}
-            className="grid size-8 place-items-center rounded-full text-ink-tertiary hover:bg-hover hover:text-ink disabled:opacity-30"
-          >
-            <Paperclip size={14} />
-          </button>
-          {canStop || isStopping ? (
+          {!conversationPaused ? (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={MEDIA_ACCEPT}
+                className="sr-only"
+                onChange={(event) => {
+                  const files = [...(event.target.files ?? [])];
+                  if (files.length > 0) void onImportFiles(files);
+                  event.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                aria-label="Attach media"
+                disabled={importing}
+                onClick={() => fileInputRef.current?.click()}
+                className="grid size-8 place-items-center rounded-full text-ink-tertiary hover:bg-hover hover:text-ink disabled:opacity-30"
+              >
+                <Paperclip size={14} />
+              </button>
+            </>
+          ) : null}
+          {!conversationPaused && (canStop || isStopping) ? (
             <button
               type="button"
               aria-label="Stop current run"
@@ -1645,7 +2135,7 @@ export const ProducerPanel = ({
             >
               <Square size={11} fill="currentColor" />
             </button>
-          ) : (
+          ) : !conversationPaused ? (
             <button
               type="submit"
               aria-label="Send instruction"
@@ -1654,7 +2144,7 @@ export const ProducerPanel = ({
             >
               <ArrowUp size={15} strokeWidth={2.2} />
             </button>
-          )}
+          ) : null}
         </div>
       </form>
       {openDocument ? (
