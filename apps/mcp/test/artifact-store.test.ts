@@ -43,4 +43,59 @@ describe("artifact sandbox transfer", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("persists generated-media metadata as structured artifact state", async () => {
+    const root = await mkdtemp(join(tmpdir(), "greenlight-generated-"));
+    const databasePath = join(root, "greenlight.sqlite");
+    const store = new GreenlightStore(databasePath);
+    try {
+      const project = store.createProject({
+        topic: "Durable generated media provenance",
+        audience: "video creators",
+        goal: "Keep generation facts attached across restarts",
+        target_duration_seconds: 30,
+        tone: "clear",
+      });
+      const artifacts = new ArtifactStore(join(root, "artifacts"), store);
+      const promptHash = "b".repeat(64);
+      const artifact = await artifacts.importBuffer({
+        projectId: project.id,
+        kind: "image",
+        filename: "generated.png",
+        bytes: Buffer.from("generated-image-fixture"),
+        generation: {
+          media_type: "image",
+          provider: "codex_subscription",
+          model: null,
+          runtime: "codex app-server",
+          input_hashes: [promptHash],
+          prompt_sha256: promptHash,
+          width: 1920,
+          height: 1080,
+          generated_at: "2026-08-30T00:00:00.000Z",
+          provider_reported_cost: null,
+          disclosure: {
+            contains_synthetic_media: true,
+            method: "generated",
+          },
+        },
+        provenance: { purpose: "thumbnail" },
+      });
+
+      const reopened = new GreenlightStore(databasePath);
+      try {
+        expect(reopened.getArtifact(artifact.id)?.generation).toMatchObject({
+          media_type: "image",
+          input_hashes: [promptHash],
+          width: 1920,
+          height: 1080,
+        });
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

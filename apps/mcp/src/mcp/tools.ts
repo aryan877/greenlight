@@ -30,7 +30,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { extname } from "node:path";
 import { z } from "zod";
 
-import { createId, hashJson } from "../lib/canonical.js";
+import { createId, hashJson, now } from "../lib/canonical.js";
 import type { CodexImageProvider } from "../providers/codex-image.js";
 import type { QualityInspector } from "../providers/quality.js";
 import type { OpenMojiToolkit } from "../providers/openmoji.js";
@@ -570,6 +570,22 @@ export const buildMcpServer = ({
         kind: "narration",
         filename: `${request.scene_id}${generated.extension}`,
         bytes: generated.bytes,
+        generation: {
+          media_type: "audio",
+          provider: generated.generation.provider,
+          model: generated.generation.model,
+          runtime: generated.generation.runtime,
+          input_hashes: [generated.generation.scriptSha256],
+          script_sha256: generated.generation.scriptSha256,
+          voice_id: generated.generation.voiceId,
+          duration_seconds: generated.durationSeconds,
+          generated_at: now(),
+          provider_reported_cost: generated.generation.providerReportedCost,
+          disclosure: {
+            contains_synthetic_media: true,
+            method: "generated",
+          },
+        },
         provenance: {
           ...generated.provenance,
           scene_id: request.scene_id,
@@ -1006,8 +1022,10 @@ export const buildMcpServer = ({
         store.failOperation(operation.id, "release_not_unlisted");
         throw new Error("release_not_unlisted");
       }
-      store.claimRelease(request.youtube_release_id, "publishing");
+      let claimed = false;
       try {
+        store.claimRelease(request.youtube_release_id, "publishing");
+        claimed = true;
         const youtubeResult = await youtube.publish(
           release.snapshot.youtube_video_id,
         );
@@ -1023,14 +1041,19 @@ export const buildMcpServer = ({
         store.finishOperation(operation.id, output);
         return result(output);
       } catch (error) {
-        try {
-          store.rollbackReleaseClaim(request.youtube_release_id, "publishing");
-        } catch (rollbackError) {
-          store.failOperation(operation.id, "release_rollback_failed");
-          throw new AggregateError(
-            [error, rollbackError],
-            "publish_failed_and_release_rollback_failed",
-          );
+        if (claimed) {
+          try {
+            store.rollbackReleaseClaim(
+              request.youtube_release_id,
+              "publishing",
+            );
+          } catch (rollbackError) {
+            store.failOperation(operation.id, "release_rollback_failed");
+            throw new AggregateError(
+              [error, rollbackError],
+              "publish_failed_and_release_rollback_failed",
+            );
+          }
         }
         store.failOperation(operation.id, "publish_failed");
         throw error;
@@ -1078,8 +1101,10 @@ export const buildMcpServer = ({
         store.failOperation(operation.id, "release_not_unlisted");
         throw new Error("release_not_unlisted");
       }
-      store.claimRelease(request.youtube_release_id, "scheduling");
+      let claimed = false;
       try {
+        store.claimRelease(request.youtube_release_id, "scheduling");
+        claimed = true;
         const youtubeResult = await youtube.schedule(
           release.snapshot.youtube_video_id,
           request.publish_at,
@@ -1096,14 +1121,19 @@ export const buildMcpServer = ({
         store.finishOperation(operation.id, output);
         return result(output);
       } catch (error) {
-        try {
-          store.rollbackReleaseClaim(request.youtube_release_id, "scheduling");
-        } catch (rollbackError) {
-          store.failOperation(operation.id, "release_rollback_failed");
-          throw new AggregateError(
-            [error, rollbackError],
-            "schedule_failed_and_release_rollback_failed",
-          );
+        if (claimed) {
+          try {
+            store.rollbackReleaseClaim(
+              request.youtube_release_id,
+              "scheduling",
+            );
+          } catch (rollbackError) {
+            store.failOperation(operation.id, "release_rollback_failed");
+            throw new AggregateError(
+              [error, rollbackError],
+              "schedule_failed_and_release_rollback_failed",
+            );
+          }
         }
         store.failOperation(operation.id, "schedule_failed");
         throw error;

@@ -133,6 +133,7 @@ describe("GreenlightStore", () => {
       relative_path: `${project.id}/image/${"a".repeat(64)}.png`,
       mime_type: "image/png",
       byte_size: 8,
+      generation: null,
       provenance: { source: "local_import" },
       created_at: now(),
     };
@@ -173,6 +174,7 @@ describe("GreenlightStore", () => {
       relative_path: `${first.id}/image/${"b".repeat(64)}.png`,
       mime_type: "image/png",
       byte_size: 8,
+      generation: null,
       provenance: { source: "test" },
       created_at: now(),
     });

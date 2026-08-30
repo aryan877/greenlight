@@ -34,6 +34,7 @@ type ArtifactRow = {
   relative_path: string;
   mime_type: string;
   byte_size: number;
+  generation_json: string | null;
   provenance_json: string;
   created_at: string;
 };
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   relative_path TEXT NOT NULL,
   mime_type TEXT NOT NULL,
   byte_size INTEGER NOT NULL,
+  generation_json TEXT,
   provenance_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
   UNIQUE(project_id, kind, sha256)
@@ -130,6 +132,7 @@ const toArtifact = (row: ArtifactRow): Artifact =>
     relative_path: row.relative_path,
     mime_type: row.mime_type,
     byte_size: row.byte_size,
+    generation: row.generation_json ? JSON.parse(row.generation_json) : null,
     provenance: JSON.parse(row.provenance_json),
     created_at: row.created_at,
   });
@@ -141,6 +144,12 @@ export class GreenlightStore {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
     this.db = new Database(path);
     this.db.exec(migrations);
+    const artifactColumns = this.db
+      .prepare("PRAGMA table_info(artifacts)")
+      .all() as Array<{ name: string }>;
+    if (!artifactColumns.some((column) => column.name === "generation_json")) {
+      this.db.exec("ALTER TABLE artifacts ADD COLUMN generation_json TEXT");
+    }
   }
 
   close(): void {
@@ -236,8 +245,8 @@ export class GreenlightStore {
     this.db
       .prepare(
         `INSERT OR IGNORE INTO artifacts
-          (id, project_id, kind, sha256, relative_path, mime_type, byte_size, provenance_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          (id, project_id, kind, sha256, relative_path, mime_type, byte_size, generation_json, provenance_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         valid.id,
@@ -247,6 +256,7 @@ export class GreenlightStore {
         valid.relative_path,
         valid.mime_type,
         valid.byte_size,
+        valid.generation ? JSON.stringify(valid.generation) : null,
         JSON.stringify(valid.provenance),
         valid.created_at,
       );

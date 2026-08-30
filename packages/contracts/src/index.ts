@@ -1247,6 +1247,42 @@ export const artifactKindSchema = z.enum([
   "release_report",
 ]);
 
+const generatedArtifactMetadataBaseSchema = z.object({
+  provider: z.string().trim().min(1).max(120),
+  model: z.string().trim().min(1).max(240).nullable(),
+  runtime: z.string().trim().min(1).max(160),
+  input_hashes: z.array(sha256Schema).min(1).max(8),
+  generated_at: z.string().datetime(),
+  provider_reported_cost: z
+    .object({
+      amount: z.number().nonnegative(),
+      currency: z.string().trim().min(3).max(8),
+    })
+    .nullable(),
+  disclosure: z.object({
+    contains_synthetic_media: z.literal(true),
+    method: z.literal("generated"),
+  }),
+});
+
+export const generatedArtifactMetadataSchema = z.discriminatedUnion(
+  "media_type",
+  [
+    generatedArtifactMetadataBaseSchema.extend({
+      media_type: z.literal("image"),
+      prompt_sha256: sha256Schema,
+      width: z.number().int().positive(),
+      height: z.number().int().positive(),
+    }),
+    generatedArtifactMetadataBaseSchema.extend({
+      media_type: z.literal("audio"),
+      script_sha256: sha256Schema,
+      voice_id: z.string().trim().min(1).max(160),
+      duration_seconds: z.number().positive(),
+    }),
+  ],
+);
+
 export const artifactSchema = z.object({
   id: idSchema,
   project_id: idSchema,
@@ -1255,6 +1291,7 @@ export const artifactSchema = z.object({
   relative_path: z.string().min(1).max(600),
   mime_type: z.string().min(3).max(120),
   byte_size: z.number().int().nonnegative(),
+  generation: generatedArtifactMetadataSchema.nullable().default(null),
   provenance: z.record(z.string(), z.unknown()),
   created_at: z.string().datetime(),
 });
@@ -1916,6 +1953,9 @@ export type YoutubeMetadata = z.infer<typeof youtubeMetadataSchema>;
 export type ReleasePlan = z.infer<typeof releasePlanSchema>;
 export type ArtifactKind = z.infer<typeof artifactKindSchema>;
 export type Artifact = z.infer<typeof artifactSchema>;
+export type GeneratedArtifactMetadata = z.infer<
+  typeof generatedArtifactMetadataSchema
+>;
 export type QualityReport = z.infer<typeof qualityReportSchema>;
 export type QualityCheck = z.infer<typeof qualityCheckSchema>;
 export type ReleaseSnapshot = z.infer<typeof releaseSnapshotSchema>;
@@ -2218,6 +2258,16 @@ export const applyEditorPatch = (
         requireSelectedScene(selectedSceneIds, operation.scene_id);
         requireTrack("visual");
         const index = requireScene(next.scenes, operation.scene_id);
+        const removedVideoItemIds = new Set([
+          videoTimelineItemId(operation.scene_id),
+        ]);
+        for (const track of next.video_tracks ?? []) {
+          for (const clip of track.clips ?? []) {
+            if (clip.scene_id === operation.scene_id) {
+              removedVideoItemIds.add(videoTimelineItemId(clip.id));
+            }
+          }
+        }
         next.scenes.splice(index, 1);
         next.localized_narration_tracks =
           next.localized_narration_tracks.filter(
@@ -2228,6 +2278,32 @@ export const applyEditorPatch = (
             ...track,
             clips: track.clips.filter(
               (clip) => clip.scene_id !== operation.scene_id,
+            ),
+          }));
+        }
+        if (next.video_tracks) {
+          next.video_tracks = next.video_tracks.map((track) => ({
+            ...track,
+            clips: track.clips?.filter(
+              (clip) => clip.scene_id !== operation.scene_id,
+            ),
+          }));
+        }
+        if (next.caption_tracks) {
+          next.caption_tracks = next.caption_tracks.map((track) => ({
+            ...track,
+            clips: track.clips?.filter(
+              (clip) => clip.scene_id !== operation.scene_id,
+            ),
+          }));
+        }
+        if (next.transition_tracks) {
+          next.transition_tracks = next.transition_tracks.map((track) => ({
+            ...track,
+            clips: track.clips.filter(
+              (clip) =>
+                !removedVideoItemIds.has(clip.from_item_id) &&
+                !removedVideoItemIds.has(clip.to_item_id),
             ),
           }));
         }

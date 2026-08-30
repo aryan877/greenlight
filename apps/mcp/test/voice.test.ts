@@ -63,6 +63,12 @@ describe("voice provider", () => {
       locale: "hi-IN",
       voice_id: "Puck",
     });
+    expect(result.generation).toMatchObject({
+      provider: "openrouter",
+      model: "provider/model",
+      runtime: "openrouter_audio_speech",
+      voiceId: "Puck",
+    });
   });
 
   it("offers a deterministic offline adapter only for tests", async () => {

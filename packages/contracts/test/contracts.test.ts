@@ -148,6 +148,115 @@ describe("Greenlight contracts", () => {
     ).toBe(false);
   });
 
+  it("removes every timeline dependency when deleting a scene", () => {
+    const scenes = ["one", "two", "three"].map((id, index) => ({
+      id: `scene_${id}`,
+      kind: index === 0 ? ("hook" as const) : ("explanation" as const),
+      title: `Scene ${id}`,
+      narration: `Narration for scene ${id}.`,
+      claim_ids: [],
+      duration_seconds: 15,
+      visual: { treatment: "type" as const, accent: "signal" as const },
+    }));
+    const content = contentPackageSchema.parse({
+      version: 1,
+      project_id: "project_scene_removal",
+      headline: "Scene removal stays atomic",
+      dek: "Dependent clips and transitions leave with their scene.",
+      scenes,
+      video_tracks: [
+        {
+          id: "track_video",
+          name: "Video",
+          kind: "video",
+          protected: true,
+          visible: true,
+        },
+        {
+          id: "track_overlay",
+          name: "Overlay",
+          kind: "video",
+          clips: [
+            {
+              id: "clip_scene_two",
+              scene_id: "scene_two",
+              label: "Scene two overlay",
+              artifact_id: "artifact_overlay",
+              timeline_start_seconds: 15,
+              source_in_seconds: 0,
+              source_out_seconds: 5,
+              source_duration_seconds: 5,
+              duration_seconds: 5,
+            },
+          ],
+        },
+      ],
+      caption_tracks: [
+        {
+          id: "track_captions",
+          name: "Captions",
+          kind: "caption",
+          clips: [
+            {
+              id: "caption_scene_two",
+              scene_id: "scene_two",
+              label: "Scene two caption",
+              timeline_start_seconds: 15,
+              duration_seconds: 5,
+            },
+          ],
+        },
+      ],
+      transition_tracks: [
+        {
+          id: "track_transitions",
+          name: "Transitions",
+          kind: "transition",
+          clips: [
+            {
+              id: "transition_into_two",
+              label: "Crossfade",
+              from_item_id: videoTimelineItemId("scene_one"),
+              to_item_id: videoTimelineItemId("scene_two"),
+              cut_seconds: 15,
+              duration_seconds: 0.4,
+              preset_id: "crossfade",
+            },
+          ],
+        },
+      ],
+      metadata: {
+        title: "Scene removal stays atomic",
+        description: "Scene deletion fixture.",
+        tags: ["editing"],
+      },
+    });
+
+    const revised = applyEditorPatch(content, {
+      selection: {
+        project_id: content.project_id,
+        base_content_package_artifact_id: "artifact_scene_removal",
+        item_ids: [],
+        scene_ids: ["scene_two"],
+        track_ids: ["visual"],
+        gap_ids: [],
+        artifact_ids: [],
+        playhead_seconds: null,
+        time_range_seconds: null,
+      },
+      instruction_summary: "Remove scene two and its timeline dependencies",
+      operations: [{ type: "remove_scene", scene_id: "scene_two" }],
+    });
+
+    expect(revised.scenes.map((scene) => scene.id)).toEqual([
+      "scene_one",
+      "scene_three",
+    ]);
+    expect(revised.video_tracks?.[1]?.clips).toEqual([]);
+    expect(revised.caption_tracks?.[0]?.clips).toEqual([]);
+    expect(revised.transition_tracks?.[0]?.clips).toEqual([]);
+  });
+
   it("requires editor operations to contain a real change", () => {
     const parsed = editorPatchInputSchema.safeParse({
       selection: {

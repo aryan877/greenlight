@@ -38,6 +38,7 @@ describe("source-backed media", () => {
       relative_path: "audio/test.mp3",
       mime_type: "audio/mpeg",
       byte_size: 1,
+      generation: null,
       provenance: { media_metadata: { duration_seconds: 3.156 } },
       created_at: "2026-08-26T00:00:00.000Z",
     };
@@ -95,6 +96,7 @@ const sourceLedger = {
   relative_path: "project/sources.json",
   mime_type: "application/json",
   byte_size: 100,
+  generation: null,
   provenance: {},
   created_at: "2026-08-24T00:00:00.000Z",
 } satisfies Artifact;

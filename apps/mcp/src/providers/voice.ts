@@ -10,6 +10,14 @@ export type VoiceResult = {
   bytes: Uint8Array;
   durationSeconds: number;
   extension: ".wav";
+  generation: {
+    model: string | null;
+    provider: string;
+    providerReportedCost: { amount: number; currency: string } | null;
+    runtime: string;
+    scriptSha256: string;
+    voiceId: string;
+  };
   provenance: Record<string, unknown>;
 };
 
@@ -149,6 +157,14 @@ export class OpenRouterVoiceProvider implements VoiceProvider {
       bytes: wav,
       durationSeconds: pcm.byteLength / (24_000 * 2),
       extension: ".wav",
+      generation: {
+        provider: "openrouter",
+        model: this.config.model,
+        runtime: "openrouter_audio_speech",
+        scriptSha256: sha256(script),
+        voiceId: voiceId ?? this.config.voiceId,
+        providerReportedCost: null,
+      },
       provenance: {
         provider: "openrouter",
         model: this.config.model,
@@ -204,6 +220,14 @@ export class TestVoiceProvider implements VoiceProvider {
       bytes: pcm16MonoToWav(pcm),
       durationSeconds,
       extension: ".wav",
+      generation: {
+        provider: "test",
+        model: "deterministic-pcm",
+        runtime: "deterministic_test_adapter",
+        scriptSha256: sha256(script),
+        voiceId: voiceId ?? "fixture",
+        providerReportedCost: null,
+      },
       provenance: {
         provider: "test",
         model: "deterministic-pcm",

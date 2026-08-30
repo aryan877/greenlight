@@ -5,6 +5,7 @@ import {
   artifactKindSchema,
   type Artifact,
   type ArtifactKind,
+  type GeneratedArtifactMetadata,
 } from "@greenlight/contracts";
 
 import { createId, now, sha256 } from "../lib/canonical.js";
@@ -41,6 +42,7 @@ export class ArtifactStore {
     kind: ArtifactKind;
     filename: string;
     bytes: Uint8Array;
+    generation?: GeneratedArtifactMetadata;
     provenance: Record<string, unknown>;
   }): Promise<Artifact> {
     const kind = artifactKindSchema.parse(input.kind);
@@ -65,6 +67,7 @@ export class ArtifactStore {
       relative_path: relativePath,
       mime_type: mimeByExtension[extension],
       byte_size: info.size,
+      generation: input.generation ?? null,
       provenance: input.provenance,
       created_at: now(),
     };

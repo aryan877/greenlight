@@ -638,6 +638,18 @@ export const App = () => {
   );
 
   const visibleContent = previewContent ?? editorContent;
+  const pendingPublicReleaseApproval = useMemo(() => {
+    const release = project.data?.release;
+    if (!release || release.privacy !== "unlisted") return null;
+    return (
+      producer.pendingApprovals.find(
+        (approval) =>
+          approval.toolName === "publish_video" &&
+          approval.arguments.project_id === projectId &&
+          approval.arguments.release_snapshot_sha256 === release.snapshotSha256,
+      ) ?? null
+    );
+  }, [producer.pendingApprovals, project.data?.release, projectId]);
   const programDuration = visibleContent ? totalDuration(visibleContent) : 0;
   const previewUsesCanvas =
     Boolean(previewPatch) ||
@@ -1874,6 +1886,7 @@ export const App = () => {
                       busy={
                         applyDirectPatch.isPending ||
                         producer.isSending ||
+                        producer.isApproving ||
                         Boolean(previewPatch)
                       }
                       connection={youtubeConnection.data ?? null}
@@ -1888,6 +1901,28 @@ export const App = () => {
                           : null
                       }
                       onChange={updateRelease}
+                      onApprovePublicRelease={() => {
+                        setRightTab("producer");
+                        if (pendingPublicReleaseApproval) {
+                          producer.decideApproval({
+                            pending: pendingPublicReleaseApproval,
+                            status: "allow",
+                          });
+                          return;
+                        }
+                        directProducer(
+                          "Prepare the exact current unlisted release snapshot for public publication. Recheck the locked snapshot and request TrueForge approval for publish_video. Do not publish until I approve that exact tool call.",
+                        );
+                      }}
+                      onCancelPublicRelease={() => {
+                        if (!pendingPublicReleaseApproval) return;
+                        setRightTab("producer");
+                        producer.decideApproval({
+                          pending: pendingPublicReleaseApproval,
+                          status: "deny",
+                          reason: "Cancelled by the creator.",
+                        });
+                      }}
                       onGenerateThumbnails={() => {
                         setRightTab("producer");
                         directProducer(
@@ -1906,6 +1941,9 @@ export const App = () => {
                             : "Prepare this cut for an unlisted YouTube review. Run only missing quality or render steps and stop for approval before upload.",
                         );
                       }}
+                      publicApprovalPending={Boolean(
+                        pendingPublicReleaseApproval,
+                      )}
                       video={videoArtifact}
                     />
                   ) : null}

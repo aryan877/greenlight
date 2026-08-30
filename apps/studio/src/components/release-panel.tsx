@@ -69,8 +69,11 @@ export const ReleasePanel = ({
   evidence,
   latestThumbnail,
   onChange,
+  onApprovePublicRelease,
+  onCancelPublicRelease,
   onPrepare,
   onGenerateThumbnails,
+  publicApprovalPending,
   qualityReport,
   releasePrivacy,
   releaseStudioUrl,
@@ -83,8 +86,11 @@ export const ReleasePanel = ({
   evidence: EvidenceLedger | null;
   latestThumbnail: Artifact | null;
   onChange: (operation: ReleaseOperation, summary: string) => void;
+  onApprovePublicRelease: () => void;
+  onCancelPublicRelease: () => void;
   onPrepare: () => void;
   onGenerateThumbnails: () => void;
+  publicApprovalPending: boolean;
   qualityReport: QualityReport | null;
   releasePrivacy: string | null;
   releaseStudioUrl: string | null;
@@ -131,6 +137,8 @@ export const ReleasePanel = ({
   ) => onChange({ type: "update_release", metadata }, summary);
 
   const destination = content.release.destination;
+  const isPublicRelease =
+    releasePrivacy === "unlisted" && destination === "public";
   const status = releasePrivacy ?? "draft";
   const checkByName = new Map(
     qualityReport?.checks.map((check) => [check.name, check]) ?? [],
@@ -550,6 +558,16 @@ export const ReleasePanel = ({
       </div>
 
       <div className="shrink-0 border-t border-line-subtle p-3">
+        {isPublicRelease && publicApprovalPending ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onCancelPublicRelease}
+            className="mb-2 h-8 w-full text-[10px] text-ink-tertiary hover:bg-hover hover:text-ink disabled:opacity-45"
+          >
+            Cancel public release
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={
@@ -557,7 +575,7 @@ export const ReleasePanel = ({
             !connection?.connected ||
             !content.release.thumbnail_artifact_id
           }
-          onClick={onPrepare}
+          onClick={isPublicRelease ? onApprovePublicRelease : onPrepare}
           className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-control text-[11px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-45"
         >
           {busy ? (
@@ -567,15 +585,17 @@ export const ReleasePanel = ({
           ) : (
             <LockKeyhole size={13} />
           )}
-          {releasePrivacy === "unlisted"
-            ? destination === "scheduled"
-              ? "Review schedule"
-              : destination === "public"
-                ? "Review public release"
+          {isPublicRelease
+            ? publicApprovalPending
+              ? "Approve public release"
+              : "Request public approval"
+            : releasePrivacy === "unlisted"
+              ? destination === "scheduled"
+                ? "Review schedule"
                 : "Open unlisted review"
-            : content.release.thumbnail_artifact_id
-              ? "Prepare unlisted review"
-              : "Choose a thumbnail"}
+              : content.release.thumbnail_artifact_id
+                ? "Prepare unlisted review"
+                : "Choose a thumbnail"}
         </button>
       </div>
     </section>

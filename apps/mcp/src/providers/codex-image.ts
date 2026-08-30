@@ -9,8 +9,9 @@ import { promisify } from "node:util";
 
 import type { ArtifactKind } from "@greenlight/contracts";
 
-import { sha256 } from "../lib/canonical.js";
+import { now, sha256 } from "../lib/canonical.js";
 import type { ArtifactStore } from "../storage/artifacts.js";
+import { probeImportedMedia } from "./media-metadata.js";
 
 type RpcResponse = {
   id: number;
@@ -319,17 +320,38 @@ export class CodexImageProvider {
         throw new Error("codex_image_type_not_allowed");
       }
       const bytes = await readFile(generatedPath);
+      const measured = await probeImportedMedia(extension, bytes);
+      if (!measured?.width || !measured.height) {
+        throw new Error("generated_image_dimensions_unavailable");
+      }
+      const promptHash = sha256(input.prompt);
       return this.artifacts.importBuffer({
         projectId: input.projectId,
         kind: input.kind,
         filename: `codex-image${extension}`,
         bytes,
+        generation: {
+          media_type: "image",
+          provider: capabilities.provider,
+          model: capabilities.model,
+          runtime: capabilities.runtime,
+          input_hashes: [promptHash],
+          prompt_sha256: promptHash,
+          width: measured.width,
+          height: measured.height,
+          generated_at: now(),
+          provider_reported_cost: null,
+          disclosure: {
+            contains_synthetic_media: true,
+            method: "generated",
+          },
+        },
         provenance: {
-          provider: "codex_subscription",
-          runtime: "codex app-server",
-          model: this.config.model ?? "codex_default",
+          provider: capabilities.provider,
+          runtime: capabilities.runtime,
+          model: capabilities.model,
           skill: "imagegen",
-          prompt_sha256: sha256(input.prompt),
+          prompt_sha256: promptHash,
           revised_prompt: generated.revisedPrompt ?? null,
           aspect_ratio: input.aspectRatio,
           scene_id: input.sceneId,
