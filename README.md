@@ -1,99 +1,121 @@
 <p align="center">
-  <img src="apps/studio/src/assets/greenlight-logo.svg" alt="Greenlight" width="420" />
+  <img src="assets/readme/greenlight-mark.svg" alt="Greenlight aperture mark" width="76" />
 </p>
 
-<p align="center"><strong>A TrueForge-native YouTube production studio with evidence, editing, rendering, and release in one controlled loop.</strong></p>
+<h1 align="center">Greenlight</h1>
 
-```text
-research → sourced script → editable timeline → checked render → unlisted review
-```
+<p align="center"><strong>A TrueForge-native YouTube production studio where evidence, editing, rendering, and release share one controlled loop.</strong></p>
 
-## Why Greenlight
+<p align="center">
+  Research → sourced script → editable timeline → checked render → unlisted review
+</p>
 
-Greenlight combines a real multi-track editor with a visible TrueForge Producer. Direct gestures and agent proposals use the same typed edit contract, every accepted change creates an immutable revision, and the creator keeps final release control.
+Greenlight is a real multi-track editor with a visible Producer agent. Direct gestures and Producer proposals use the same typed edit contract, every accepted change creates an immutable revision, and the creator keeps final release control.
 
-- Click a scene to inspect its claims and source links in Evidence Lens.
-- Edit video, audio, captions, transitions, tracks, and gaps independently.
-- Preview Producer changes before Apply, Refine, or Cancel.
-- See waveforms, normalize tracks, and duck music under narration.
-- Check evidence, captions, audio, black frames, metadata, render, and disclosure together.
-- Prepare three YouTube thumbnail candidates and choose the active one.
-- Refresh during research and continue the same durable TrueForge thread.
-- Stage to YouTube as unlisted; public or scheduled release requires exact-snapshot approval.
+## The demo surface
 
-## TrueForge architecture
+- **Evidence Lens** — click a scene to inspect its supported claims and source links.
+- **Reviewable agent work** — research, scripts, questions, progress, and approvals remain visible in the durable TrueForge thread.
+- **Typed editing** — move, trim, split, mute, transition, caption, and gap operations share one command model.
+- **Credible audio** — waveforms, loudness normalization, and music ducking under narration.
+- **Release Readiness** — evidence, captions, audio, black frames, metadata, render, and disclosure checks in one view.
+- **Three thumbnail candidates** — prepare and select among three YouTube-ready options.
+- **Reconnect proof** — refresh during research and continue the same TrueForge turn.
+- **Safe release** — stage unlisted first; public or scheduled release needs approval for the exact locked snapshot.
 
-```text
-Studio editor ───────┐
-                     ├─ typed EditorPatchOperation → immutable revision
-TrueForge Producer ──┘
-  ├─ durable sessions and bounded subagents
-  ├─ four lazy SKILL.md workflows
-  ├─ sandbox and Code Mode
-  └─ Greenlight MCP → providers → Remotion → quality → YouTube
-```
+## Architecture
 
-`agents/producer` contains the saved Producer definition. `agents/skills/*` contains the git-backed skills registered by `scripts/configure-trueforge.mjs`. This matches TrueForge’s skill model: each configured repository path is rooted at a `SKILL.md` and loaded progressively in the sandbox.
+TrueForge visibly owns the agent loop. Greenlight MCP owns trusted state and side effects. Remotion produces the deterministic render.
 
-TrueForge only clones public GitHub/GitLab skill repositories. While this repository is private, setup safely detaches the skills; rerun `pnpm trueforge:configure` after making the submission repository public.
+![Greenlight and TrueForge architecture](assets/readme/trueforge-loop.svg)
 
-## Run the demo
+Both creator edits and Producer edits resolve to `EditorPatchOperation`, so the editor never maintains a hidden second state model.
+
+![Greenlight release gates](assets/readme/release-gates.svg)
+
+## Run locally
 
 Requirements: Node.js 22+, pnpm 9+, FFmpeg/FFprobe, and an owner-configured model route.
 
 ```bash
 pnpm install
 cp .env.example .env
-openssl rand -hex 32 # use as GREENLIGHT_MCP_AUTH_TOKEN
+openssl rand -hex 32 # set this as GREENLIGHT_MCP_AUTH_TOKEN in .env
+```
 
-# First-time setup: start TrueForge, then run configure in another terminal.
+Start TrueForge once, configure the saved Producer from another terminal, then run the judged stack:
+
+```bash
 pnpm trueforge
 pnpm trueforge:configure
 
-# Complete judged stack after configuration
-# Stop the first TrueForge process before this command.
+# Stop the first TrueForge process before starting the complete stack.
 pnpm demo
 ```
 
-- Studio: `http://localhost:4173`
-- Greenlight MCP: `http://localhost:8941/mcp`
-- TrueForge: `http://localhost:8790`
+| Service           | URL                         |
+| ----------------- | --------------------------- |
+| Greenlight Studio | `http://localhost:4173`     |
+| Greenlight MCP    | `http://localhost:8941/mcp` |
+| TrueForge         | `http://localhost:8790`     |
 
-Demo order: start refresh-safe research, refresh the page, open Evidence Lens, make one direct edit and one Producer edit, show waveform/ducking, then open Release Readiness and the thumbnail candidates before staging unlisted.
+TrueForge 0.1.4 clones Git-backed skills only from public GitHub or GitLab repositories. While this repository is private, configuration safely detaches the four skills. Run `pnpm trueforge:configure` again if the submission repository becomes public.
+
+## Demo path
+
+1. Start sourced research, then refresh to prove durable reconnect.
+2. Open the completed script for creator review before production.
+3. Click a scene and open its claims in Evidence Lens.
+4. Make one direct timeline edit, then preview one Producer edit and Apply it.
+5. Normalize narration and duck music while showing the waveform.
+6. Open Release Readiness and the three thumbnail candidates.
+7. Lock the snapshot and stage the upload as unlisted.
 
 ## Repository
 
 ```text
-apps/studio         React editor and Producer event projection
-apps/mcp            MCP/API service and trusted side effects
+apps/studio         React editor and TrueForge event projection
+apps/mcp            Runnable MCP/API service and trusted side effects
 apps/render         Deterministic Remotion renderer
-packages/contracts  Shared Zod schemas and invariants
-agents              Producer definition and lazy skills
-scripts             Setup and demo utilities
+packages/contracts  Shared Zod schemas and editing invariants
+agents              Saved Producer definition and four lazy skills
+scripts             Repeatable setup and demo utilities
 ```
 
-Run the complete gate with:
+The complete quality gate runs formatting, lint, types, tests, and every workspace build:
 
 ```bash
 pnpm verify
 ```
 
-## Safety
+## Safety contract
 
 - Models receive immutable artifact IDs, never credentials or host paths.
 - Claim-to-source coverage is required before render and public release.
 - Upload is always unlisted first.
-- Changing a locked release input invalidates approval.
+- Changing evidence, edit state, media, render, metadata, thumbnail, or disclosure invalidates release approval.
 - No video-delete or channel-wide mutation tool exists.
 
-## Qodo Code Review Evidence
+## Harness and review
 
 <p>
-  <a href="https://www.qodo.ai/media-kit/"><img src="https://www.qodo.ai/wp-content/uploads/2025/04/Group-2147203332.svg" alt="Qodo" height="38" /></a>&nbsp;&nbsp;
-  <a href="https://trueforge.dev/"><img src="apps/studio/src/assets/trueforge-logomark.svg" alt="TrueForge" height="38" /></a>
+  <a href="https://trueforge.dev/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/readme/trueforge-dark.svg" />
+      <img src="assets/readme/trueforge.svg" alt="TrueForge" height="34" />
+    </picture>
+  </a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.qodo.ai/media-kit/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/readme/qodo-dark.svg" />
+      <img src="assets/readme/qodo.svg" alt="Qodo" height="48" />
+    </picture>
+  </a>
 </p>
 
-- Submission PR: [aryan877/greenlight#1](https://github.com/aryan877/greenlight/pull/1)
-- Run Qodo on the final head, resolve findings, and merge before submission.
+TrueForge runs the Producer harness. Qodo reviews the submission pull request: [aryan877/greenlight#1](https://github.com/aryan877/greenlight/pull/1).
 
-See [PRD.md](PRD.md), [TrueForge docs](https://trueforge.dev/llms.txt), and the [official hackathon resources](https://www.wemakedevs.org/hackathons/trueforge/resources).
+Brand assets above come from the official [TrueForge repository](https://github.com/truefoundry/trueforge/tree/main/docs/logo) and [Qodo media kit](https://www.qodo.ai/media-kit/).
+
+References: [TrueForge documentation](https://trueforge.dev/llms.txt) · [Hackathon resources](https://www.wemakedevs.org/hackathons/trueforge/resources)

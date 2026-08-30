@@ -16,3 +16,4 @@ apps/render/public/generated/
 *.sqlite-wal
 *.tsbuildinfo
 .DS_Store
+*.code-workspace

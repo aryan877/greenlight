@@ -1,0 +1,53 @@
+<svg width="1200" height="275" viewBox="0 0 1200 275" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Greenlight release gates</title>
+  <desc>Evidence, editing, rendering, readiness checks, snapshot locking, unlisted upload, and exact-snapshot approval happen in order.</desc>
+  <defs>
+    <marker id="gate-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#69E0A7"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="275" rx="18" fill="#0B1110"/>
+  <text x="40" y="46" fill="#F3F7F5" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700">Release is a gated state machine</text>
+  <text x="1160" y="46" fill="#82928A" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="13">NO ONE-SHOT PUBLISH</text>
+
+  <path d="M175 135h35M330 135h35M485 135h35M640 135h35M795 135h35M950 135h35" stroke="#69E0A7" stroke-width="2" marker-end="url(#gate-arrow)"/>
+
+  <g font-family="Arial, Helvetica, sans-serif">
+    <rect x="35" y="82" width="140" height="106" rx="9" fill="#111B17" stroke="#294137"/>
+    <text x="55" y="116" fill="#69E0A7" font-size="12" font-weight="700">01</text>
+    <text x="55" y="143" fill="#F3F7F5" font-size="16" font-weight="700">Evidence</text>
+    <text x="55" y="166" fill="#9FB0A7" font-size="12">Claims linked</text>
+
+    <rect x="210" y="82" width="120" height="106" rx="9" fill="#111B17" stroke="#294137"/>
+    <text x="230" y="116" fill="#69E0A7" font-size="12" font-weight="700">02</text>
+    <text x="230" y="143" fill="#F3F7F5" font-size="16" font-weight="700">Edit</text>
+    <text x="230" y="166" fill="#9FB0A7" font-size="12">New revision</text>
+
+    <rect x="365" y="82" width="120" height="106" rx="9" fill="#111B17" stroke="#294137"/>
+    <text x="385" y="116" fill="#69E0A7" font-size="12" font-weight="700">03</text>
+    <text x="385" y="143" fill="#F3F7F5" font-size="16" font-weight="700">Render</text>
+    <text x="385" y="166" fill="#9FB0A7" font-size="12">Remotion</text>
+
+    <rect x="520" y="82" width="120" height="106" rx="9" fill="#111B17" stroke="#294137"/>
+    <text x="540" y="116" fill="#69E0A7" font-size="12" font-weight="700">04</text>
+    <text x="540" y="143" fill="#F3F7F5" font-size="16" font-weight="700">Check</text>
+    <text x="540" y="166" fill="#9FB0A7" font-size="12">Readiness</text>
+
+    <rect x="675" y="82" width="120" height="106" rx="9" fill="#111B17" stroke="#294137"/>
+    <text x="695" y="116" fill="#69E0A7" font-size="12" font-weight="700">05</text>
+    <text x="695" y="143" fill="#F3F7F5" font-size="16" font-weight="700">Lock</text>
+    <text x="695" y="166" fill="#9FB0A7" font-size="12">Exact snapshot</text>
+
+    <rect x="830" y="82" width="120" height="106" rx="9" fill="#2B1716" stroke="#6D2A27"/>
+    <text x="850" y="116" fill="#FF8A84" font-size="12" font-weight="700">06</text>
+    <text x="850" y="143" fill="#F3F7F5" font-size="16" font-weight="700">Upload</text>
+    <text x="850" y="166" fill="#FFB6B2" font-size="12">Unlisted first</text>
+
+    <rect x="985" y="82" width="180" height="106" rx="9" fill="#131221" stroke="#55479B"/>
+    <text x="1005" y="116" fill="#9F90FF" font-size="12" font-weight="700">07</text>
+    <text x="1005" y="143" fill="#F3F7F5" font-size="16" font-weight="700">Approve release</text>
+    <text x="1005" y="166" fill="#C5BBFF" font-size="12">Public / scheduled</text>
+
+    <text x="40" y="232" fill="#9FB0A7" font-size="13">Any evidence, edit, render, metadata, thumbnail, or disclosure change invalidates the locked approval.</text>
+  </g>
+</svg>

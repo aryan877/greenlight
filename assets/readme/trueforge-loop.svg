@@ -1,0 +1,59 @@
+<svg width="1200" height="430" viewBox="0 0 1200 430" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Greenlight and TrueForge architecture</title>
+  <desc>The creator works in Greenlight Studio with a visible TrueForge Producer. TrueForge calls Greenlight's MCP service, which owns project state, providers, rendering, checks, and release actions.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10Z" fill="#69E0A7"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="430" rx="18" fill="#0B1110"/>
+  <text x="40" y="48" fill="#F3F7F5" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700">One controlled production loop</text>
+  <text x="1160" y="48" fill="#82928A" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="13">TRUEFORGE OWNS THE AGENT LOOP</text>
+
+  <rect x="40" y="82" width="230" height="218" rx="10" fill="#111B17" stroke="#294137"/>
+  <circle cx="76" cy="120" r="18" stroke="#69E0A7" stroke-width="3"/>
+  <path d="m80.2 112 10.5 18.2M71.8 112h21M67.6 120l10.5-18.2M71.8 128l-10.5-18.2M80.2 128h-21M84.4 120l-10.5 18.2" stroke="#69E0A7" stroke-width="3" stroke-linecap="round"/>
+  <text x="108" y="116" fill="#F3F7F5" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">Greenlight Studio</text>
+  <text x="108" y="137" fill="#9FB0A7" font-family="Arial, Helvetica, sans-serif" font-size="13">Creator workspace</text>
+  <text x="62" y="180" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Timeline + program monitor</text>
+  <text x="62" y="207" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Evidence Lens + Producer</text>
+  <text x="62" y="234" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Apply / Refine / Cancel</text>
+  <text x="62" y="261" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Release Readiness</text>
+
+  <rect x="325" y="82" width="230" height="218" rx="10" fill="#131221" stroke="#403873"/>
+  <path d="M350 103 367 111.5V120h-8.5v17H367v8.5l-17 8.5v-51ZM401 103l-17 8.5v8.5h8.5v17H384v8.5l17 8.5v-51Z" fill="#F3F7F5"/>
+  <path d="M375.5 120c.5 3 1.7 5.3 3.4 7 1.7 1.7 4 2.8 7 3.3-3 .6-5.3 1.7-7 3.5-1.7 1.7-2.9 4-3.4 7-.6-3-1.7-5.3-3.5-7-1.7-1.8-4-2.9-7-3.5 3-.5 5.3-1.6 7-3.3 1.8-1.7 2.9-4 3.5-7Z" fill="#7A68FA"/>
+  <text x="419" y="126" fill="#F3F7F5" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">TrueForge</text>
+  <text x="347" y="180" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Durable sessions + reconnect</text>
+  <text x="347" y="207" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Approvals + questions</text>
+  <text x="347" y="234" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Bounded subagents + skills</text>
+  <text x="347" y="261" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Model, sandbox, Code Mode</text>
+
+  <rect x="610" y="82" width="230" height="218" rx="10" fill="#111B17" stroke="#294137"/>
+  <text x="632" y="120" fill="#F3F7F5" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">Greenlight MCP</text>
+  <text x="632" y="142" fill="#9FB0A7" font-family="Arial, Helvetica, sans-serif" font-size="13">Trusted side effects</text>
+  <text x="632" y="180" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Projects + immutable artifacts</text>
+  <text x="632" y="207" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Typed edit operations</text>
+  <text x="632" y="234" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Research + media providers</text>
+  <text x="632" y="261" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">OAuth + release actions</text>
+
+  <rect x="895" y="82" width="265" height="218" rx="10" fill="#111B17" stroke="#294137"/>
+  <text x="917" y="120" fill="#F3F7F5" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700">Deterministic output</text>
+  <text x="917" y="159" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Remotion render</text>
+  <text x="917" y="186" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Evidence + media checks</text>
+  <text x="917" y="213" fill="#D9E4DE" font-family="Arial, Helvetica, sans-serif" font-size="14">Locked release snapshot</text>
+  <rect x="917" y="239" width="160" height="36" rx="7" fill="#E53935"/>
+  <path d="M934 249.5c4.5-.4 22.5-.4 27 0 4 .4 5 2.7 5.3 8.5-.3 5.8-1.3 8.1-5.3 8.5-4.5.4-22.5.4-27 0-4-.4-5-2.7-5.3-8.5.3-5.8 1.3-8.1 5.3-8.5Zm10 4v9l8-4.5-8-4.5Z" fill="white"/>
+  <text x="974" y="263" fill="white" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700">UNLISTED FIRST</text>
+
+  <path d="M270 190h44" stroke="#69E0A7" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <path d="M555 190h44" stroke="#69E0A7" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <path d="M840 190h44" stroke="#69E0A7" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="292" y="176" fill="#9FB0A7" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10">CHAT</text>
+  <text x="577" y="176" fill="#9FB0A7" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="10">MCP</text>
+
+  <rect x="325" y="340" width="835" height="54" rx="9" fill="#0E1713" stroke="#294137"/>
+  <text x="742" y="362" fill="#69E0A7" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700">ONE STATE MODEL</text>
+  <text x="742" y="383" fill="#B9C8C0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="14">Zod contracts · stable IDs · immutable revisions · SQLite · artifact references</text>
+  <path d="M440 300v30M725 300v30M1027 300v30" stroke="#294137" stroke-width="2"/>
+</svg>

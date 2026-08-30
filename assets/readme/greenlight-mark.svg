@@ -1,0 +1,6 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Greenlight</title>
+  <desc>The aperture mark used by the Greenlight Studio interface.</desc>
+  <circle cx="48" cy="48" r="40" stroke="#69E0A7" stroke-width="7"/>
+  <path d="m57.24 32 22.96 39.76M38.76 32h45.92M29.52 48 52.48 8.24M38.76 64 15.8 24.24M57.24 64H11.32M66.48 48 43.52 87.76" stroke="#69E0A7" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
