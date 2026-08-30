@@ -2,6 +2,7 @@ node_modules/
 .turbo/
 dist/
 coverage/
+# Private/local research only. Never commit downloaded documentation mirrors.
 research/
 .env
 .env.*

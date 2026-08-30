@@ -23,6 +23,8 @@ idea → sourced script → editable timeline → checked render → unlisted re
 
 TrueForge runs the Producer loop rather than acting as a chat shell around another workflow. It owns turns, tool discovery, subagents, skills, Code Mode, approval pauses, session history, and context compaction.
 
+TrueForge is TrueFoundry's open-source agent harness. TrueFoundry's broader AI Gateway and MCP Gateway products are separate optional integrations, not replacements for the harness Greenlight runs on.
+
 Greenlight supplies a typed HTTP MCP service for production state and trusted side effects. The model sees immutable artifact IDs, never credentials or host paths.
 
 ```text
@@ -100,6 +102,24 @@ pnpm verify          # format check, lint, typecheck, tests, and builds
 ```
 
 Tests use local fixtures and fake provider/process responses. They do not make paid media calls, upload videos, or publish anything.
+
+## Documentation and hackathon references
+
+Use live sources so implementation decisions do not depend on stale documentation copies:
+
+1. [TrueForge documentation index](https://trueforge.dev/llms.txt)
+2. [TrueForge combined documentation](https://trueforge.dev/llms-full.txt)
+3. [Official WeMakeDevs hackathon resources](https://www.wemakedevs.org/hackathons/trueforge/resources)
+
+Downloaded research and private working notes belong under the Git-ignored `research/` directory. Do not commit documentation mirrors.
+
+Repository documentation:
+
+- [Product requirements](PRD.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Architecture decisions](docs/decisions/)
+- [AI assistance disclosure](AI_ASSISTANCE.md)
+- [Attributions](docs/ATTRIBUTIONS.md)
 
 ## Release guarantees
 
