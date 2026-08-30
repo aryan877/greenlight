@@ -1,0 +1,11 @@
+.git
+.turbo
+.env
+.env.*
+artifacts
+data
+node_modules
+research
+**/dist
+**/node_modules
+apps/render/out

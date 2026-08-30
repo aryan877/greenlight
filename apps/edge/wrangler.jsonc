@@ -1,0 +1,34 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "greenlight-studio",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-30",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "greenlight.aryankumar.dev",
+      "custom_domain": true,
+    },
+  ],
+  "assets": {
+    "directory": "../studio/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "html_handling": "none",
+    "run_worker_first": true,
+  },
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "greenlight-media",
+    },
+  ],
+  "vars": {
+    "DEMO_EMAIL": "demo@greenlight.studio",
+    "ORIGIN_URL": "https://greenlight-origin.aryankumar.dev",
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+}

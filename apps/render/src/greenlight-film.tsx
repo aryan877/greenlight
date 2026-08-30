@@ -404,21 +404,7 @@ const ProductionAudio = ({
   assetFiles,
   content,
 }: Pick<RenderProject, "assetFiles" | "content">) => {
-  const narrationWindows = audibleAudioTracks(content)
-    .filter((track) => track.role === "narration")
-    .flatMap((track) =>
-      track.clips.flatMap((clip) => {
-        const placement = audioClipRenderPlacement(content, clip);
-        return placement
-          ? [
-              {
-                from: placement.from,
-                to: placement.from + placement.durationInFrames,
-              },
-            ]
-          : [];
-      }),
-    );
+  const narrationWindows = narrationDuckingWindows(content, assetFiles);
   return (
     <>
       {audibleAudioTracks(content).flatMap((track) =>
@@ -448,6 +434,27 @@ const ProductionAudio = ({
     </>
   );
 };
+
+export const narrationDuckingWindows = (
+  content: ContentPackage,
+  assetFiles: Record<string, string>,
+) =>
+  audibleAudioTracks(content)
+    .filter((track) => track.role === "narration")
+    .flatMap((track) =>
+      track.clips.flatMap((clip) => {
+        if (!clip.artifact_id || !assetFiles[clip.artifact_id]) return [];
+        const placement = audioClipRenderPlacement(content, clip);
+        return placement
+          ? [
+              {
+                from: placement.from,
+                to: placement.from + placement.durationInFrames,
+              },
+            ]
+          : [];
+      }),
+    );
 
 const ProductionCaptions = ({
   captionTracks,

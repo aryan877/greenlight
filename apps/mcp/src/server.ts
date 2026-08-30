@@ -458,6 +458,7 @@ app.post(
         ? decodeURIComponent(encodedSandboxPath)
         : null;
       const fromSandbox = source === "trueforge_sandbox";
+      const fromR2 = source === "cloudflare_r2";
       if (
         fromSandbox &&
         (!sandboxSessionId || !sandboxTurnId || !sandboxPath?.startsWith("/"))
@@ -477,13 +478,16 @@ app.post(
         bytes,
         provenance: {
           producer: fromSandbox ? "trueforge" : "creator",
-          source: fromSandbox ? "sandbox_output" : "local_import",
+          source: fromSandbox
+            ? "sandbox_output"
+            : fromR2
+              ? "cloudflare_r2"
+              : "local_import",
           original_filename: filename,
           ...(fromSandbox
             ? {
                 trueforge_session_id: sandboxSessionId,
                 trueforge_turn_id: sandboxTurnId,
-                sandbox_path: sandboxPath,
               }
             : {}),
           declared_mime_type: request.header("x-greenlight-mime") ?? null,
@@ -585,8 +589,8 @@ const rejectStatelessMcpStream = (
 app.get("/mcp", rejectStatelessMcpStream);
 app.delete("/mcp", rejectStatelessMcpStream);
 
-const listener = app.listen(config.port, "127.0.0.1", () => {
-  console.log(`[greenlight-mcp] http://localhost:${config.port}/mcp`);
+const listener = app.listen(config.port, config.host, () => {
+  console.log(`[greenlight-mcp] listening on port ${config.port}`);
 });
 
 const shutdown = () => {

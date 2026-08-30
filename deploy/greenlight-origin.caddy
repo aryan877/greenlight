@@ -1,0 +1,21 @@
+:3540 {
+	bind 127.0.0.1
+
+	@authorized header X-Greenlight-Origin-Token {$GREENLIGHT_ORIGIN_TOKEN}
+	handle @authorized {
+		handle /greenlight-api/* {
+			uri replace /greenlight-api /api
+			reverse_proxy 127.0.0.1:3541 {
+				header_up -X-Greenlight-Origin-Token
+			}
+		}
+
+		handle_path /trueforge/* {
+			reverse_proxy 127.0.0.1:3542 {
+				header_up -X-Greenlight-Origin-Token
+			}
+		}
+	}
+
+	respond 404
+}

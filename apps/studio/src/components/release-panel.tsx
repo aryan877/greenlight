@@ -45,6 +45,7 @@ const tagsFromText = (value: string) =>
 const artifactName = (artifact: Artifact) => {
   const original = artifact.provenance.original_filename;
   if (typeof original === "string" && original.trim()) return original;
+  if (artifact.kind === "thumbnail") return "Rendered thumbnail";
   return artifact.relative_path.split("/").at(-1) ?? "thumbnail";
 };
 
@@ -159,10 +160,17 @@ export const ReleasePanel = ({
       track.clips.length > 0 &&
       track.clips.every((clip) => Boolean(clip.artifact_id)),
   );
+  const audibleTracks = audibleAudioTracks(content);
+  const spokenAudioNeedsCaptions = audibleTracks.some(
+    (track) =>
+      (track.role === "narration" || track.role === "dub") &&
+      track.clips.some((clip) => Boolean(clip.artifact_id)),
+  );
   const captionsReady =
-    hasTimedCaptions &&
-    (!qualityReport || checkByName.get("timed_captions")?.passed === true);
-  const hasAudibleAudio = audibleAudioTracks(content).some((track) =>
+    !spokenAudioNeedsCaptions ||
+    (hasTimedCaptions &&
+      (!qualityReport || checkByName.get("timed_captions")?.passed === true));
+  const hasAudibleAudio = audibleTracks.some((track) =>
     track.clips.some((clip) => Boolean(clip.artifact_id)),
   );
   const audioReady =
@@ -206,7 +214,7 @@ export const ReleasePanel = ({
             <p className="mt-0.5 text-[11px] text-ink-tertiary">
               {connection?.connected
                 ? connection.channel_title
-                : "Connect YouTube from the local uploader"}
+                : "YouTube channel not connected"}
             </p>
           </div>
           <span className="flex items-center gap-1.5 text-[10px] capitalize text-ink-tertiary">

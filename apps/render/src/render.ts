@@ -64,6 +64,7 @@ const captionTracks = Object.fromEntries(
 );
 const outputPath = resolve(argument("--output") ?? "out/greenlight.mp4");
 const thumbnailPath = resolve(argument("--thumbnail") ?? "out/thumbnail.png");
+const browserExecutable = process.env.GREENLIGHT_CHROMIUM_PATH || undefined;
 const publicDir = await mkdtemp(join(tmpdir(), "greenlight-public-"));
 
 await mkdir(dirname(outputPath), { recursive: true });
@@ -92,17 +93,20 @@ try {
     },
   });
   const filmComposition = await selectComposition({
+    browserExecutable,
     serveUrl,
     id: "GreenlightFilm",
     inputProps,
   });
   const thumbnailComposition = await selectComposition({
+    browserExecutable,
     serveUrl,
     id: "GreenlightThumbnail",
     inputProps,
   });
 
   await renderMedia({
+    browserExecutable,
     composition: filmComposition,
     serveUrl,
     codec: "h264",

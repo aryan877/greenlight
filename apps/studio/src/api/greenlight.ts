@@ -101,6 +101,77 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return value as T;
 };
 
+const edgeRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      accept: "application/json",
+      ...init?.headers,
+    },
+  });
+  const value = (await response.json().catch(() => null)) as
+    T | { error?: string } | null;
+  if (!response.ok) {
+    const code =
+      value && typeof value === "object" && "error" in value
+        ? value.error
+        : null;
+    throw new Error(code || `Greenlight edge ${response.status}`);
+  }
+  return value as T;
+};
+
+const uploadToR2 = async (projectId: string, file: File) => {
+  const grant = await edgeRequest<{
+    part_size_bytes: number;
+    token: string;
+  }>("/uploads/start", {
+    method: "POST",
+    body: JSON.stringify({
+      filename: file.name,
+      mime_type: file.type || "application/octet-stream",
+      project_id: projectId,
+      size: file.size,
+    }),
+    headers: { "content-type": "application/json" },
+  });
+  const parts: Array<{ etag: string; part_number: number }> = [];
+  try {
+    for (
+      let offset = 0, partNumber = 1;
+      offset < file.size;
+      offset += grant.part_size_bytes, partNumber += 1
+    ) {
+      const part = file.slice(
+        offset,
+        Math.min(file.size, offset + grant.part_size_bytes),
+      );
+      parts.push(
+        await edgeRequest<{ etag: string; part_number: number }>(
+          `/uploads/part?token=${encodeURIComponent(grant.token)}&part_number=${String(partNumber)}`,
+          {
+            method: "PUT",
+            body: part,
+            headers: { "content-type": "application/octet-stream" },
+          },
+        ),
+      );
+    }
+    return await edgeRequest<{ artifact: Artifact }>("/uploads/complete", {
+      method: "POST",
+      body: JSON.stringify({ parts, token: grant.token }),
+      headers: { "content-type": "application/json" },
+    });
+  } catch (error) {
+    await edgeRequest<void>("/uploads/abort", {
+      method: "POST",
+      body: JSON.stringify({ token: grant.token }),
+      headers: { "content-type": "application/json" },
+    }).catch(() => undefined);
+    throw error;
+  }
+};
+
 const requestJsonArtifact = async <T>(artifactId: string): Promise<T> => {
   const response = await fetch(
     `/greenlight-api/artifacts/${encodeURIComponent(artifactId)}`,
@@ -229,18 +300,7 @@ export const greenlightApi = {
       contentPackageSchema.parse(value),
     ),
   uploadAsset: async (projectId: string, file: File) => {
-    const response = await request<{ artifact: Artifact }>(
-      `/projects/${encodeURIComponent(projectId)}/assets`,
-      {
-        method: "POST",
-        body: file,
-        headers: {
-          "content-type": "application/octet-stream",
-          "x-greenlight-filename": encodeURIComponent(file.name),
-          "x-greenlight-mime": file.type || "application/octet-stream",
-        },
-      },
-    );
+    const response = await uploadToR2(projectId, file);
     return response.artifact;
   },
   uploadSandboxAsset: async (

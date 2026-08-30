@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, Image, LoaderCircle } from "lucide-react";
+import { CircleCheck, Image, LoaderCircle } from "lucide-react";
 
 import type { ImageGenerationCapabilities } from "../api/greenlight.js";
 import { cx } from "./controls.js";
@@ -6,9 +6,9 @@ import { cx } from "./controls.js";
 const unavailableCopy = (
   reason: ImageGenerationCapabilities["reason"] | undefined,
 ) => {
-  if (reason === "codex_not_installed") return "Codex is not installed";
+  if (reason === "codex_not_installed") return "Imagegen optional";
   if (reason === "codex_not_authenticated") return "Sign in to Codex";
-  return "Codex status unavailable";
+  return "Imagegen optional";
 };
 
 export const CodexConnectionStatus = ({
@@ -50,9 +50,7 @@ export const CodexConnectionStatus = ({
         <LoaderCircle className="size-3.5 animate-spin" />
       ) : connected ? (
         <CircleCheck className="size-3.5" />
-      ) : (
-        <CircleAlert className="size-3.5" />
-      )}
+      ) : null}
       <Image className="size-3.5" />
       <span>{label}</span>
     </div>

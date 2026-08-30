@@ -5,6 +5,7 @@ import {
   captionClipRenderPlacement,
   getDurationInFrames,
   FPS,
+  narrationDuckingWindows,
 } from "../src/greenlight-film";
 import { fixturePackage } from "../src/fixture";
 
@@ -57,5 +58,17 @@ describe("GreenlightFilm", () => {
       from: 3 * FPS,
       durationInFrames: 2 * FPS,
     });
+  });
+
+  it("ducks only under narration clips that have a renderable artifact", () => {
+    const content = structuredClone(fixturePackage);
+    expect(narrationDuckingWindows(content, {})).toEqual([]);
+
+    content.scenes[0]!.narration_artifact_id = "artifact_voice_hook";
+    expect(
+      narrationDuckingWindows(content, {
+        artifact_voice_hook: "assets/voice-hook.wav",
+      }),
+    ).toEqual([{ from: 0, to: 8 * FPS }]);
   });
 });

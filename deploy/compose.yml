@@ -1,0 +1,89 @@
+name: greenlight
+
+services:
+  mcp:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: greenlight-runtime:current
+    restart: unless-stopped
+    env_file: .env.runtime
+    environment:
+      GREENLIGHT_ARTIFACT_DIR: /var/lib/greenlight/artifacts
+      GREENLIGHT_CHROMIUM_PATH: /usr/bin/chromium
+      GREENLIGHT_DATA_DIR: /var/lib/greenlight/data
+      GREENLIGHT_MCP_HOST: 0.0.0.0
+      GREENLIGHT_MCP_PORT: 8941
+      GREENLIGHT_OPENMOJI_ROOT: /opt/openmoji
+      GREENLIGHT_STUDIO_ORIGIN: https://greenlight.aryankumar.dev
+      GREENLIGHT_TRANSCRIPTION_PROVIDER: openrouter
+      GREENLIGHT_WHISPER_BINARY: /usr/local/bin/whisper-cli
+      GREENLIGHT_WHISPER_MODEL: /opt/whisper-models/ggml-base.bin
+      GREENLIGHT_YOUTUBE_UPLOADER: /opt/youtube-uploader/bin/youtube-uploader
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8941/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    ports:
+      - 127.0.0.1:3541:8941
+    volumes:
+      - ../../state/greenlight:/var/lib/greenlight
+      - ../../state/openmoji:/opt/openmoji:ro
+      - ../../state/whisper:/opt/whisper-models:ro
+      - ../../state/youtube:/root/.config/youtube-uploader
+
+  trueforge:
+    image: greenlight-runtime:current
+    restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor=unconfined
+      - seccomp=unconfined
+      - systempaths=unconfined
+    depends_on:
+      mcp:
+        condition: service_healthy
+    command: ["node", "node_modules/@truefoundry/trueforge/dist/cli.js"]
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8790
+      SQLITE_PATH: /var/lib/trueforge/trueforge.sqlite
+      STANDALONE: "true"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8790/api/v1/agents').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    ports:
+      - 127.0.0.1:3542:8790
+    volumes:
+      - ../../state/trueforge:/var/lib/trueforge
+
+  configure:
+    image: greenlight-runtime:current
+    profiles: [setup]
+    depends_on:
+      mcp:
+        condition: service_healthy
+      trueforge:
+        condition: service_healthy
+    env_file: .env.runtime
+    environment:
+      GREENLIGHT_ENABLE_GIT_SKILLS: "false"
+      GREENLIGHT_MCP_URL: http://mcp:8941/mcp
+      TRUEFORGE_API_URL: http://trueforge:8790
+    command: ["node", "scripts/configure-trueforge.mjs"]

@@ -34,6 +34,7 @@ export const parseMcpPort = (value: string | undefined): number => {
 export type GreenlightConfig = {
   artifactDir: string;
   dataDir: string;
+  host: string;
   mcpAuthToken: string;
   port: number;
   studioOrigin: string;
@@ -96,6 +97,7 @@ export const loadConfig = (): GreenlightConfig => {
   return {
     artifactDir,
     dataDir,
+    host: process.env.GREENLIGHT_MCP_HOST?.trim() || "127.0.0.1",
     mcpAuthToken,
     port: parseMcpPort(process.env.GREENLIGHT_MCP_PORT),
     studioOrigin: new URL(

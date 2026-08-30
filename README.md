@@ -10,6 +10,10 @@
   Research → sourced script → editable timeline → checked render → unlisted review
 </p>
 
+<p align="center">
+  <a href="https://greenlight.aryankumar.dev"><strong>Open the live demo</strong></a> · Judge credentials are prefilled on the login screen
+</p>
+
 Greenlight is a real multi-track editor with a visible Producer agent. Direct gestures and Producer proposals use the same typed edit contract, every accepted change creates an immutable revision, and the creator keeps final release control.
 
 ## The demo surface
@@ -32,6 +36,8 @@ TrueForge visibly owns the agent loop. Greenlight MCP owns trusted state and sid
 Both creator edits and Producer edits resolve to `EditorPatchOperation`, so the editor never maintains a hidden second state model.
 
 ![Greenlight release gates](assets/readme/release-gates.svg)
+
+The live deployment serves the Studio and signed multipart uploads from a Cloudflare Worker, keeps creator media in private R2, and reaches the containerized TrueForge + Greenlight origin through a header-gated Cloudflare Tunnel. The origin exposes no public service port.
 
 ## Run locally
 
@@ -77,10 +83,12 @@ TrueForge 0.1.4 clones Git-backed skills only from public GitHub or GitLab repos
 
 ```text
 apps/studio         React editor and TrueForge event projection
+apps/edge           Cloudflare auth, static assets, proxy, and signed R2 upload
 apps/mcp            Runnable MCP/API service and trusted side effects
 apps/render         Deterministic Remotion renderer
 packages/contracts  Shared Zod schemas and editing invariants
 agents              Saved Producer definition and four lazy skills
+deploy              Container and private-origin configuration
 scripts             Repeatable setup and demo utilities
 ```
 
