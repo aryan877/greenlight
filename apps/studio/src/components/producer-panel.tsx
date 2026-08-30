@@ -9,6 +9,7 @@ import type {
 import {
   Blend,
   ArrowUp,
+  BookOpen,
   Captions,
   Check,
   ChevronDown,
@@ -35,7 +36,7 @@ import {
   useVoiceCapabilities,
   useVoiceSample,
 } from "../hooks/use-greenlight-queries.js";
-import { GreenlightMark } from "../brand-icons.js";
+import { GreenlightMark, TrueForgeIcon } from "../brand-icons.js";
 import type {
   PendingToolApproval,
   PendingQuestion,
@@ -45,6 +46,7 @@ import type {
 import { MEDIA_ACCEPT, MEDIA_ARTIFACT_MIME } from "../editor/media-transfer.js";
 import { shouldSubmitProducerInstruction } from "../editor/producer-composer.js";
 import type { ProducerDraftIntent } from "../editor/producer-draft.js";
+import { producerPromptTemplates } from "../editor/producer-prompt-library.js";
 import { cx } from "./controls.js";
 
 const eventIcon: Partial<
@@ -798,6 +800,7 @@ export const ProducerPanel = ({
   contextArtifacts,
   draftIntent,
   events,
+  sessionId,
   sessionCostInUsd,
   activity,
   pendingApprovals,
@@ -828,6 +831,7 @@ export const ProducerPanel = ({
   contextArtifacts: Artifact[];
   draftIntent: ProducerDraftIntent | null;
   events: StudioAgentEvent[];
+  sessionId: string | null;
   sessionCostInUsd: number | null;
   activity: string | null;
   pendingApprovals: PendingToolApproval[];
@@ -854,6 +858,7 @@ export const ProducerPanel = ({
   importing: boolean;
 }) => {
   const [instruction, setInstruction] = useState("");
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [openDocument, setOpenDocument] = useState<StudioReviewDocument | null>(
     null,
@@ -1169,6 +1174,14 @@ export const ProducerPanel = ({
         ) : null}
         {!conversationPaused ? (
           <div className="no-scrollbar flex gap-1.5 overflow-x-auto border-b border-line-subtle px-3 py-2">
+            <button
+              type="button"
+              aria-expanded={libraryOpen}
+              onClick={() => setLibraryOpen((open) => !open)}
+              className="flex shrink-0 items-center gap-1 rounded-lg border border-action/40 bg-action-soft px-2.5 py-1.5 text-[10px] font-medium text-action"
+            >
+              <BookOpen size={11} /> Prompt library
+            </button>
             {liveSelection.some((reference) => reference.type === "gap") ? (
               <button
                 type="button"
@@ -1192,6 +1205,37 @@ export const ProducerPanel = ({
                 {intent.label}
               </button>
             ))}
+          </div>
+        ) : null}
+        {libraryOpen && !conversationPaused ? (
+          <div className="max-h-56 overflow-y-auto border-b border-line-subtle bg-surface-sunken p-2">
+            <div className="mb-2 flex items-center gap-2 px-1 text-[9px] text-ink-tertiary">
+              <TrueForgeIcon className="size-3" />
+              TrueForge playbooks · fill the composer, never auto-send
+            </div>
+            <div className="grid grid-cols-2 gap-px overflow-hidden border border-line-subtle bg-line-subtle">
+              {producerPromptTemplates.map((template) => (
+                <button
+                  key={template.label}
+                  type="button"
+                  onClick={() => {
+                    setInstruction(template.prompt);
+                    setLibraryOpen(false);
+                  }}
+                  className="min-h-16 bg-surface px-2.5 py-2 text-left hover:bg-hover"
+                >
+                  <span className="block font-mono text-[8px] uppercase tracking-wider text-action">
+                    {template.group}
+                  </span>
+                  <strong className="mt-0.5 block text-[10px] font-medium text-ink">
+                    {template.label}
+                  </strong>
+                  <span className="mt-0.5 block text-[9px] leading-3.5 text-ink-tertiary">
+                    {template.description}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         ) : null}
         <div className="flex min-h-[88px] flex-col gap-2 px-3 pt-3">
@@ -1303,10 +1347,17 @@ export const ProducerPanel = ({
         </div>
         <div className="flex items-center px-3 pb-2.5 pt-1">
           <span
-            className="mr-auto font-mono text-[10px] text-ink-secondary"
+            className="mr-auto flex items-center gap-1.5 font-mono text-[9px] text-ink-secondary"
             title="Provider-reported cost for this TrueForge session"
           >
-            Session cost {formatSessionCost(sessionCostInUsd)}
+            <TrueForgeIcon className="size-3" />
+            {sessionId
+              ? isSending
+                ? "Refresh-safe"
+                : "Durable session"
+              : "Starts on send"}
+            <span className="text-ink-caption">·</span>
+            {formatSessionCost(sessionCostInUsd)}
           </span>
           <input
             ref={fileInputRef}

@@ -53,6 +53,22 @@ export const useContentPackage = (artifactId: string | null) =>
       : skipToken,
   });
 
+export const useEvidenceLedger = (artifactId: string | null) =>
+  useQuery({
+    queryKey: greenlightKeys.artifact(artifactId ?? "pending"),
+    queryFn: artifactId
+      ? () => greenlightApi.getEvidenceLedger(artifactId)
+      : skipToken,
+  });
+
+export const useQualityReport = (artifactId: string | null) =>
+  useQuery({
+    queryKey: greenlightKeys.artifact(artifactId ?? "pending"),
+    queryFn: artifactId
+      ? () => greenlightApi.getQualityReport(artifactId)
+      : skipToken,
+  });
+
 export const useVoiceCapabilities = () =>
   useQuery({
     queryKey: greenlightKeys.voice(),

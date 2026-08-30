@@ -8,6 +8,8 @@ export type MediaTimelineAudioSource = {
   sourceInSeconds: number;
   playbackRate: number;
   gain: number;
+  duckingGain: number;
+  duckingWindows: Array<{ startSeconds: number; endSeconds: number }>;
 };
 
 export const useMediaController = () => {
@@ -55,9 +57,16 @@ export const useMediaController = () => {
           audio.src = source.url;
         }
         audio.muted = mutedRef.current;
+        const ducked = source.duckingWindows.some(
+          (window) =>
+            seconds >= window.startSeconds && seconds < window.endSeconds,
+        );
         audio.volume = Math.max(
           0,
-          Math.min(1, volumeRef.current * source.gain),
+          Math.min(
+            1,
+            volumeRef.current * source.gain * (ducked ? source.duckingGain : 1),
+          ),
         );
         audio.playbackRate = source.playbackRate;
 

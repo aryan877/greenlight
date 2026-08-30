@@ -30,11 +30,13 @@ import { useProducerAgent } from "./hooks/use-producer-agent.js";
 import { greenlightApi } from "./api/greenlight.js";
 import {
   useContentPackage,
+  useEvidenceLedger,
   useApplyEditorPatch,
   useCreateProject,
   useImageGenerationCapabilities,
   useProject,
   useProjects,
+  useQualityReport,
   useRestoreContentRevision,
   useUploadAsset,
   useYouTubeConnection,
@@ -174,6 +176,15 @@ export const App = () => {
             contentArtifact?.id,
       )
       .at(-1) ?? null;
+  const qualityArtifact =
+    project.data?.artifacts
+      .filter(
+        (artifact) =>
+          artifact.kind === "quality_report" &&
+          artifact.provenance.content_package_artifact_id ===
+            contentArtifact?.id,
+      )
+      .at(-1) ?? null;
   const thumbnailArtifact =
     project.data?.artifacts
       .filter(
@@ -184,6 +195,8 @@ export const App = () => {
       )
       .at(-1) ?? null;
   const content = useContentPackage(contentArtifact?.id ?? null);
+  const evidence = useEvidenceLedger(evidenceArtifact?.id ?? null);
+  const quality = useQualityReport(qualityArtifact?.id ?? null);
   const editorArtifactId =
     directRevision?.artifactId ?? contentArtifact?.id ?? null;
   const editorContent =
@@ -1788,6 +1801,7 @@ export const App = () => {
                     )}
                     draftIntent={draftIntent}
                     events={producer.events}
+                    sessionId={producer.sessionId}
                     sessionCostInUsd={producer.sessionCostInUsd}
                     activity={producer.activity}
                     pendingApprovals={producer.pendingApprovals}
@@ -1864,7 +1878,9 @@ export const App = () => {
                       }
                       connection={youtubeConnection.data ?? null}
                       content={visibleContent}
+                      evidence={evidence.data ?? null}
                       latestThumbnail={releaseThumbnailArtifact}
+                      qualityReport={quality.data ?? null}
                       releasePrivacy={project.data?.release?.privacy ?? null}
                       releaseStudioUrl={
                         project.data?.release?.snapshot.youtube_video_id
@@ -1872,6 +1888,12 @@ export const App = () => {
                           : null
                       }
                       onChange={updateRelease}
+                      onGenerateThumbnails={() => {
+                        setRightTab("producer");
+                        directProducer(
+                          "Create three distinct, accurate 16:9 YouTube thumbnail candidates for the current locked cut. Use only licensed or generated visual artifacts, keep claims truthful, attach all three to the release test set, and leave the final choice to me.",
+                        );
+                      }}
                       onPrepare={() => {
                         setRightTab("producer");
                         directProducer(
@@ -1884,6 +1906,7 @@ export const App = () => {
                             : "Prepare this cut for an unlisted YouTube review. Run only missing quality or render steps and stop for approval before upload.",
                         );
                       }}
+                      video={videoArtifact}
                     />
                   ) : null}
                 </div>
@@ -1894,7 +1917,21 @@ export const App = () => {
                 >
                   <InspectorPanel
                     scene={visibleScene}
+                    evidence={evidence.data ?? null}
                     editing={applyDirectPatch.isPending}
+                    onChangeLook={(scene, look) =>
+                      applyDirectOperations(
+                        [scene.id],
+                        [
+                          {
+                            type: "update_scene",
+                            scene_id: scene.id,
+                            visual: { look },
+                          },
+                        ],
+                        `Set “${scene.title}” look to ${look}`,
+                      )
+                    }
                     onChangeSpeed={(scene, playbackRate) =>
                       applyDirectOperations(
                         [scene.id],

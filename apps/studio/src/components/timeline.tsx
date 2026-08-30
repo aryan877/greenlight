@@ -59,6 +59,8 @@ import {
   minimumTimelineItemStart,
 } from "../editor/operations.js";
 import { pointInsideProducer } from "../editor/pointer-target.js";
+import { normalizationGain } from "../editor/audio-waveforms.js";
+import { useAudioWaveforms } from "../hooks/use-audio-waveforms.js";
 import { TrackRail, type TrackDraft } from "./track-rail.js";
 import { cx, IconButton } from "./controls.js";
 
@@ -210,8 +212,41 @@ export const Timeline = ({
   const duration = totalDuration(content);
   const audioTracks = effectiveAudioTracks(content);
   const items = useMemo(() => timelineItems(content), [content]);
+  const audioArtifactIds = useMemo(
+    () =>
+      items
+        .filter((item) => item.kind === "audio")
+        .flatMap((item) => item.artifact_ids.slice(0, 1)),
+    [items],
+  );
+  const waveformAnalyses = useAudioWaveforms(audioArtifactIds);
   const gaps = useMemo(() => timelineGaps(content), [content]);
   const tracks = useMemo(() => timelineTracks(content), [content]);
+  const normalizationGainByTrackId = useMemo(
+    () =>
+      new Map(
+        tracks
+          .filter((track) => track.kind === "audio")
+          .flatMap((track) => {
+            const rmsValues = items
+              .filter(
+                (item) => item.kind === "audio" && item.track_id === track.id,
+              )
+              .flatMap((item) => {
+                const analysis = waveformAnalyses.get(
+                  item.artifact_ids[0] ?? "",
+                );
+                return analysis ? [analysis.rms] : [];
+              });
+            if (rmsValues.length === 0) return [];
+            const rms =
+              rmsValues.reduce((sum, value) => sum + value, 0) /
+              rmsValues.length;
+            return [[track.id, normalizationGain(rms, track.role)] as const];
+          }),
+      ),
+    [items, tracks, waveformAnalyses],
+  );
   const laneIndex = useMemo(
     () => new Map(tracks.map((track, index) => [track.id, index])),
     [tracks],
@@ -330,6 +365,7 @@ export const Timeline = ({
             solo: false,
             export_enabled: true,
             gain: 1,
+            ducking: { enabled: false, reduction_db: -12 },
             clips: [],
           },
         },
@@ -1060,6 +1096,7 @@ export const Timeline = ({
         >
           <TrackRail
             tracks={tracks}
+            normalizationGainByTrackId={normalizationGainByTrackId}
             selectedTrackIds={selectedTrackIds}
             onAddTrack={addTrack}
             onAttachTracks={onAttachTracksToProducer}
@@ -1149,7 +1186,11 @@ export const Timeline = ({
                 [
                   {
                     type: "upsert_audio_track",
-                    track: { ...source, ...patch },
+                    track: {
+                      ...source,
+                      ...patch,
+                      ducking: patch.ducking ?? source.ducking,
+                    },
                   },
                 ],
                 summary,
@@ -1420,10 +1461,29 @@ export const Timeline = ({
                             : undefined,
                       }}
                     >
+                      {item.kind === "audio" &&
+                      waveformAnalyses.get(item.artifact_ids[0] ?? "") ? (
+                        <span
+                          aria-hidden="true"
+                          className="pointer-events-none absolute inset-x-1 bottom-1 top-1 flex items-center gap-px opacity-25"
+                        >
+                          {waveformAnalyses
+                            .get(item.artifact_ids[0] ?? "")!
+                            .peaks.map((peak, index) => (
+                              <span
+                                key={index}
+                                className="min-w-px flex-1 rounded-full bg-track-voice-strong"
+                                style={{
+                                  height: `${Math.max(8, peak * 100)}%`,
+                                }}
+                              />
+                            ))}
+                        </span>
+                      ) : null}
                       <Icon
                         size={10}
                         className={cx(
-                          "shrink-0",
+                          "relative z-10 shrink-0",
                           item.kind === "video" && "text-track-video-strong",
                           item.kind === "audio" && "text-track-voice-strong",
                           item.kind === "caption" &&
@@ -1431,11 +1491,11 @@ export const Timeline = ({
                           item.kind === "transition" && "text-action",
                         )}
                       />
-                      <span className="timeline-clip-label min-w-0 flex-1 overflow-hidden text-[9px] font-medium">
+                      <span className="timeline-clip-label relative z-10 min-w-0 flex-1 overflow-hidden text-[9px] font-medium">
                         <span>{item.label}</span>
                       </span>
                       {item.kind !== "transition" ? (
-                        <span className="ml-auto shrink-0 font-mono text-[7px] text-ink-caption">
+                        <span className="relative z-10 ml-auto shrink-0 font-mono text-[7px] text-ink-caption">
                           {formatTime(displayedEnd - displayedStart)}
                         </span>
                       ) : null}

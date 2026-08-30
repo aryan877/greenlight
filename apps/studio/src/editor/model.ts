@@ -225,6 +225,7 @@ export const timelineTracks = (
       solo: false,
       export_enabled: true,
       gain: 1,
+      ducking: null,
       visible: true,
     })),
     ...effectiveAudioTracks(content).map((track, index, audioTracks) => ({
@@ -242,6 +243,7 @@ export const timelineTracks = (
       solo: track.solo,
       export_enabled: track.export_enabled,
       gain: track.gain,
+      ducking: track.ducking,
       visible: true,
     })),
     ...effectiveCaptionTracks(content).map((track) => ({
@@ -251,6 +253,7 @@ export const timelineTracks = (
       solo: false,
       export_enabled: true,
       gain: 1,
+      ducking: null,
       visible: track.visible,
     })),
     ...effectiveTransitionTracks(content).map((track) => ({
@@ -260,6 +263,7 @@ export const timelineTracks = (
       solo: false,
       export_enabled: true,
       gain: 1,
+      ducking: null,
       visible: track.visible,
     })),
   ];

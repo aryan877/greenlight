@@ -38,6 +38,13 @@ const AUDIO_EDGE_FADE_FRAMES = 2;
 
 const { color, layout, timing, type } = renderSpec;
 
+const lookFilter: Record<NonNullable<Scene["visual"]["look"]>, string> = {
+  neutral: "none",
+  warm: "saturate(1.08) contrast(1.03) sepia(.08)",
+  punchy: "saturate(1.18) contrast(1.12)",
+  monochrome: "grayscale(1) contrast(1.08)",
+};
+
 export const audioClipRenderPlacement = (
   content: ContentPackage,
   clip: AudioTrackClip,
@@ -323,6 +330,7 @@ const EditorialScene = ({
         style={{
           padding: `${layout.bodyTop}px ${layout.bodyX}px ${layout.bodyBottom}px`,
           justifyContent: "center",
+          filter: lookFilter[scene.visual.look ?? "neutral"],
         }}
       >
         <Treatment assetFiles={assetFiles} scene={scene} />
@@ -337,14 +345,28 @@ const TrackAudioClip = ({
   file,
   scenePlaybackRate,
   track,
+  timelineStartFrame,
+  narrationWindows,
 }: {
   clip: AudioTrackClip;
   durationInFrames: number;
   file: string;
   scenePlaybackRate: number;
   track: AudioTrack;
+  timelineStartFrame: number;
+  narrationWindows: Array<{ from: number; to: number }>;
 }) => {
   const frame = useCurrentFrame();
+  const isDucked =
+    track.ducking?.enabled &&
+    narrationWindows.some(
+      (window) =>
+        timelineStartFrame + frame >= window.from &&
+        timelineStartFrame + frame < window.to,
+    );
+  const duckingGain = isDucked
+    ? 10 ** ((track.ducking?.reduction_db ?? -12) / 20)
+    : 1;
   const fadeIn = interpolate(
     frame,
     [0, AUDIO_EDGE_FADE_FRAMES],
@@ -373,7 +395,7 @@ const TrackAudioClip = ({
           ? undefined
           : Math.round(clip.source_out_seconds * FPS)
       }
-      volume={Math.min(fadeIn, fadeOut)}
+      volume={Math.min(fadeIn, fadeOut) * duckingGain}
     />
   );
 };
@@ -381,32 +403,51 @@ const TrackAudioClip = ({
 const ProductionAudio = ({
   assetFiles,
   content,
-}: Pick<RenderProject, "assetFiles" | "content">) => (
-  <>
-    {audibleAudioTracks(content).flatMap((track) =>
+}: Pick<RenderProject, "assetFiles" | "content">) => {
+  const narrationWindows = audibleAudioTracks(content)
+    .filter((track) => track.role === "narration")
+    .flatMap((track) =>
       track.clips.flatMap((clip) => {
-        const file = clip.artifact_id ? assetFiles[clip.artifact_id] : null;
         const placement = audioClipRenderPlacement(content, clip);
-        if (!file || !placement) return [];
-        return [
-          <Sequence
-            key={`${track.id}:${clip.id}`}
-            from={placement.from}
-            durationInFrames={placement.durationInFrames}
-          >
-            <TrackAudioClip
-              clip={clip}
-              durationInFrames={placement.durationInFrames}
-              file={file}
-              scenePlaybackRate={placement.scene.playback_rate}
-              track={track}
-            />
-          </Sequence>,
-        ];
+        return placement
+          ? [
+              {
+                from: placement.from,
+                to: placement.from + placement.durationInFrames,
+              },
+            ]
+          : [];
       }),
-    )}
-  </>
-);
+    );
+  return (
+    <>
+      {audibleAudioTracks(content).flatMap((track) =>
+        track.clips.flatMap((clip) => {
+          const file = clip.artifact_id ? assetFiles[clip.artifact_id] : null;
+          const placement = audioClipRenderPlacement(content, clip);
+          if (!file || !placement) return [];
+          return [
+            <Sequence
+              key={`${track.id}:${clip.id}`}
+              from={placement.from}
+              durationInFrames={placement.durationInFrames}
+            >
+              <TrackAudioClip
+                clip={clip}
+                durationInFrames={placement.durationInFrames}
+                file={file}
+                scenePlaybackRate={placement.scene.playback_rate}
+                track={track}
+                timelineStartFrame={placement.from}
+                narrationWindows={narrationWindows}
+              />
+            </Sequence>,
+          ];
+        }),
+      )}
+    </>
+  );
+};
 
 const ProductionCaptions = ({
   captionTracks,

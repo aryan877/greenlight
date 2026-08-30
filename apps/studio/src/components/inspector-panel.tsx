@@ -1,9 +1,17 @@
-import type { Scene } from "@greenlight/contracts";
+import type {
+  EvidenceLedger,
+  Scene,
+  VisualLookPreset,
+} from "@greenlight/contracts";
 import {
+  CircleAlert,
   Clock3,
+  ExternalLink,
   Gauge,
   MessageSquareText,
+  Palette,
   RotateCcw,
+  ShieldCheck,
   WandSparkles,
 } from "lucide-react";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
@@ -12,12 +20,16 @@ import { formatTime } from "../editor/model.js";
 
 export const InspectorPanel = ({
   scene,
+  evidence,
   editing,
+  onChangeLook,
   onChangeSpeed,
   onEdit,
 }: {
   scene: Scene | null;
+  evidence: EvidenceLedger | null;
   editing: boolean;
+  onChangeLook: (scene: Scene, look: VisualLookPreset) => void;
   onChangeSpeed: (scene: Scene, playbackRate: number) => void;
   onEdit: (instruction: string) => void;
 }) => {
@@ -35,6 +47,19 @@ export const InspectorPanel = ({
     lastCommittedSpeed.current = speed;
     onChangeSpeed(scene, speed);
   };
+  const sceneClaims = scene
+    ? (evidence?.claims.filter((claim) => scene.claim_ids.includes(claim.id)) ??
+      [])
+    : [];
+  const sourcesById = new Map(
+    evidence?.sources.map((source) => [source.id, source]) ?? [],
+  );
+  const looks: Array<{ id: VisualLookPreset; label: string }> = [
+    { id: "neutral", label: "Neutral" },
+    { id: "warm", label: "Warm" },
+    { id: "punchy", label: "Punchy" },
+    { id: "monochrome", label: "Mono" },
+  ];
 
   return (
     <div className="scroll-stable h-full overflow-y-auto px-4 py-4">
@@ -110,12 +135,114 @@ export const InspectorPanel = ({
 
           <section className="mt-5">
             <div className="flex items-center gap-1.5 text-[10px] font-medium text-ink">
+              <Palette size={12} className="text-ink-tertiary" />
+              Look
+              <span className="ml-auto text-[9px] text-ink-caption">
+                deterministic
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-2 border border-line-subtle">
+              {looks.map((look) => (
+                <button
+                  key={look.id}
+                  type="button"
+                  disabled={editing}
+                  aria-pressed={scene.visual.look === look.id}
+                  onClick={() => onChangeLook(scene, look.id)}
+                  className={`h-8 border-b border-r border-line-subtle text-[9px] last:border-b-0 hover:bg-hover ${
+                    scene.visual.look === look.id
+                      ? "bg-action-soft font-medium text-action"
+                      : "text-ink-secondary"
+                  }`}
+                >
+                  {look.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="mt-5">
+            <div className="flex items-center gap-1.5 text-[10px] font-medium text-ink">
               <MessageSquareText size={12} className="text-ink-tertiary" />
               Script
             </div>
             <p className="mt-2 text-[11px] leading-5 text-ink-secondary">
               {scene.narration}
             </p>
+          </section>
+
+          <section className="mt-5 border-t border-line-subtle pt-4">
+            <div className="flex items-center gap-1.5 text-[10px] font-medium text-ink">
+              <ShieldCheck size={12} className="text-action" />
+              Evidence lens
+              <span className="ml-auto font-mono text-[9px] text-ink-caption">
+                {
+                  sceneClaims.filter((claim) => claim.status === "supported")
+                    .length
+                }
+                /{sceneClaims.length}
+              </span>
+            </div>
+            {sceneClaims.length > 0 ? (
+              <div className="mt-2 divide-y divide-line-subtle border-y border-line-subtle">
+                {sceneClaims.map((claim) => (
+                  <div key={claim.id} className="py-2.5">
+                    <div className="flex items-start gap-2">
+                      {claim.status === "supported" ? (
+                        <ShieldCheck
+                          size={12}
+                          className="mt-0.5 shrink-0 text-success"
+                        />
+                      ) : (
+                        <CircleAlert
+                          size={12}
+                          className="mt-0.5 shrink-0 text-warning"
+                        />
+                      )}
+                      <p className="text-[10px] leading-4 text-ink-secondary">
+                        {claim.text}
+                      </p>
+                    </div>
+                    <div className="ml-5 mt-1.5 space-y-1">
+                      {claim.source_ids.flatMap((sourceId) => {
+                        const source = sourcesById.get(sourceId);
+                        return source
+                          ? [
+                              <a
+                                key={source.id}
+                                href={source.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center gap-1 truncate text-[9px] text-action hover:underline"
+                              >
+                                <ExternalLink size={9} className="shrink-0" />
+                                <span className="truncate">
+                                  {source.publisher} · {source.title}
+                                </span>
+                              </a>,
+                            ]
+                          : [];
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-[10px] leading-4 text-ink-tertiary">
+                No factual claim is attached to this scene.
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() =>
+                onEdit(
+                  `Audit every factual claim in the attached scene “${scene.title}”. Use current-web primary sources, update the evidence ledger, and do not change the cut.`,
+                )
+              }
+              className="mt-2 text-[9px] font-medium text-action hover:underline"
+            >
+              Ask Producer to verify this scene
+            </button>
           </section>
 
           <button

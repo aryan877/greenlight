@@ -87,6 +87,13 @@ describe("timelineAudioSources", () => {
         sourceInSeconds: 1,
         playbackRate: 3,
         gain: 0.75,
+        duckingGain: 1,
+        duckingWindows: [
+          {
+            startSeconds: 0.5,
+            endSeconds: 1.5,
+          },
+        ],
       },
     ]);
   });

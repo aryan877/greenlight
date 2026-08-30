@@ -1,12 +1,16 @@
 import {
   contentPackageSchema,
+  evidenceLedgerSchema,
+  qualityReportSchema,
   type Artifact,
   type ContentPackage,
   type EditorPatchInput,
+  type EvidenceLedger,
   type GenerateSoundEffectInput,
   type MediaLibraryResult,
   type Project,
   type ProjectBrief,
+  type QualityReport,
   type ReleaseSnapshot,
 } from "@greenlight/contracts";
 
@@ -126,6 +130,14 @@ export const greenlightApi = {
     }).then((response) => response.project),
   getProject: (projectId: string) =>
     request<ProjectDetail>(`/projects/${encodeURIComponent(projectId)}`),
+  getEvidenceLedger: (artifactId: string): Promise<EvidenceLedger> =>
+    requestJsonArtifact<unknown>(artifactId).then((value) =>
+      evidenceLedgerSchema.parse(value),
+    ),
+  getQualityReport: (artifactId: string): Promise<QualityReport> =>
+    requestJsonArtifact<unknown>(artifactId).then((value) =>
+      qualityReportSchema.parse(value),
+    ),
   getImageGenerationCapabilities: () =>
     request<ImageGenerationCapabilities>("/image-generation"),
   getVoiceCapabilities: () => request<VoiceCapabilities>("/voice"),

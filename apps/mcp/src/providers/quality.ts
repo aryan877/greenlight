@@ -19,11 +19,28 @@ type Probe = {
   streams?: Array<{ codec_type?: string; height?: number; width?: number }>;
 };
 
+export const detectedBlackDurationSeconds = (output: string) =>
+  [...output.matchAll(/black_duration:([0-9.]+)/g)].reduce(
+    (sum, match) => sum + Number(match[1] ?? 0),
+    0,
+  );
+
+export const integratedLoudnessLufs = (output: string) => {
+  const matches = [
+    ...output.matchAll(/\bI:\s*(-?(?:\d+(?:\.\d+)?|inf))\s*LUFS/g),
+  ];
+  const value = matches.at(-1)?.[1];
+  if (!value || value === "-inf") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 export class QualityInspector {
   constructor(
     private readonly artifacts: ArtifactStore,
     private readonly ffprobePath = "ffprobe",
     private readonly execute: typeof runFile = runFile,
+    private readonly ffmpegPath = "ffmpeg",
   ) {}
 
   async inspect(input: {
@@ -92,6 +109,48 @@ export class QualityInspector {
       (stream) => stream.codec_type === "audio",
     );
     const plannedDuration = productionDurationSeconds(content.scenes);
+    const [blackResult, loudnessResult] = await Promise.all([
+      this.execute(
+        this.ffmpegPath,
+        [
+          "-hide_banner",
+          "-i",
+          video.absolutePath,
+          "-vf",
+          "blackdetect=d=0.25:pix_th=0.10",
+          "-an",
+          "-f",
+          "null",
+          "-",
+        ],
+        { encoding: "utf8", timeout: 120_000 },
+      ),
+      this.execute(
+        this.ffmpegPath,
+        [
+          "-hide_banner",
+          "-i",
+          video.absolutePath,
+          "-af",
+          "ebur128=framelog=verbose",
+          "-vn",
+          "-f",
+          "null",
+          "-",
+        ],
+        { encoding: "utf8", timeout: 120_000 },
+      ),
+    ]);
+    const blackDuration = detectedBlackDurationSeconds(blackResult.stderr);
+    const plannedBlackDuration = content.scenes.reduce(
+      (sum, scene) => sum + (scene.gap_after_seconds ?? 0),
+      0,
+    );
+    const unexpectedBlackDuration = Math.max(
+      0,
+      blackDuration - plannedBlackDuration,
+    );
+    const loudness = integratedLoudnessLufs(loudnessResult.stderr);
     const scenesMissingTimedCaptions = content.scenes.filter(
       (scene) =>
         scene.narration_artifact_id &&
@@ -126,6 +185,24 @@ export class QualityInspector {
           ? "Narration audio stream is present."
           : "No audio stream found.",
         measured: Boolean(hasAudio),
+      },
+      {
+        name: "loudness",
+        passed: loudness !== null && loudness >= -18 && loudness <= -12,
+        detail:
+          loudness === null
+            ? "Integrated loudness could not be measured."
+            : `Integrated loudness is ${loudness.toFixed(1)} LUFS; target is -18 to -12 LUFS.`,
+        measured: loudness,
+      },
+      {
+        name: "unexpected_black_frames",
+        passed: unexpectedBlackDuration <= 0.35,
+        detail:
+          unexpectedBlackDuration <= 0.35
+            ? "No unexpected black segment longer than the tolerance."
+            : `${unexpectedBlackDuration.toFixed(2)}s of black exceeds explicit timeline gaps.`,
+        measured: unexpectedBlackDuration,
       },
       {
         name: "timed_captions",

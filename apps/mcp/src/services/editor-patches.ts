@@ -89,6 +89,10 @@ export const saveEditorPatch = async (input: {
     }
   }
   requireArtifactKind(revised.release.thumbnail_artifact_id, ["thumbnail"]);
+  for (const artifactId of revised.release.thumbnail_candidate_artifact_ids ??
+    []) {
+    requireArtifactKind(artifactId, ["thumbnail"]);
+  }
 
   const permittedSceneIds = new Set(selection.scene_ids);
   for (const operation of request.operations) {
@@ -155,6 +159,12 @@ export const saveEditorPatch = async (input: {
       requireArtifactKind(operation.release.thumbnail_artifact_id, [
         "thumbnail",
       ]);
+    }
+    if (operation.type === "update_release") {
+      for (const artifactId of operation.release
+        ?.thumbnail_candidate_artifact_ids ?? []) {
+        requireArtifactKind(artifactId, ["thumbnail"]);
+      }
     }
   }
 

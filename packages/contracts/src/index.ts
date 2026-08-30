@@ -159,6 +159,13 @@ export const sourceClipSchema = z
     }
   });
 
+export const visualLookPresetSchema = z.enum([
+  "neutral",
+  "warm",
+  "punchy",
+  "monochrome",
+]);
+
 export const sceneSchema = z.object({
   id: idSchema,
   kind: sceneKindSchema,
@@ -199,6 +206,7 @@ export const sceneSchema = z.object({
     prompt: z.string().max(900).nullable().default(null),
     artifact_ids: z.array(idSchema).max(4).default([]),
     accent: z.enum(["signal", "ink", "ember"]).default("signal"),
+    look: visualLookPresetSchema.optional(),
   }),
 });
 
@@ -280,6 +288,11 @@ export const audioClipDurationSeconds = (
     ? scene.duration_seconds - clip.start_offset_seconds
     : (clip.source_out_seconds - clip.source_in_seconds) / clip.playback_rate);
 
+export const audioDuckingSchema = z.object({
+  enabled: z.boolean().default(false),
+  reduction_db: z.number().min(-30).max(0).default(-12),
+});
+
 export const audioTrackSchema = z.object({
   id: idSchema,
   name: z.string().trim().min(1).max(80),
@@ -295,6 +308,7 @@ export const audioTrackSchema = z.object({
   solo: z.boolean().default(false),
   export_enabled: z.boolean().default(true),
   gain: z.number().min(0).max(2).default(1),
+  ducking: audioDuckingSchema.optional(),
   clips: z.array(audioTrackClipSchema).default([]),
 });
 
@@ -549,6 +563,7 @@ export const youtubeMetadataSchema = z.object({
 
 const releasePlanFieldsSchema = z.object({
   thumbnail_artifact_id: idSchema.nullable().default(null),
+  thumbnail_candidate_artifact_ids: z.array(idSchema).max(3).optional(),
   destination: z.enum(["unlisted", "public", "scheduled"]).default("unlisted"),
   publish_at: z.string().datetime().nullable().default(null),
 });
@@ -583,6 +598,7 @@ export const contentPackageSchema = z
     metadata: youtubeMetadataSchema,
     release: releasePlanSchema.default(() => ({
       thumbnail_artifact_id: null,
+      thumbnail_candidate_artifact_ids: [],
       destination: "unlisted" as const,
       publish_at: null,
     })),
@@ -1120,6 +1136,7 @@ const primaryAudioTrack = (content: { scenes: Scene[] }): AudioTrack => ({
   solo: false,
   export_enabled: true,
   gain: 1,
+  ducking: { enabled: false, reduction_db: -12 },
   clips: content.scenes.map(primaryAudioClip),
 });
 
@@ -1143,6 +1160,7 @@ export const effectiveAudioTracks = (content: ContentPackage): AudioTrack[] => {
       solo: false,
       export_enabled: true,
       gain: 1,
+      ducking: { enabled: false, reduction_db: -12 },
       clips: tracks.map((track) => ({
         id: track.id,
         scene_id: track.scene_id,
@@ -1489,6 +1507,7 @@ export const editorTimelineTrackSchema = z.object({
   solo: z.boolean().default(false),
   export_enabled: z.boolean().default(true),
   gain: z.number().min(0).max(2).default(1),
+  ducking: audioDuckingSchema.nullable().optional(),
   visible: z.boolean().default(true),
 });
 
@@ -1652,6 +1671,7 @@ const sceneVisualPatchSchema = z
     prompt: z.string().max(900).nullable().optional(),
     artifact_ids: z.array(idSchema).max(4).optional(),
     accent: z.enum(["signal", "ink", "ember"]).optional(),
+    look: visualLookPresetSchema.optional(),
   })
   .refine(
     (patch) => Object.values(patch).some((value) => value !== undefined),
@@ -1885,6 +1905,7 @@ export type Source = z.infer<typeof sourceSchema>;
 export type Claim = z.infer<typeof claimSchema>;
 export type EvidenceLedger = z.infer<typeof evidenceLedgerSchema>;
 export type Scene = z.infer<typeof sceneSchema>;
+export type VisualLookPreset = z.infer<typeof visualLookPresetSchema>;
 export type ContentPackage = z.infer<typeof contentPackageSchema>;
 export type LocalizedNarrationTrack = z.infer<
   typeof localizedNarrationTrackSchema

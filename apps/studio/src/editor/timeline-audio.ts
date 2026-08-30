@@ -14,6 +14,8 @@ export type TimelineAudioSource = {
   sourceInSeconds: number;
   playbackRate: number;
   gain: number;
+  duckingGain: number;
+  duckingWindows: Array<{ startSeconds: number; endSeconds: number }>;
 };
 
 export const timelineAudioSources = (
@@ -21,6 +23,30 @@ export const timelineAudioSources = (
 ): TimelineAudioSource[] => {
   const tracks = effectiveAudioTracks(content);
   const hasSolo = tracks.some((track) => track.solo && !track.muted);
+  const duckingWindows = tracks
+    .filter(
+      (track) =>
+        track.role === "narration" && !track.muted && (!hasSolo || track.solo),
+    )
+    .flatMap((track) =>
+      track.clips.flatMap((clip) => {
+        const sceneIndex = content.scenes.findIndex(
+          (scene) => scene.id === clip.scene_id,
+        );
+        const scene = content.scenes[sceneIndex];
+        if (!scene || !clip.artifact_id) return [];
+        const startSeconds =
+          clip.timeline_start_seconds ??
+          sceneOffset(content.scenes, sceneIndex) + clip.start_offset_seconds;
+        return [
+          {
+            startSeconds,
+            endSeconds:
+              startSeconds + Math.max(0, audioClipDurationSeconds(clip, scene)),
+          },
+        ];
+      }),
+    );
 
   return tracks.flatMap((track) => {
     if (track.muted || (hasSolo && !track.solo)) return [];
@@ -50,6 +76,10 @@ export const timelineAudioSources = (
           sourceInSeconds: clip.source_in_seconds,
           playbackRate: clip.playback_rate * scene.playback_rate,
           gain: track.gain,
+          duckingGain: track.ducking?.enabled
+            ? 10 ** ((track.ducking?.reduction_db ?? -12) / 20)
+            : 1,
+          duckingWindows,
         },
       ];
     });

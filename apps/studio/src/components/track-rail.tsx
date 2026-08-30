@@ -3,8 +3,10 @@ import type {
   EditorTimelineTrack,
 } from "@greenlight/contracts";
 import {
+  AudioLines,
   Blend,
   Captions,
+  ChevronsDown,
   Eye,
   EyeOff,
   Film,
@@ -97,6 +99,7 @@ type TrackDrag = {
 
 export const TrackRail = ({
   tracks,
+  normalizationGainByTrackId,
   selectedTrackIds,
   onAddTrack,
   onAttachTracks,
@@ -108,12 +111,18 @@ export const TrackRail = ({
   onSelectTrack,
 }: {
   tracks: EditorTimelineTrack[];
+  normalizationGainByTrackId: Map<string, number>;
   selectedTrackIds: string[];
   onAddTrack: (track: TrackDraft) => void;
   onAttachTracks: (tracks: EditorTimelineTrack[]) => void;
   onChangeAudioTrack: (
     track: EditorTimelineTrack,
-    patch: Pick<EditorTimelineTrack, "muted" | "solo" | "export_enabled">,
+    patch: Partial<
+      Pick<
+        EditorTimelineTrack,
+        "muted" | "solo" | "export_enabled" | "gain" | "ducking"
+      >
+    >,
     summary: string,
   ) => void;
   onChangeCaptionTrack: (track: EditorTimelineTrack, visible: boolean) => void;
@@ -331,25 +340,59 @@ export const TrackRail = ({
               </span>
             )}
             {track.kind === "audio" ? (
-              <RailAction
-                active={track.muted}
-                label={
-                  track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`
-                }
-                onClick={() =>
-                  onChangeAudioTrack(
-                    track,
-                    {
-                      muted: !track.muted,
-                      solo: track.solo,
-                      export_enabled: track.export_enabled,
-                    },
-                    track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`,
-                  )
-                }
-              >
-                {track.muted ? <VolumeX size={10} /> : <Volume2 size={10} />}
-              </RailAction>
+              <>
+                {normalizationGainByTrackId.has(track.id) ? (
+                  <RailAction
+                    label={`Normalize ${track.name}`}
+                    onClick={() =>
+                      onChangeAudioTrack(
+                        track,
+                        { gain: normalizationGainByTrackId.get(track.id)! },
+                        `Normalize ${track.name}`,
+                      )
+                    }
+                  >
+                    <AudioLines size={10} />
+                  </RailAction>
+                ) : null}
+                {track.role === "music" || track.role === "effects" ? (
+                  <RailAction
+                    active={track.ducking?.enabled}
+                    label={`${track.ducking?.enabled ? "Disable" : "Enable"} ducking for ${track.name}`}
+                    onClick={() =>
+                      onChangeAudioTrack(
+                        track,
+                        {
+                          ducking: {
+                            enabled: !track.ducking?.enabled,
+                            reduction_db: track.ducking?.reduction_db ?? -12,
+                          },
+                        },
+                        `${track.ducking?.enabled ? "Disable" : "Enable"} ducking for ${track.name}`,
+                      )
+                    }
+                  >
+                    <ChevronsDown size={10} />
+                  </RailAction>
+                ) : null}
+                <RailAction
+                  active={track.muted}
+                  label={
+                    track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`
+                  }
+                  onClick={() =>
+                    onChangeAudioTrack(
+                      track,
+                      { muted: !track.muted },
+                      track.muted
+                        ? `Unmute ${track.name}`
+                        : `Mute ${track.name}`,
+                    )
+                  }
+                >
+                  {track.muted ? <VolumeX size={10} /> : <Volume2 size={10} />}
+                </RailAction>
+              </>
             ) : null}
             {track.kind === "caption" ? (
               <RailAction

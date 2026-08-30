@@ -2,8 +2,15 @@ import type {
   Artifact,
   ContentPackage,
   EditorPatchOperation,
+  EvidenceLedger,
+  QualityReport,
 } from "@greenlight/contracts";
 import {
+  audibleAudioTracks,
+  effectiveCaptionTracks,
+} from "@greenlight/contracts";
+import {
+  CircleAlert,
   CalendarClock,
   Check,
   ChevronDown,
@@ -11,6 +18,8 @@ import {
   Image as ImageIcon,
   LoaderCircle,
   LockKeyhole,
+  ShieldCheck,
+  Sparkles,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -57,21 +66,29 @@ export const ReleasePanel = ({
   busy,
   connection,
   content,
+  evidence,
   latestThumbnail,
   onChange,
   onPrepare,
+  onGenerateThumbnails,
+  qualityReport,
   releasePrivacy,
   releaseStudioUrl,
+  video,
 }: {
   artifacts: Artifact[];
   busy: boolean;
   connection: YouTubeConnection | null;
   content: ContentPackage;
+  evidence: EvidenceLedger | null;
   latestThumbnail: Artifact | null;
   onChange: (operation: ReleaseOperation, summary: string) => void;
   onPrepare: () => void;
+  onGenerateThumbnails: () => void;
+  qualityReport: QualityReport | null;
   releasePrivacy: string | null;
   releaseStudioUrl: string | null;
+  video: Artifact | null;
 }) => {
   const [title, setTitle] = useState(content.metadata.title);
   const [description, setDescription] = useState(content.metadata.description);
@@ -85,7 +102,18 @@ export const ReleasePanel = ({
     artifacts.find(
       (artifact) => artifact.id === content.release.thumbnail_artifact_id,
     ) ?? null;
-  const displayedThumbnail = selectedThumbnail ?? latestThumbnail;
+  const storedCandidateIds =
+    content.release.thumbnail_candidate_artifact_ids ?? [];
+  const candidateThumbnails = (
+    storedCandidateIds.length > 0
+      ? storedCandidateIds.flatMap((id) => {
+          const artifact = thumbnails.find((candidate) => candidate.id === id);
+          return artifact ? [artifact] : [];
+        })
+      : thumbnails.slice(-3).reverse()
+  ).slice(0, 3);
+  const displayedThumbnail =
+    selectedThumbnail ?? candidateThumbnails[0] ?? latestThumbnail;
 
   useEffect(() => setTitle(content.metadata.title), [content.metadata.title]);
   useEffect(
@@ -104,6 +132,62 @@ export const ReleasePanel = ({
 
   const destination = content.release.destination;
   const status = releasePrivacy ?? "draft";
+  const checkByName = new Map(
+    qualityReport?.checks.map((check) => [check.name, check]) ?? [],
+  );
+  const referencedClaimIds = new Set(
+    content.scenes.flatMap((scene) => scene.claim_ids),
+  );
+  const evidenceReady =
+    referencedClaimIds.size > 0 &&
+    [...referencedClaimIds].every(
+      (claimId) =>
+        evidence?.claims.find((claim) => claim.id === claimId)?.status ===
+        "supported",
+    );
+  const hasTimedCaptions = effectiveCaptionTracks(content).some(
+    (track) =>
+      track.visible &&
+      track.clips.length > 0 &&
+      track.clips.every((clip) => Boolean(clip.artifact_id)),
+  );
+  const captionsReady =
+    hasTimedCaptions &&
+    (!qualityReport || checkByName.get("timed_captions")?.passed === true);
+  const hasAudibleAudio = audibleAudioTracks(content).some((track) =>
+    track.clips.some((clip) => Boolean(clip.artifact_id)),
+  );
+  const audioReady =
+    hasAudibleAudio &&
+    (!qualityReport ||
+      (checkByName.get("audio_stream")?.passed === true &&
+        checkByName.get("loudness")?.passed === true));
+  const blackFramesReady =
+    checkByName.get("unexpected_black_frames")?.passed ?? false;
+  const metadataReady =
+    content.metadata.title.trim().length > 0 &&
+    content.metadata.description.trim().length > 0 &&
+    content.metadata.tags.length > 0;
+  const renderReady = Boolean(video && qualityReport);
+  const requiresDisclosure = artifacts.some(
+    (artifact) =>
+      ["image", "thumbnail", "narration", "audio"].includes(artifact.kind) &&
+      (typeof artifact.provenance.provider === "string" ||
+        typeof artifact.provenance.model === "string"),
+  );
+  const readiness = [
+    { label: "Evidence", ready: evidenceReady },
+    { label: "Captions", ready: captionsReady },
+    { label: "Audio", ready: audioReady },
+    { label: "Black frames", ready: blackFramesReady },
+    { label: "Metadata", ready: metadataReady },
+    { label: "Render", ready: renderReady },
+    {
+      label: "Disclosure",
+      ready: !requiresDisclosure || content.metadata.contains_synthetic_media,
+    },
+  ];
+  const readyCount = readiness.filter((item) => item.ready).length;
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-surface">
@@ -127,18 +211,69 @@ export const ReleasePanel = ({
           </span>
         </div>
 
-        <div className="border-b border-line-subtle py-4">
+        <div className="border-b border-line-subtle py-3">
           <div className="mb-2 flex items-center justify-between">
-            <label className="text-[11px] font-medium text-ink">
-              Thumbnail
-            </label>
+            <p className="text-[11px] font-medium text-ink">
+              Release readiness
+            </p>
+            <span className="font-mono text-[9px] text-ink-tertiary">
+              {readyCount}/{readiness.length}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 border-l border-t border-line-subtle">
+            {readiness.map((item) => (
+              <div
+                key={item.label}
+                className="flex h-7 items-center gap-1.5 border-b border-r border-line-subtle px-2 text-[9px] text-ink-secondary"
+              >
+                {item.ready ? (
+                  <ShieldCheck size={10} className="text-success" />
+                ) : (
+                  <CircleAlert size={10} className="text-warning" />
+                )}
+                {item.label}
+              </div>
+            ))}
+          </div>
+          {readyCount < readiness.length ? (
             <button
               type="button"
-              onClick={() => setChoosingThumbnail((current) => !current)}
-              className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] text-ink-tertiary hover:bg-hover hover:text-ink"
+              onClick={onPrepare}
+              className="mt-2 text-[9px] font-medium text-action hover:underline"
             >
-              Choose <ChevronDown size={11} />
+              Ask Producer to run missing checks
             </button>
+          ) : null}
+        </div>
+
+        <div className="border-b border-line-subtle py-4">
+          <div className="mb-2 flex items-center justify-between">
+            <div>
+              <p className="text-[11px] font-medium text-ink">
+                Thumbnail test set
+              </p>
+              <p className="text-[9px] text-ink-caption">
+                Up to three watch-time candidates
+              </p>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={onGenerateThumbnails}
+                className="flex items-center gap-1 px-2 py-1 text-[9px] font-medium text-action hover:underline"
+              >
+                <Sparkles size={10} /> Generate 3
+              </button>
+              <button
+                type="button"
+                aria-label="Choose thumbnail candidates"
+                title="Choose thumbnail candidates"
+                onClick={() => setChoosingThumbnail((current) => !current)}
+                className="grid size-6 place-items-center text-ink-tertiary hover:bg-hover hover:text-ink"
+              >
+                <ChevronDown size={11} />
+              </button>
+            </div>
           </div>
           <div className="aspect-video overflow-hidden rounded-xl bg-canvas">
             {displayedThumbnail ? (
@@ -183,6 +318,46 @@ export const ReleasePanel = ({
               ) : null}
             </div>
           ) : null}
+          {candidateThumbnails.length > 0 ? (
+            <div className="mt-3 grid grid-cols-3 gap-1.5">
+              {candidateThumbnails.map((artifact, index) => (
+                <button
+                  type="button"
+                  key={artifact.id}
+                  onClick={() =>
+                    onChange(
+                      {
+                        type: "update_release",
+                        release: {
+                          thumbnail_artifact_id: artifact.id,
+                          thumbnail_candidate_artifact_ids:
+                            candidateThumbnails.map(
+                              (candidate) => candidate.id,
+                            ),
+                        },
+                      },
+                      `Select thumbnail candidate ${String.fromCharCode(65 + index)}`,
+                    )
+                  }
+                  className={cx(
+                    "relative overflow-hidden border bg-canvas",
+                    artifact.id === selectedThumbnail?.id
+                      ? "border-action ring-1 ring-action"
+                      : "border-line hover:border-line-strong",
+                  )}
+                >
+                  <img
+                    src={greenlightApi.artifactUrl(artifact.id)}
+                    alt={`Thumbnail candidate ${String.fromCharCode(65 + index)}`}
+                    className="aspect-video w-full object-cover"
+                  />
+                  <span className="absolute left-1 top-1 grid size-4 place-items-center bg-black/80 font-mono text-[8px] text-white">
+                    {String.fromCharCode(65 + index)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
           {choosingThumbnail ? (
             <div className="mt-2 grid grid-cols-2 gap-2">
               {thumbnails.map((artifact) => (
@@ -190,12 +365,21 @@ export const ReleasePanel = ({
                   type="button"
                   key={artifact.id}
                   onClick={() => {
+                    const nextCandidateIds = [
+                      artifact.id,
+                      ...candidateThumbnails
+                        .map((candidate) => candidate.id)
+                        .filter((id) => id !== artifact.id),
+                    ].slice(0, 3);
                     onChange(
                       {
                         type: "update_release",
-                        release: { thumbnail_artifact_id: artifact.id },
+                        release: {
+                          thumbnail_artifact_id: artifact.id,
+                          thumbnail_candidate_artifact_ids: nextCandidateIds,
+                        },
                       },
-                      `Use ${artifactName(artifact)} as the thumbnail`,
+                      `Add ${artifactName(artifact)} to the thumbnail test set`,
                     );
                     setChoosingThumbnail(false);
                   }}

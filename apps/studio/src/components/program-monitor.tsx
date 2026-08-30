@@ -20,6 +20,13 @@ import { cx, IconButton } from "./controls.js";
 
 type MediaController = ReturnType<typeof useMediaController>;
 
+const lookFilter: Record<NonNullable<Scene["visual"]["look"]>, string> = {
+  neutral: "none",
+  warm: "saturate(1.08) contrast(1.03) sepia(.08)",
+  punchy: "saturate(1.18) contrast(1.12)",
+  monochrome: "grayscale(1) contrast(1.08)",
+};
+
 const TransitionOverlay = ({
   clip,
   currentTime,
@@ -88,7 +95,10 @@ export const SceneCanvas = ({
   const visuals = scene.visual.artifact_ids.slice(0, 4);
   const byId = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
   return (
-    <div className="relative size-full overflow-hidden bg-[#f8faf9]">
+    <div
+      className="relative size-full overflow-hidden bg-[#f8faf9]"
+      style={{ filter: lookFilter[scene.visual.look ?? "neutral"] }}
+    >
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_18%,rgba(255,208,103,.34),transparent_32%),radial-gradient(circle_at_8%_84%,rgba(77,196,156,.19),transparent_34%)]" />
       {visuals.length > 0 ? (
         <div
