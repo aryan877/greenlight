@@ -240,15 +240,6 @@ export const App = () => {
             artifact.id === qualityArtifact?.provenance.video_artifact_id),
       )
       .at(-1) ?? null;
-  const thumbnailArtifact =
-    project.data?.artifacts
-      .filter(
-        (artifact) =>
-          artifact.kind === "thumbnail" &&
-          artifact.provenance.content_package_artifact_id ===
-            videoArtifact?.provenance.content_package_artifact_id,
-      )
-      .at(-1) ?? null;
   const content = useContentPackage(contentArtifact?.id ?? null);
   const evidence = useEvidenceLedger(evidenceArtifact?.id ?? null);
   const quality = useQualityReport(qualityArtifact?.id ?? null);
@@ -700,9 +691,6 @@ export const App = () => {
     );
   }, [producer.pendingApprovals, project.data?.release, projectId]);
   const programDuration = visibleContent ? totalDuration(visibleContent) : 0;
-  const previewUsesCanvas =
-    Boolean(previewPatch) ||
-    videoArtifact?.provenance.content_package_artifact_id !== editorArtifactId;
   const programAudioSources = useMemo(
     () =>
       visibleContent
@@ -1712,12 +1700,9 @@ export const App = () => {
           <ProgramMonitor
             scene={visibleScene}
             artifacts={project.data?.artifacts ?? []}
-            video={videoArtifact}
-            poster={thumbnailArtifact}
             media={media}
             duration={programDuration}
             previewing={Boolean(previewContent)}
-            previewUsesCanvas={previewUsesCanvas}
             transition={activeTransition}
             videoClip={activeVideoClip}
             transitionReview={null}

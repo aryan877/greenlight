@@ -60,6 +60,27 @@ describe("GreenlightFilm", () => {
     });
   });
 
+  it("keeps caption placement independent from narration artifact ownership", () => {
+    const content = structuredClone(fixturePackage);
+    const scene = content.scenes[0]!;
+    scene.captions_artifact_id = "artifact_caption_hook";
+    scene.transcript_artifact_id = "artifact_transcript_hook";
+    const clip = {
+      id: "caption_scene_hook",
+      scene_id: scene.id,
+      label: scene.narration,
+      artifact_id: null,
+      transcript_artifact_id: scene.transcript_artifact_id,
+      timeline_start_seconds: 1,
+      duration_seconds: 4,
+    };
+
+    expect(captionClipRenderPlacement(clip)).toEqual({
+      from: FPS,
+      durationInFrames: 4 * FPS,
+    });
+  });
+
   it("ducks only under narration clips that have a renderable artifact", () => {
     const content = structuredClone(fixturePackage);
     expect(narrationDuckingWindows(content, {})).toEqual([]);

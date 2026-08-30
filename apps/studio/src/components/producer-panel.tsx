@@ -156,6 +156,64 @@ const SubagentMark = ({
   </span>
 );
 
+const InlineResearchText = ({ value }: { value: string }) => {
+  const parts = value.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)]+\))/g);
+  return parts.map((part, index) => {
+    const bold = /^\*\*([^*]+)\*\*$/.exec(part);
+    if (bold) return <strong key={index}>{bold[1]}</strong>;
+    const link = /^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/.exec(part);
+    if (link) {
+      return (
+        <a
+          key={index}
+          href={link[2]}
+          target="_blank"
+          rel="noreferrer"
+          className="text-action underline decoration-action/35 underline-offset-2 hover:decoration-action"
+        >
+          {link[1]}
+        </a>
+      );
+    }
+    return part;
+  });
+};
+
+const ResearchResult = ({ value }: { value: string }) => (
+  <div className="mt-3 max-h-[26rem] space-y-2 overflow-y-auto border-t border-line-subtle pt-3 pr-1 text-[11px] leading-5 text-ink-secondary">
+    {value.split("\n").flatMap((rawLine, index) => {
+      const line = rawLine.trim();
+      if (!line || /^(?:-{3,}|\.\.\.)$/.test(line)) return [];
+      const heading = /^#{1,6}\s+(.+)$/.exec(line);
+      const bullet = /^(?:[-*•])\s+(.+)$/.exec(line);
+      if (heading) {
+        return [
+          <h4 key={index} className="pt-1 text-[12px] font-semibold text-ink">
+            <InlineResearchText value={heading[1]!} />
+          </h4>,
+        ];
+      }
+      if (bullet) {
+        return [
+          <div key={index} className="grid grid-cols-[10px_1fr] gap-1.5">
+            <span aria-hidden="true" className="text-action">
+              •
+            </span>
+            <p>
+              <InlineResearchText value={bullet[1]!} />
+            </p>
+          </div>,
+        ];
+      }
+      return [
+        <p key={index}>
+          <InlineResearchText value={line} />
+        </p>,
+      ];
+    })}
+  </div>
+);
+
 const SubagentCard = ({
   event,
   onOpenDocument,
@@ -242,9 +300,7 @@ const SubagentCard = ({
             </ul>
           ) : null}
           {run?.result && !event.document ? (
-            <p className="mt-2 line-clamp-6 whitespace-pre-wrap text-[11px] leading-5 text-ink-secondary">
-              {run.result}
-            </p>
+            <ResearchResult value={run.result} />
           ) : null}
           {document ? (
             <button

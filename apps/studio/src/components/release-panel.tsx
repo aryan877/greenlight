@@ -7,6 +7,7 @@ import type {
 } from "@greenlight/contracts";
 import {
   audibleAudioTracks,
+  captionArtifactIdForTimelineClip,
   effectiveCaptionTracks,
 } from "@greenlight/contracts";
 import {
@@ -16,10 +17,13 @@ import {
   CircleAlert,
   ExternalLink,
   LoaderCircle,
+  Maximize2,
   ShieldCheck,
   Sparkles,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { greenlightApi, type YouTubeConnection } from "../api/greenlight.js";
 import { YouTubeIcon } from "../brand-icons.js";
@@ -98,6 +102,9 @@ export const ReleasePanel = ({
   );
   const [connecting, setConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [previewThumbnail, setPreviewThumbnail] = useState<Artifact | null>(
+    null,
+  );
 
   const thumbnails = useMemo(
     () => artifacts.filter((artifact) => artifact.kind === "thumbnail"),
@@ -116,6 +123,20 @@ export const ReleasePanel = ({
   }, [content.release.thumbnail_candidate_artifact_ids, thumbnails]);
   const selectedThumbnailId = content.release.thumbnail_artifact_id;
 
+  useEffect(() => {
+    if (!previewThumbnail) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPreviewThumbnail(null);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [previewThumbnail]);
+
   useEffect(() => setTitle(content.metadata.title), [content.metadata.title]);
   useEffect(
     () => setDescription(content.metadata.description),
@@ -130,6 +151,26 @@ export const ReleasePanel = ({
     metadata: NonNullable<ReleaseOperation["metadata"]>,
     summary: string,
   ) => onChange({ type: "update_release", metadata }, summary);
+
+  const chooseThumbnail = (artifact: Artifact) => {
+    const index = candidateThumbnails.findIndex(
+      (candidate) => candidate.id === artifact.id,
+    );
+    const label = String.fromCharCode(65 + Math.max(0, index));
+    onChange(
+      {
+        type: "update_release",
+        release: {
+          thumbnail_artifact_id: artifact.id,
+          thumbnail_candidate_artifact_ids: candidateThumbnails.map(
+            (candidate) => candidate.id,
+          ),
+        },
+      },
+      `Choose thumbnail ${label}`,
+    );
+    setPreviewThumbnail(null);
+  };
 
   const checkByName = new Map(
     qualityReport?.checks.map((check) => [check.name, check]) ?? [],
@@ -148,7 +189,9 @@ export const ReleasePanel = ({
     (track) =>
       track.visible &&
       track.clips.length > 0 &&
-      track.clips.every((clip) => Boolean(clip.artifact_id)),
+      track.clips.every((clip) =>
+        Boolean(captionArtifactIdForTimelineClip(content, clip)),
+      ),
   );
   const audibleTracks = audibleAudioTracks(content);
   const spokenAudioNeedsCaptions = audibleTracks.some(
@@ -324,25 +367,10 @@ export const ReleasePanel = ({
                   <button
                     key={artifact.id}
                     type="button"
-                    aria-label={`Choose thumbnail ${label}`}
-                    aria-pressed={selected}
-                    onClick={() =>
-                      onChange(
-                        {
-                          type: "update_release",
-                          release: {
-                            thumbnail_artifact_id: artifact.id,
-                            thumbnail_candidate_artifact_ids:
-                              candidateThumbnails.map(
-                                (candidate) => candidate.id,
-                              ),
-                          },
-                        },
-                        `Choose thumbnail ${label}`,
-                      )
-                    }
+                    aria-label={`Preview thumbnail ${label}`}
+                    onClick={() => setPreviewThumbnail(artifact)}
                     className={cx(
-                      "relative overflow-hidden border bg-canvas text-left",
+                      "group relative overflow-hidden border bg-canvas text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-action",
                       selected
                         ? "border-action ring-1 ring-action"
                         : "border-line hover:border-line-strong",
@@ -355,6 +383,9 @@ export const ReleasePanel = ({
                     />
                     <span className="absolute left-1.5 top-1.5 grid size-5 place-items-center bg-black/80 font-mono text-[9px] text-white">
                       {selected ? <Check size={11} /> : label}
+                    </span>
+                    <span className="absolute bottom-1.5 right-1.5 grid size-5 place-items-center bg-black/80 text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                      <Maximize2 size={10} />
                     </span>
                   </button>
                 );
@@ -554,6 +585,86 @@ export const ReleasePanel = ({
           ) : null}
         </div>
       ) : null}
+      {previewThumbnail
+        ? createPortal(
+            <div
+              role="presentation"
+              className="fixed inset-0 z-[140] grid place-items-center bg-black/82 p-5"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) {
+                  setPreviewThumbnail(null);
+                }
+              }}
+            >
+              <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="thumbnail-preview-title"
+                className="w-full max-w-6xl border border-line-strong bg-surface shadow-float"
+              >
+                <header className="flex h-12 items-center border-b border-line-subtle px-4">
+                  <div className="min-w-0 flex-1">
+                    <h2
+                      id="thumbnail-preview-title"
+                      className="text-[13px] font-medium text-ink"
+                    >
+                      Thumbnail{" "}
+                      {String.fromCharCode(
+                        65 +
+                          Math.max(
+                            0,
+                            candidateThumbnails.findIndex(
+                              (candidate) =>
+                                candidate.id === previewThumbnail.id,
+                            ),
+                          ),
+                      )}
+                    </h2>
+                    <p className="text-[9px] text-ink-tertiary">
+                      Full 16:9 preview
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    autoFocus
+                    aria-label="Close thumbnail preview"
+                    onClick={() => setPreviewThumbnail(null)}
+                    className="grid size-8 place-items-center text-ink-tertiary hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-action"
+                  >
+                    <X size={16} />
+                  </button>
+                </header>
+                <div className="bg-canvas p-3 sm:p-5">
+                  <img
+                    src={greenlightApi.artifactUrl(previewThumbnail.id)}
+                    alt="Selected YouTube thumbnail preview"
+                    className="mx-auto block aspect-video max-h-[70vh] w-full object-contain"
+                  />
+                </div>
+                <footer className="grid grid-cols-2 gap-2 border-t border-line-subtle p-3 sm:flex sm:justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewThumbnail(null)}
+                    className="h-9 border border-line px-5 text-[11px] font-medium text-ink-secondary hover:bg-hover hover:text-ink"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    disabled={previewThumbnail.id === selectedThumbnailId}
+                    onClick={() => chooseThumbnail(previewThumbnail)}
+                    className="h-9 bg-control px-5 text-[11px] font-medium text-control-ink hover:bg-control-hover disabled:opacity-45"
+                  >
+                    {previewThumbnail.id === selectedThumbnailId
+                      ? "Selected"
+                      : "Use this thumbnail"}
+                  </button>
+                </footer>
+              </section>
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 };

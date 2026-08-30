@@ -1235,6 +1235,36 @@ export const effectiveAudioTracks = (content: ContentPackage): AudioTrack[] => {
 };
 
 /**
+ * Resolves the measured caption data for a timeline caption clip.
+ *
+ * New caption lanes can own their caption artifact directly. Older and
+ * scene-generated lanes intentionally reference the spoken clip instead, so
+ * the matching narration clip remains the single owner of measured words.
+ */
+export const captionArtifactIdForTimelineClip = (
+  content: ContentPackage,
+  captionClip: CaptionTimelineClip,
+): string | null => {
+  if (captionClip.artifact_id) return captionClip.artifact_id;
+
+  const spokenTracks = effectiveAudioTracks(content).filter(
+    (track) => track.role === "narration" || track.role === "dub",
+  );
+  const preferredTracks = [
+    ...spokenTracks.filter((track) => track.role === "narration"),
+    ...spokenTracks.filter((track) => track.role === "dub"),
+  ];
+  for (const track of preferredTracks) {
+    const artifactId = track.clips.find(
+      (clip) =>
+        clip.scene_id === captionClip.scene_id && clip.captions_artifact_id,
+    )?.captions_artifact_id;
+    if (artifactId) return artifactId;
+  }
+  return null;
+};
+
+/**
  * Migrates scene-relative legacy placement into explicit non-linear timeline
  * placement without changing what the creator currently sees or hears.
  */

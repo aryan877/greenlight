@@ -681,10 +681,17 @@ type ResolvedToolCall = {
 const resolvedToolCall = (call: ToolCall): ResolvedToolCall => {
   const outer = parseArguments(call);
   if (call.function.name === "call_tool") {
+    const delegatedName =
+      typeof outer.tool_name === "string"
+        ? outer.tool_name
+        : typeof outer.toolName === "string"
+          ? outer.toolName
+          : typeof outer.name === "string"
+            ? outer.name
+            : "unknown_tool";
     return {
       id: call.id,
-      name:
-        typeof outer.tool_name === "string" ? outer.tool_name : "unknown_tool",
+      name: delegatedName,
       server: typeof outer.mcp_server === "string" ? outer.mcp_server : null,
       arguments:
         outer.input && typeof outer.input === "object"
@@ -1011,9 +1018,22 @@ const creatorFacingSubagentBrief = (value: string): string => {
 const subagentToolLabel = (call: ToolCall): string | null => {
   const resolved = resolvedToolCall(call);
   const toolName = resolved.name;
+  if (toolName === "unknown_tool") return null;
+  const rawSubject = [
+    resolved.arguments.query,
+    resolved.arguments.q,
+    resolved.arguments.url,
+    resolved.arguments.topic,
+  ].find((value): value is string => typeof value === "string");
+  const subject = rawSubject
+    ? cleanConversationText(rawSubject).replace(/^https?:\/\/(?:www\.)?/, "")
+    : "";
+  const withSubject = (label: string) =>
+    subject && subject.length <= 110 ? `${label} · ${subject}` : label;
   if (/get_current_datetime/i.test(toolName)) return "Checked source freshness";
-  if (/search|exa/i.test(toolName)) return "Searching the web";
-  if (/crawl|fetch|read|contents?/i.test(toolName)) return "Reading a source";
+  if (/search|exa/i.test(toolName)) return withSubject("Searching the web");
+  if (/crawl|fetch|read|contents?/i.test(toolName))
+    return withSubject("Reading a source");
   if (/evidence|claim|source/i.test(toolName)) return "Organizing findings";
   if (/script|story|content_package/i.test(toolName))
     return "Shaping the draft";
@@ -1037,8 +1057,9 @@ const subagentResult = (event: WireEvent): string => {
   const result = textContent(output?.content)
     .replace(/```(?:markdown|md)?/gi, "")
     .replace(/```/g, "")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/^\s*[-*]\s+/gm, "• ")
+    .replace(/^\s*-{3,}\s*$/gm, "")
+    .replace(/^\s*\.\.\.\s*$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
     .trim()
     .slice(0, 12_000);
   return /(?:project[_-][a-z0-9]+|artifact[_-][a-z0-9]+|content.?package|tool|mcp|host path|credentials?|environment variables?)/i.test(
@@ -1205,7 +1226,27 @@ const describeSubagentEvent = (event: WireEvent): StudioAgentEvent[] | null => {
   }
 
   if (type === "tool.response") {
-    return [];
+    const callId = String(
+      event.tool_call_id ?? event.toolCallId ?? event.id ?? "",
+    );
+    return callId
+      ? [
+          {
+            id: `subagent-${threadId}`,
+            kind: "subagent",
+            label: "Subagent",
+            detail: "Working",
+            sceneIds: [],
+            status: "running",
+            subagent: {
+              threadId,
+              brief: "",
+              steps: [{ id: callId, label: "", status: "done" }],
+              result: "",
+            },
+          },
+        ]
+      : [];
   }
 
   if (type === "thread.done") {

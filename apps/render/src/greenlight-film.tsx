@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import {
   audioClipDurationSeconds,
   audibleAudioTracks,
+  captionArtifactIdForTimelineClip,
   effectiveCaptionTracks,
   effectiveTransitionTracks,
   effectiveVideoTracks,
@@ -465,8 +466,12 @@ const ProductionCaptions = ({
       {effectiveCaptionTracks(content).flatMap((track) =>
         track.visible
           ? track.clips.flatMap((clip) => {
-              const cues = clip.artifact_id
-                ? (captionTracks[clip.artifact_id] ?? null)
+              const captionArtifactId = captionArtifactIdForTimelineClip(
+                content,
+                clip,
+              );
+              const cues = captionArtifactId
+                ? (captionTracks[captionArtifactId] ?? null)
                 : null;
               const scene = content.scenes.find(
                 (candidate) => candidate.id === clip.scene_id,

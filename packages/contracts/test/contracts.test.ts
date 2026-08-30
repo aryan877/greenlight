@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   applyEditorPatch,
   audibleAudioTracks,
+  captionArtifactIdForTimelineClip,
   captionTrackSchema,
   contentPackageSchema,
   editorPatchInputSchema,
   editorTimelineItemSchema,
   effectiveAudioTracks,
+  effectiveCaptionTracks,
   evidenceLedgerSchema,
   isYoutubeReviewPrivacy,
   productionDurationSeconds,
@@ -562,6 +564,43 @@ describe("Greenlight contracts", () => {
     expect(audibleAudioTracks(explicit).map((track) => track.id)).toEqual([
       "track_hindi_dub",
     ]);
+  });
+
+  it("resolves a caption lane through its matching measured narration clip", () => {
+    const content = contentPackageSchema.parse({
+      version: 1,
+      project_id: "project_caption_resolution",
+      headline: "Captions follow the spoken timeline",
+      dek: "Measured words remain attached to the narration that created them.",
+      scenes: Array.from({ length: 3 }, (_, index) => ({
+        id: `scene_caption_${index}`,
+        kind: index === 0 ? "hook" : "explanation",
+        title: `Caption scene ${index + 1}`,
+        narration: "One independently measured narration clip.",
+        narration_artifact_id: `artifact_voice_caption_${index}`,
+        captions_artifact_id: `artifact_captions_${index}`,
+        transcript_artifact_id: `artifact_transcript_${index}`,
+        claim_ids: [],
+        duration_seconds: 10,
+        visual: { treatment: "type", accent: "signal" },
+      })),
+      metadata: {
+        title: "Captions follow the spoken timeline",
+        description: "Caption artifact resolution fixture.",
+        tags: ["captions"],
+      },
+    });
+    const clip = effectiveCaptionTracks(content)[0]!.clips[1]!;
+
+    expect(clip.artifact_id).toBe("artifact_captions_1");
+    expect(captionArtifactIdForTimelineClip(content, clip)).toBe(
+      "artifact_captions_1",
+    );
+
+    const independentClip = { ...clip, artifact_id: null };
+    expect(captionArtifactIdForTimelineClip(content, independentClip)).toBe(
+      "artifact_captions_1",
+    );
   });
 
   it("rejects ambiguous or incomplete lane ordering", () => {

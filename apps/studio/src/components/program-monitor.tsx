@@ -221,13 +221,10 @@ export const SceneCanvas = ({
 export const ProgramMonitor = ({
   scene,
   artifacts,
-  video,
-  poster,
   media,
   duration,
   timelineOpen,
   previewing,
-  previewUsesCanvas,
   transition,
   videoClip,
   transitionReview,
@@ -236,13 +233,10 @@ export const ProgramMonitor = ({
 }: {
   scene: Scene | null;
   artifacts: Artifact[];
-  video: Artifact | null;
-  poster: Artifact | null;
   media: MediaController;
   duration: number;
   timelineOpen: boolean;
   previewing: boolean;
-  previewUsesCanvas: boolean;
   transition: TransitionTimelineClip | null;
   videoClip: VideoTimelineClip | null;
   transitionReview: {
@@ -305,16 +299,7 @@ export const ProgramMonitor = ({
 
       <div className="monitor-viewport grid min-h-0 flex-1 place-items-center overflow-hidden p-5 xl:p-7">
         <div className="monitor-frame">
-          {video && !previewUsesCanvas ? (
-            <video
-              ref={media.mediaRef}
-              src={greenlightApi.artifactUrl(video.id)}
-              poster={poster ? greenlightApi.artifactUrl(poster.id) : undefined}
-              className="block size-full object-contain"
-              playsInline
-              {...media.mediaEvents}
-            />
-          ) : scene ? (
+          {scene ? (
             <SceneCanvas
               scene={scene}
               artifacts={artifacts}

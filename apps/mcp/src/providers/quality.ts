@@ -2,7 +2,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import {
+  captionArtifactIdForTimelineClip,
   contentPackageSchema,
+  effectiveCaptionTracks,
   evidenceLedgerSchema,
   productionDurationSeconds,
   qualityReportSchema,
@@ -151,10 +153,13 @@ export class QualityInspector {
       blackDuration - plannedBlackDuration,
     );
     const loudness = integratedLoudnessLufs(loudnessResult.stderr);
-    const scenesMissingTimedCaptions = content.scenes.filter(
-      (scene) =>
-        scene.narration_artifact_id &&
-        (!scene.captions_artifact_id || !scene.transcript_artifact_id),
+    const captionClips = effectiveCaptionTracks(content)
+      .filter((track) => track.visible)
+      .flatMap((track) => track.clips);
+    const missingTimedCaptionClips = captionClips.filter(
+      (clip) =>
+        !clip.transcript_artifact_id ||
+        !captionArtifactIdForTimelineClip(content, clip),
     );
     const checks: QualityCheck[] = [
       {
@@ -206,14 +211,15 @@ export class QualityInspector {
       },
       {
         name: "timed_captions",
-        passed: scenesMissingTimedCaptions.length === 0,
+        passed:
+          captionClips.length > 0 && missingTimedCaptionClips.length === 0,
         detail:
-          scenesMissingTimedCaptions.length === 0
-            ? "Every generated narration has measured words and captions."
-            : `Missing timed captions: ${scenesMissingTimedCaptions
-                .map((scene) => scene.title)
+          captionClips.length > 0 && missingTimedCaptionClips.length === 0
+            ? "Every visible caption clip resolves to measured words."
+            : `Missing timed captions: ${missingTimedCaptionClips
+                .map((clip) => clip.label)
                 .join(", ")}`,
-        measured: scenesMissingTimedCaptions.length,
+        measured: missingTimedCaptionClips.length,
       },
       {
         name: "youtube_metadata",
