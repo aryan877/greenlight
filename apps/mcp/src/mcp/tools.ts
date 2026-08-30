@@ -1109,9 +1109,6 @@ export const buildMcpServer = ({
     },
     async (input) => {
       const request = scheduleVideoInputSchema.parse(input);
-      if (new Date(request.publish_at).getTime() <= Date.now()) {
-        throw new Error("schedule_time_must_be_future");
-      }
       const release = store.getRelease(request.youtube_release_id);
       if (!release || release.snapshot.project_id !== request.project_id) {
         throw new Error("release_not_found");
@@ -1148,6 +1145,10 @@ export const buildMcpServer = ({
           throw new Error("operation_already_started");
         }
         return result(operation.result);
+      }
+      if (new Date(request.publish_at).getTime() <= Date.now()) {
+        store.failOperation(operation.id, "schedule_time_must_be_future");
+        throw new Error("schedule_time_must_be_future");
       }
       if (release.privacy !== "unlisted") {
         store.failOperation(operation.id, "release_not_unlisted");
