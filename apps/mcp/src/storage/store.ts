@@ -73,8 +73,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
   byte_size INTEGER NOT NULL,
   generation_json TEXT,
   provenance_json TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  UNIQUE(project_id, kind, sha256)
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS project_content_heads (
@@ -149,6 +148,44 @@ export class GreenlightStore {
       .all() as Array<{ name: string }>;
     if (!artifactColumns.some((column) => column.name === "generation_json")) {
       this.db.exec("ALTER TABLE artifacts ADD COLUMN generation_json TEXT");
+    }
+    const artifactTable = this.db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'artifacts'",
+      )
+      .get() as { sql: string } | undefined;
+    if (artifactTable?.sql.includes("UNIQUE(project_id, kind, sha256)")) {
+      this.db.pragma("foreign_keys = OFF");
+      try {
+        this.db.exec(`
+          BEGIN;
+          CREATE TABLE artifacts_without_payload_uniqueness (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(id),
+            kind TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            mime_type TEXT NOT NULL,
+            byte_size INTEGER NOT NULL,
+            generation_json TEXT,
+            provenance_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          );
+          INSERT INTO artifacts_without_payload_uniqueness
+            SELECT id, project_id, kind, sha256, relative_path, mime_type,
+              byte_size, generation_json, provenance_json, created_at
+            FROM artifacts;
+          DROP TABLE artifacts;
+          ALTER TABLE artifacts_without_payload_uniqueness RENAME TO artifacts;
+          CREATE INDEX artifacts_project_idx ON artifacts(project_id, created_at);
+          COMMIT;
+        `);
+      } catch (error) {
+        if (this.db.inTransaction) this.db.exec("ROLLBACK");
+        throw error;
+      } finally {
+        this.db.pragma("foreign_keys = ON");
+      }
     }
   }
 
@@ -244,7 +281,7 @@ export class GreenlightStore {
     const valid = artifactSchema.parse(artifact);
     this.db
       .prepare(
-        `INSERT OR IGNORE INTO artifacts
+        `INSERT INTO artifacts
           (id, project_id, kind, sha256, relative_path, mime_type, byte_size, generation_json, provenance_json, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
@@ -261,11 +298,8 @@ export class GreenlightStore {
         valid.created_at,
       );
     const saved = this.db
-      .prepare(
-        "SELECT * FROM artifacts WHERE project_id = ? AND kind = ? AND sha256 = ?",
-      )
-      .get(valid.project_id, valid.kind, valid.sha256) as
-      ArtifactRow | undefined;
+      .prepare("SELECT * FROM artifacts WHERE id = ?")
+      .get(valid.id) as ArtifactRow | undefined;
     if (!saved) throw new Error("artifact_save_failed");
     return toArtifact(saved);
   }
@@ -339,10 +373,15 @@ export class GreenlightStore {
     type: string;
     idempotencyKey: string;
     payload: unknown;
-  }): { id: string; existing: boolean; result: unknown | null } {
+  }): {
+    id: string;
+    existing: boolean;
+    result: unknown | null;
+    state: string;
+  } {
     const existing = this.db
       .prepare(
-        `SELECT id, project_id, type, input_sha256, result_json
+        `SELECT id, project_id, type, state, input_sha256, result_json
          FROM operations WHERE idempotency_key = ?`,
       )
       .get(input.idempotencyKey) as
@@ -350,6 +389,7 @@ export class GreenlightStore {
           id: string;
           project_id: string;
           type: string;
+          state: string;
           input_sha256: string;
           result_json: string | null;
         }
@@ -366,6 +406,7 @@ export class GreenlightStore {
         id: existing.id,
         existing: true,
         result: existing.result_json ? JSON.parse(existing.result_json) : null,
+        state: existing.state,
       };
     }
 
@@ -386,7 +427,20 @@ export class GreenlightStore {
         timestamp,
         timestamp,
       );
-    return { id, existing: false, result: null };
+    return { id, existing: false, result: null, state: "running" };
+  }
+
+  recordOperationExternalSuccess(id: string, result: unknown): void {
+    const updated = this.db
+      .prepare(
+        `UPDATE operations
+         SET state = 'external_succeeded', result_json = ?, updated_at = ?
+         WHERE id = ? AND state = 'running'`,
+      )
+      .run(JSON.stringify(result), now(), id);
+    if (updated.changes !== 1) {
+      throw new Error("operation_external_success_not_recorded");
+    }
   }
 
   finishOperation(id: string, result: unknown): void {
@@ -499,5 +553,23 @@ export class GreenlightStore {
       )
       .run(now(), id, from);
     if (result.changes !== 1) throw new Error("release_rollback_failed");
+  }
+
+  reconcileReleaseSuccess(input: {
+    id: string;
+    from: "publishing" | "scheduling";
+    privacy: "public" | "scheduled";
+    projectId: string;
+  }): Project {
+    return this.db.transaction(() => {
+      const release = this.getRelease(input.id);
+      if (!release) throw new Error("release_not_found");
+      if (release.privacy === input.from) {
+        this.completeRelease(input.id, input.from, input.privacy);
+      } else if (release.privacy !== input.privacy) {
+        throw new Error("release_state_changed");
+      }
+      return this.setProjectStage(input.projectId, "released");
+    })();
   }
 }

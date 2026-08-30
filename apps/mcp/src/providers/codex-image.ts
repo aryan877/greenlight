@@ -281,9 +281,11 @@ export class CodexImageProvider {
         ephemeral: true,
         developerInstructions:
           "You are a bounded image-generation worker. Use only Codex's built-in imagegen skill and its image generation tool. Generate exactly one image. Do not run shell commands, edit files, browse the web, or use any browser-driven image workflow.",
-      })) as { thread?: { id?: string } };
+      })) as { model?: string; thread?: { id?: string } };
       const threadId = threadResponse.thread?.id;
       if (!threadId) throw new Error("codex_thread_id_missing");
+      const actualModel = threadResponse.model?.trim();
+      if (!actualModel) throw new Error("codex_model_id_missing");
       await call("turn/start", {
         threadId,
         input: [
@@ -333,7 +335,7 @@ export class CodexImageProvider {
         generation: {
           media_type: "image",
           provider: capabilities.provider,
-          model: capabilities.model,
+          model: actualModel,
           runtime: capabilities.runtime,
           input_hashes: [promptHash],
           prompt_sha256: promptHash,
@@ -349,7 +351,7 @@ export class CodexImageProvider {
         provenance: {
           provider: capabilities.provider,
           runtime: capabilities.runtime,
-          model: capabilities.model,
+          model: actualModel,
           skill: "imagegen",
           prompt_sha256: promptHash,
           revised_prompt: generated.revisedPrompt ?? null,

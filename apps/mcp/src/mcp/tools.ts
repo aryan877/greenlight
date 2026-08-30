@@ -787,7 +787,9 @@ export const buildMcpServer = ({
         payload: request,
       });
       if (operation.existing) {
-        if (!operation.result) throw new Error("operation_already_started");
+        if (operation.state !== "succeeded" || !operation.result) {
+          throw new Error("operation_already_started");
+        }
         return result(operation.result);
       }
       store.setProjectStage(request.project_id, "rendering");
@@ -937,7 +939,9 @@ export const buildMcpServer = ({
         payload: request,
       });
       if (operation.existing) {
-        if (!operation.result) throw new Error("operation_already_started");
+        if (operation.state !== "succeeded" || !operation.result) {
+          throw new Error("operation_already_started");
+        }
         return result(operation.result);
       }
       store.setProjectStage(request.project_id, "uploading");
@@ -1015,48 +1019,76 @@ export const buildMcpServer = ({
         payload: request,
       });
       if (operation.existing) {
-        if (!operation.result) throw new Error("operation_already_started");
+        if (
+          operation.state === "external_succeeded" &&
+          operation.result &&
+          typeof operation.result === "object" &&
+          "youtube" in operation.result
+        ) {
+          const output = {
+            youtube: operation.result.youtube,
+            project: store.reconcileReleaseSuccess({
+              id: request.youtube_release_id,
+              from: "publishing",
+              privacy: "public",
+              projectId: request.project_id,
+            }),
+          };
+          store.finishOperation(operation.id, output);
+          return result(output);
+        }
+        if (operation.state !== "succeeded" || !operation.result) {
+          throw new Error("operation_already_started");
+        }
         return result(operation.result);
       }
       if (release.privacy !== "unlisted") {
         store.failOperation(operation.id, "release_not_unlisted");
         throw new Error("release_not_unlisted");
       }
-      let claimed = false;
       try {
         store.claimRelease(request.youtube_release_id, "publishing");
-        claimed = true;
-        const youtubeResult = await youtube.publish(
+      } catch (error) {
+        store.failOperation(operation.id, "publish_claim_failed");
+        throw error;
+      }
+      let youtubeResult: unknown;
+      try {
+        youtubeResult = await youtube.publish(
           release.snapshot.youtube_video_id,
         );
-        store.completeRelease(
-          request.youtube_release_id,
-          "publishing",
-          "public",
-        );
+      } catch (error) {
+        try {
+          store.rollbackReleaseClaim(request.youtube_release_id, "publishing");
+        } catch (rollbackError) {
+          store.failOperation(operation.id, "release_rollback_failed");
+          throw new AggregateError(
+            [error, rollbackError],
+            "publish_failed_and_release_rollback_failed",
+          );
+        }
+        store.failOperation(operation.id, "publish_failed");
+        throw error;
+      }
+      try {
+        store.recordOperationExternalSuccess(operation.id, {
+          youtube: youtubeResult,
+        });
         const output = {
           youtube: youtubeResult,
-          project: store.setProjectStage(request.project_id, "released"),
+          project: store.reconcileReleaseSuccess({
+            id: request.youtube_release_id,
+            from: "publishing",
+            privacy: "public",
+            projectId: request.project_id,
+          }),
         };
         store.finishOperation(operation.id, output);
         return result(output);
       } catch (error) {
-        if (claimed) {
-          try {
-            store.rollbackReleaseClaim(
-              request.youtube_release_id,
-              "publishing",
-            );
-          } catch (rollbackError) {
-            store.failOperation(operation.id, "release_rollback_failed");
-            throw new AggregateError(
-              [error, rollbackError],
-              "publish_failed_and_release_rollback_failed",
-            );
-          }
-        }
-        store.failOperation(operation.id, "publish_failed");
-        throw error;
+        throw new Error("publish_succeeded_reconciliation_required", {
+          cause: error,
+        });
       }
     },
   );
@@ -1094,49 +1126,77 @@ export const buildMcpServer = ({
         payload: request,
       });
       if (operation.existing) {
-        if (!operation.result) throw new Error("operation_already_started");
+        if (
+          operation.state === "external_succeeded" &&
+          operation.result &&
+          typeof operation.result === "object" &&
+          "youtube" in operation.result
+        ) {
+          const output = {
+            youtube: operation.result.youtube,
+            project: store.reconcileReleaseSuccess({
+              id: request.youtube_release_id,
+              from: "scheduling",
+              privacy: "scheduled",
+              projectId: request.project_id,
+            }),
+          };
+          store.finishOperation(operation.id, output);
+          return result(output);
+        }
+        if (operation.state !== "succeeded" || !operation.result) {
+          throw new Error("operation_already_started");
+        }
         return result(operation.result);
       }
       if (release.privacy !== "unlisted") {
         store.failOperation(operation.id, "release_not_unlisted");
         throw new Error("release_not_unlisted");
       }
-      let claimed = false;
       try {
         store.claimRelease(request.youtube_release_id, "scheduling");
-        claimed = true;
-        const youtubeResult = await youtube.schedule(
+      } catch (error) {
+        store.failOperation(operation.id, "schedule_claim_failed");
+        throw error;
+      }
+      let youtubeResult: unknown;
+      try {
+        youtubeResult = await youtube.schedule(
           release.snapshot.youtube_video_id,
           request.publish_at,
         );
-        store.completeRelease(
-          request.youtube_release_id,
-          "scheduling",
-          "scheduled",
-        );
+      } catch (error) {
+        try {
+          store.rollbackReleaseClaim(request.youtube_release_id, "scheduling");
+        } catch (rollbackError) {
+          store.failOperation(operation.id, "release_rollback_failed");
+          throw new AggregateError(
+            [error, rollbackError],
+            "schedule_failed_and_release_rollback_failed",
+          );
+        }
+        store.failOperation(operation.id, "schedule_failed");
+        throw error;
+      }
+      try {
+        store.recordOperationExternalSuccess(operation.id, {
+          youtube: youtubeResult,
+        });
         const output = {
           youtube: youtubeResult,
-          project: store.setProjectStage(request.project_id, "released"),
+          project: store.reconcileReleaseSuccess({
+            id: request.youtube_release_id,
+            from: "scheduling",
+            privacy: "scheduled",
+            projectId: request.project_id,
+          }),
         };
         store.finishOperation(operation.id, output);
         return result(output);
       } catch (error) {
-        if (claimed) {
-          try {
-            store.rollbackReleaseClaim(
-              request.youtube_release_id,
-              "scheduling",
-            );
-          } catch (rollbackError) {
-            store.failOperation(operation.id, "release_rollback_failed");
-            throw new AggregateError(
-              [error, rollbackError],
-              "schedule_failed_and_release_rollback_failed",
-            );
-          }
-        }
-        store.failOperation(operation.id, "schedule_failed");
-        throw error;
+        throw new Error("schedule_succeeded_reconciliation_required", {
+          cause: error,
+        });
       }
     },
   );

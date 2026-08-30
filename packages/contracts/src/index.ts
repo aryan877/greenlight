@@ -1249,7 +1249,7 @@ export const artifactKindSchema = z.enum([
 
 const generatedArtifactMetadataBaseSchema = z.object({
   provider: z.string().trim().min(1).max(120),
-  model: z.string().trim().min(1).max(240).nullable(),
+  model: z.string().trim().min(1).max(240),
   runtime: z.string().trim().min(1).max(160),
   input_hashes: z.array(sha256Schema).min(1).max(8),
   generated_at: z.string().datetime(),

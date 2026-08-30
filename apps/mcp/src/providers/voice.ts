@@ -11,7 +11,7 @@ export type VoiceResult = {
   durationSeconds: number;
   extension: ".wav";
   generation: {
-    model: string | null;
+    model: string;
     provider: string;
     providerReportedCost: { amount: number; currency: string } | null;
     runtime: string;

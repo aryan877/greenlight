@@ -66,7 +66,7 @@ describe("artifact sandbox transfer", () => {
         generation: {
           media_type: "image",
           provider: "codex_subscription",
-          model: null,
+          model: "gpt-image-current",
           runtime: "codex app-server",
           input_hashes: [promptHash],
           prompt_sha256: promptHash,
@@ -81,6 +81,34 @@ describe("artifact sandbox transfer", () => {
         },
         provenance: { purpose: "thumbnail" },
       });
+      const secondPromptHash = "c".repeat(64);
+      const second = await artifacts.importBuffer({
+        projectId: project.id,
+        kind: "image",
+        filename: "generated.png",
+        bytes: Buffer.from("generated-image-fixture"),
+        generation: {
+          media_type: "image",
+          provider: "codex_subscription",
+          model: "gpt-image-current",
+          runtime: "codex app-server",
+          input_hashes: [secondPromptHash],
+          prompt_sha256: secondPromptHash,
+          width: 1920,
+          height: 1080,
+          generated_at: "2026-08-30T00:01:00.000Z",
+          provider_reported_cost: null,
+          disclosure: {
+            contains_synthetic_media: true,
+            method: "generated",
+          },
+        },
+        provenance: { purpose: "scene" },
+      });
+
+      expect(second.id).not.toBe(artifact.id);
+      expect(second.relative_path).toBe(artifact.relative_path);
+      expect(second.generation?.input_hashes).toEqual([secondPromptHash]);
 
       const reopened = new GreenlightStore(databasePath);
       try {
@@ -90,6 +118,9 @@ describe("artifact sandbox transfer", () => {
           width: 1920,
           height: 1080,
         });
+        expect(reopened.getArtifact(second.id)?.provenance.purpose).toBe(
+          "scene",
+        );
       } finally {
         reopened.close();
       }
