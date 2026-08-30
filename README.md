@@ -126,7 +126,7 @@ pnpm verify
   </a>
 </p>
 
-TrueForge runs the Producer harness. Qodo reviews the submission pull request: [aryan877/greenlight#1](https://github.com/aryan877/greenlight/pull/1).
+TrueForge runs the Producer harness. Qodo reviews the submission pull request: [aryan877/greenlight#2](https://github.com/aryan877/greenlight/pull/2).
 
 Brand assets above come from the official [TrueForge repository](https://github.com/truefoundry/trueforge/tree/main/docs/logo) and [Qodo media kit](https://www.qodo.ai/media-kit/).
 
