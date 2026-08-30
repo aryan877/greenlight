@@ -294,6 +294,76 @@ describe("Greenlight contracts", () => {
     expect(revised.transition_tracks?.[0]?.clips).toEqual([]);
   });
 
+  it("removes a transition when dragging a scene breaks its cut", () => {
+    const scenes = ["one", "two", "three"].map((id, index) => ({
+      id: `scene_${id}`,
+      kind: index === 0 ? ("hook" as const) : ("explanation" as const),
+      title: `Scene ${id}`,
+      narration: `Narration for scene ${id}.`,
+      claim_ids: [],
+      duration_seconds: 10,
+      visual: { treatment: "type" as const, accent: "signal" as const },
+    }));
+    const content = contentPackageSchema.parse({
+      version: 1,
+      project_id: "project_drag_reorder",
+      headline: "Scene dragging stays valid",
+      dek: "A transition only survives while its two clips share a cut.",
+      scenes,
+      transition_tracks: [
+        {
+          id: "track_transitions",
+          name: "Transitions",
+          kind: "transition",
+          clips: [
+            {
+              id: "transition_one_to_two",
+              label: "Crossfade",
+              from_item_id: videoTimelineItemId("scene_one"),
+              to_item_id: videoTimelineItemId("scene_two"),
+              cut_seconds: 10,
+              duration_seconds: 0.4,
+              preset_id: "crossfade",
+            },
+          ],
+        },
+      ],
+      metadata: {
+        title: "Scene dragging stays valid",
+        description: "Scene drag transition fixture.",
+        tags: ["editing"],
+      },
+    });
+
+    const revised = applyEditorPatch(content, {
+      selection: {
+        project_id: content.project_id,
+        base_content_package_artifact_id: "artifact_drag_reorder",
+        item_ids: scenes.map((scene) => videoTimelineItemId(scene.id)),
+        scene_ids: scenes.map((scene) => scene.id),
+        track_ids: ["visual"],
+        gap_ids: [],
+        artifact_ids: [],
+        playhead_seconds: null,
+        time_range_seconds: null,
+      },
+      instruction_summary: "Move scene one after scene three",
+      operations: [
+        {
+          type: "reorder_scenes",
+          scene_ids: ["scene_two", "scene_three", "scene_one"],
+        },
+      ],
+    });
+
+    expect(revised.scenes.map((scene) => scene.id)).toEqual([
+      "scene_two",
+      "scene_three",
+      "scene_one",
+    ]);
+    expect(revised.transition_tracks?.[0]?.clips).toEqual([]);
+  });
+
   it("requires editor operations to contain a real change", () => {
     const parsed = editorPatchInputSchema.safeParse({
       selection: {

@@ -1416,7 +1416,7 @@ export const Timeline = ({
                         );
                       }}
                       className={cx(
-                        "group absolute z-10 flex min-w-0 items-center gap-1.5 overflow-hidden border px-2 text-left transition-colors duration-100 focus-visible:outline-none",
+                        "group absolute z-10 flex min-w-0 touch-none cursor-grab items-center gap-1.5 overflow-hidden border px-2 text-left transition-colors duration-100 active:cursor-grabbing focus-visible:outline-none",
                         item.kind === "video" && "bg-track-video text-ink",
                         item.kind === "audio" &&
                           "bg-track-voice text-ink-secondary",

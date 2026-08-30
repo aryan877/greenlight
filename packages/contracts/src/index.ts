@@ -2105,6 +2105,66 @@ const requireSelectedScene = (
   }
 };
 
+const videoCutByPairForContent = (
+  content: ContentPackage,
+): Map<string, number> => {
+  const itemsByTrack = new Map<
+    string,
+    Array<{ end: number; id: string; start: number }>
+  >();
+  content.scenes.forEach((scene, index) => {
+    const trackId = scene.video_track_id ?? "track_video";
+    const items = itemsByTrack.get(trackId) ?? [];
+    const start = sceneStartSeconds(content.scenes, index);
+    items.push({
+      id: videoTimelineItemId(scene.id),
+      start,
+      end: start + scene.duration_seconds,
+    });
+    itemsByTrack.set(trackId, items);
+  });
+  for (const track of content.video_tracks ?? []) {
+    const items = itemsByTrack.get(track.id) ?? [];
+    for (const clip of track.clips ?? []) {
+      items.push({
+        id: videoTimelineItemId(clip.id),
+        start: clip.timeline_start_seconds,
+        end: clip.timeline_start_seconds + clip.duration_seconds,
+      });
+    }
+    itemsByTrack.set(track.id, items);
+  }
+
+  const cuts = new Map<string, number>();
+  for (const items of itemsByTrack.values()) {
+    items.sort(
+      (left, right) => left.start - right.start || left.end - right.end,
+    );
+    for (let index = 0; index < items.length - 1; index += 1) {
+      const from = items[index]!;
+      const to = items[index + 1]!;
+      if (Math.abs(from.end - to.start) <= 1 / VIDEO_FPS) {
+        cuts.set(`${from.id}\0${to.id}`, to.start);
+      }
+    }
+  }
+  return cuts;
+};
+
+const reconcileVideoTransitions = (content: ContentPackage): void => {
+  if (!content.transition_tracks) return;
+  const cuts = videoCutByPairForContent(content);
+  content.transition_tracks = content.transition_tracks.map((track) => ({
+    ...track,
+    clips: track.clips.flatMap((clip) => {
+      const cut = cuts.get(`${clip.from_item_id}\0${clip.to_item_id}`);
+      return cut === undefined
+        ? []
+        : [{ ...clip, cut_seconds: snapSecondsToFrame(cut) }];
+    }),
+  }));
+};
+
 export const applyEditorPatch = (
   baseInput: ContentPackage,
   patchInput: EditorPatchInput,
@@ -2176,6 +2236,11 @@ export const applyEditorPatch = (
           operation.playback_rate !== undefined ||
           operation.source_clip !== undefined)),
   );
+  const changesVideoGeometry =
+    changesVideoTiming ||
+    patch.operations.some(
+      (operation) => operation.type === "update_video_clip",
+    );
   const next = changesVideoTiming
     ? materializeIndependentTimeline(base)
     : structuredClone(base);
@@ -2894,6 +2959,8 @@ export const applyEditorPatch = (
       }
     }
   }
+
+  if (changesVideoGeometry) reconcileVideoTransitions(next);
 
   const validated = contentPackageSchema.parse(next);
   if (JSON.stringify(validated) === JSON.stringify(base)) {

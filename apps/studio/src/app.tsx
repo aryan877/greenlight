@@ -19,7 +19,13 @@ import {
   type TransitionPresetId,
   type TransitionTimelineClip,
 } from "@greenlight/contracts";
-import { PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
+import {
+  CircleAlert,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useProducerAgent } from "./hooks/use-producer-agent.js";
@@ -127,6 +133,7 @@ export const App = () => {
     ProducerReferenceId[]
   >(emptyProducerReferences);
   const [importError, setImportError] = useState<string | null>(null);
+  const [directEditError, setDirectEditError] = useState<string | null>(null);
   const [draftIntent, setDraftIntent] = useState<ProducerDraftIntent | null>(
     null,
   );
@@ -810,15 +817,16 @@ export const App = () => {
       ) {
         return false;
       }
-      const patch = editorPatchInputSchema.parse({
-        instruction_summary: input.summary,
-        operations: input.operations,
-        selection: input.selection,
-      });
-      const revised = applyEditorPatch(editorContent, patch);
       const previousRevision = directRevision;
-      setDirectRevision({ artifactId: editorArtifactId, content: revised });
+      setDirectEditError(null);
       try {
+        const patch = editorPatchInputSchema.parse({
+          instruction_summary: input.summary,
+          operations: input.operations,
+          selection: input.selection,
+        });
+        const revised = applyEditorPatch(editorContent, patch);
+        setDirectRevision({ artifactId: editorArtifactId, content: revised });
         const result = await applyDirectPatch.mutateAsync(patch);
         const nextArtifactId = result.content_package_artifact.id;
         lastDirectArtifactId.current = nextArtifactId;
@@ -835,8 +843,16 @@ export const App = () => {
           updateHistorySize();
         }
         return true;
-      } catch {
+      } catch (error) {
         setDirectRevision(previousRevision);
+        const message = error instanceof Error ? error.message : "";
+        setDirectEditError(
+          /transition|adjacent|overlap/i.test(message)
+            ? "That move would break a neighboring transition."
+            : /duration|outside|range/i.test(message)
+              ? "That clip does not fit in that timeline range."
+              : "That timeline change could not be applied.",
+        );
         return false;
       }
     },
@@ -1600,7 +1616,21 @@ export const App = () => {
   const rightPaneWidth = layout.rightOpen ? layout.rightWidth : 42;
 
   return (
-    <main className="flex h-dvh min-h-0 flex-col overflow-hidden bg-surface text-ink">
+    <main className="relative flex h-dvh min-h-0 flex-col overflow-hidden bg-surface text-ink">
+      {directEditError ? (
+        <div
+          role="alert"
+          className="absolute bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 border border-danger/40 bg-surface-raised px-3 py-2 text-xs shadow-lg"
+        >
+          <CircleAlert size={14} className="shrink-0 text-danger" />
+          <span>{directEditError}</span>
+          <IconButton
+            Icon={X}
+            label="Dismiss timeline error"
+            onClick={() => setDirectEditError(null)}
+          />
+        </div>
+      ) : null}
       <header className="flex h-12 shrink-0 items-center border-b border-line-subtle bg-surface px-2">
         <button
           type="button"

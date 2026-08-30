@@ -130,6 +130,43 @@ describe("editor selection", () => {
     );
   });
 
+  it("shows one draggable video item when a scene has an explicit source clip", () => {
+    const sourceBacked = structuredClone(content);
+    sourceBacked.video_tracks = [
+      {
+        id: "track_video",
+        name: "Video",
+        kind: "video",
+        protected: true,
+        visible: true,
+        clips: [
+          {
+            id: "clip_scene_000",
+            scene_id: "scene_000",
+            label: "Source-backed opening",
+            artifact_id: "artifact_source_video",
+            timeline_start_seconds: 0,
+            source_in_seconds: 0,
+            source_out_seconds: 2,
+            source_duration_seconds: 8,
+            duration_seconds: 2,
+            playback_rate: 1,
+            fit: "cover",
+            opacity: 1,
+            provenance_artifact_id: null,
+          },
+        ],
+      },
+    ];
+
+    const openingItems = timelineItems(sourceBacked).filter(
+      (item) => item.kind === "video" && item.scene_id === "scene_000",
+    );
+
+    expect(openingItems).toHaveLength(1);
+    expect(openingItems[0]?.id).toBe(videoItemId("clip_scene_000"));
+  });
+
   it("projects scene requests into exact independent timeline items", () => {
     const sceneIds = content.scenes.slice(3, 18).map((scene) => scene.id);
     const selection = createSelection({

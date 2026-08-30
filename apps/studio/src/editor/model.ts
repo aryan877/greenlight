@@ -71,21 +71,31 @@ export const gapItemId = timelineGapId;
 export const timelineItems = (
   content: ContentPackage,
 ): EditorTimelineItem[] => {
-  const sceneVideoItems = content.scenes.map((scene, index) => {
+  const videoTracks = effectiveVideoTracks(content);
+  const explicitlyPlacedScenes = new Set(
+    videoTracks.flatMap((track) =>
+      (track.clips ?? []).map((clip) => `${track.id}\0${clip.scene_id}`),
+    ),
+  );
+  const sceneVideoItems = content.scenes.flatMap((scene, index) => {
+    const trackId = scene.video_track_id ?? "track_video";
+    if (explicitlyPlacedScenes.has(`${trackId}\0${scene.id}`)) return [];
     const start = snapToFrame(sceneOffset(content.scenes, index));
-    return {
-      id: videoItemId(scene.id),
-      kind: "video" as const,
-      track_id: scene.video_track_id ?? "track_video",
-      scene_id: scene.id,
-      label: scene.title,
-      start_seconds: start,
-      end_seconds: snapToFrame(start + scene.duration_seconds),
-      artifact_ids: scene.visual.artifact_ids,
-    };
+    return [
+      {
+        id: videoItemId(scene.id),
+        kind: "video" as const,
+        track_id: trackId,
+        scene_id: scene.id,
+        label: scene.title,
+        start_seconds: start,
+        end_seconds: snapToFrame(start + scene.duration_seconds),
+        artifact_ids: scene.visual.artifact_ids,
+      },
+    ];
   });
 
-  const overlayVideoItems = effectiveVideoTracks(content).flatMap((track) =>
+  const overlayVideoItems = videoTracks.flatMap((track) =>
     (track.clips ?? []).map((clip) => ({
       id: videoItemId(clip.id),
       kind: "video" as const,
